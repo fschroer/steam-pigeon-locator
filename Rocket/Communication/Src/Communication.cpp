@@ -18,11 +18,10 @@ namespace Communication {
 namespace FA = FlightArchive;
 
 using Sample  = FA::ExampleFlightSample;
-using Header  = PacketHeader;
 using MsgType = MsgType;
 
 static constexpr size_t SamplesPerPacket =
-    (kMaxPayloadBytes - sizeof(Header)) / sizeof(Sample);
+    (kMaxPayloadBytes - sizeof(PacketHeader)) / sizeof(Sample);
 
 Communication::Communication(FlightManager& flight,
 		RocketNav::Navigation& nav,
@@ -51,7 +50,7 @@ void Communication::SendGenericPacket(const uint8_t* data, size_t len) {
 }
 
 void Communication::SendPreLaunchData()	{
-	PreLaunchMessage msg;
+	PreLaunchData msg;
 //	NavSolution nav_solution = nav_.getFused();
 	GpsSample gps_sample = nav_.getRawGps();
 	BaroSample baro_sample = nav_.getRawBaro();
@@ -59,7 +58,7 @@ void Communication::SendPreLaunchData()	{
 	RocketPersistentSettings rocket_settings = archive_.GetLocatorSettings();
 
 	msg.packet_header.system_id = system_id;
-	msg.packet_header.msg_type  = MsgType::Prelaunch;
+	msg.packet_header.msg_type  = MsgType::PreLaunchData;
 	msg.packet_header.msg_count = 0;
 	msg.packet_header.crc       = 0; // must be zeroed before computing
 
@@ -87,23 +86,22 @@ void Communication::SendPreLaunchData()	{
 	msg.drogue_backup_deploy_delay = rocket_settings.drogue_backup_deploy_delay;
 	msg.main_primary_deploy_altitude = rocket_settings.main_primary_deploy_altitude;
 	msg.main_backup_deploy_altitude = rocket_settings.main_backup_deploy_altitude;
-  std::memcpy(msg.device_name, rocket_settings.device_name, device_name_length);
-  msg.battery_voltage_mvolt = power_.readBatteryMillivolts();
+	std::memcpy(msg.device_name, rocket_settings.device_name, device_name_length);
+	msg.battery_voltage_mvolt = power_.readBatteryMillivolts();
 
 	msg.packet_header.crc = ComputeMessageCrc(msg);
-  radio_->Send(reinterpret_cast<uint8_t*>(&msg), sizeof(PreLaunchMessage));
-  m_radio_send = !m_radio_send;
+	radio_->Send(reinterpret_cast<uint8_t*>(&msg), sizeof(PreLaunchData));
 }
 
 void Communication::SendTelemetryData() {
-	TelemetryMessage msg;
+	TelemetryData msg;
 //	NavSolution nav_solution = nav_.getFused();
 	GpsSample gps_sample = nav_.getRawGps();
 	BaroSample baro_sample = nav_.getRawBaro();
 	ImuSample imu_sample = nav_.getRawImu();
 
 	msg.packet_header.system_id = system_id;
-	msg.packet_header.msg_type  = MsgType::Telemetry;
+	msg.packet_header.msg_type  = MsgType::TelemetryData;
 	msg.packet_header.msg_count = 0;
 	msg.packet_header.crc       = 0; // must be zeroed before computing
 
@@ -133,8 +131,7 @@ void Communication::SendTelemetryData() {
 	msg.flight_state = flight_.GetFlightState();
 
 	msg.packet_header.crc = ComputeMessageCrc(msg);
-	radio_->Send(reinterpret_cast<uint8_t*>(&msg), sizeof(TelemetryMessage));
-  m_radio_send = !m_radio_send;
+	radio_->Send(reinterpret_cast<uint8_t*>(&msg), sizeof(TelemetryData));
 }
 
 void Communication::SendTestCountdownMessage(uint16_t test_deploy_count) {
@@ -150,7 +147,7 @@ void Communication::SendTestCountdownMessage(uint16_t test_deploy_count) {
 }
 
 void Communication::SendFlightProfileMetadata() {
-	FlightMetadataMessage msg;
+	FlightMetadata msg;
 	bool present = false;
 	uint16_t battery_mv = 0;
 	for (uint8_t i = 0; i < record_count; i++) {
@@ -158,7 +155,7 @@ void Communication::SendFlightProfileMetadata() {
 		archive_.ReadEvent(i, FlightArchive::ExampleStatId::ApogeeTimestampMs, msg.record[i].apogee, present);
 		archive_.ReadEvent(i, FlightArchive::ExampleStatId::LandingTimestampMs, msg.record[i].flight_time, present);
 	}
-  radio_->Send(reinterpret_cast<uint8_t*>(&msg), sizeof(FlightMetadataMessage));
+  radio_->Send(reinterpret_cast<uint8_t*>(&msg), sizeof(FlightMetadata));
 }
 
 void Communication::SendFlightProfileData() {
@@ -175,98 +172,57 @@ void Communication::OnRadioTxDone()
 }
 
 void Communication::OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t LoraSnr_FskCfo, DeviceState& device_state) {
-  HAL_GPIO_WritePin(SOFT_LED2_GPIO_Port, SOFT_LED2_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(SOFT_LED2_GPIO_Port, SOFT_LED2_Pin, GPIO_PIN_RESET);
 
-//  if (size < sizeof(Header)) return;
-//
-//  const Header* hdr = reinterpret_cast<const Header*>(payload);
-//
-//  if (hdr->msg_type == MsgType::ProfileAck) {
-//      FlightProfileAck ack{};
-//      std::memcpy(&ack, payload, sizeof(ack));
-//      OnAckReceived(ack);
-//  }
-
-  //GPIO_PinState usb_connected = HAL_GPIO_ReadPin(POWER_SENSE_GPIO_Port, POWER_SENSE_Pin);
-  if (device_state == DeviceState::Disarmed) {
-    if (payload[0] == 'R' && payload[1] == 'u' && payload[2] == 'n' && payload[3] == '\r'){
-      //if (usb_connected != GPIO_PIN_SET)
-        device_state = DeviceState::Armed;
-      //else
-      //  Radio.Send((uint8_t*)usb_connected_, strlen(usb_connected_));
-      //HAL_UART_Transmit(&huart2, (uint8_t*)"Run", 3, UART_TIMEOUT);
-    }
-    if (payload[0] == 'C' && payload[1] == 'F' && payload[2] == 'G') {
-    	RocketPersistentSettings rocket_settings {};
-      rocket_settings.deployment_ch1_mode = (DeployMode)payload[3];
-      rocket_settings.deployment_ch2_mode = (DeployMode)payload[4];
-      rocket_settings.deployment_ch3_mode = (DeployMode)payload[3];
-      rocket_settings.deployment_ch4_mode = (DeployMode)payload[4];
-      rocket_settings.launch_detect_altitude = *(uint16_t*)(payload + 5);
-      rocket_settings.drogue_primary_deploy_delay = (uint8_t)payload[7];
-      rocket_settings.drogue_backup_deploy_delay = (uint8_t)payload[8];
-      rocket_settings.main_primary_deploy_altitude = *(uint16_t*)(payload + 9);
-      rocket_settings.main_backup_deploy_altitude = *(uint16_t*)(payload + 11);
-      rocket_settings.deploy_signal_duration = (uint8_t)payload[13];
-      for (uint8_t i = 0; i < device_name_length + 1; i++)
-        rocket_settings.device_name[i] = (char)payload[i + 14];
-      archive_.SaveLocatorSettings(rocket_settings);
-    }
-//    else if (payload[0] == 'F' && payload[1] == 'P' && payload[2] == 'M') {
-//      flight_profile_state_ = FlightProfileState::kMetadataRequested;
-//    }
-  }
-  else {
-  	FlightStates flight_state = flight_.GetFlightState();
-		if (payload[0] == 'S' && payload[1] == 't' && payload[2] == 'o' && payload[3] == 'p' && payload[4] == '\r') {
-			if (flight_state == FlightStates::WaitingLaunch || flight_state == FlightStates::Landed) // Only allow disarm before/after flight
-				device_state = DeviceState::Disarmed;
-			//HAL_UART_Transmit(&huart2, (uint8_t*)"Stop", 3, UART_TIMEOUT);
-		}
-		else if ((device_state == DeviceState::Armed || device_state == DeviceState::Test)
-				&& payload[0] == 'T' && payload[1] == 'S' && payload[2] == 'T'){
-			if (flight_state == FlightStates::WaitingLaunch) // Only allow test before flight
-				switch ((UserInteractionState)payload[3]){
-					case UserInteractionState::TestDeploy1:
-			      deploy_.ResetTestDeployment();
-			    	deploy_.SetActiveDeploymentChannel(1);
+	ParsedMessage parsed{};
+	if (ParseLoraFrame(payload, size, system_id, parsed) == ParseResult::Ok) {
+		FlightStates flight_state = flight_.GetFlightState();
+		switch (parsed.type) {
+			case MsgType::LocatorCfgChgRequest : {
+				RocketPersistentSettings rocket_settings{};
+				std::memcpy(&rocket_settings, payload + sizeof(PacketHeader), sizeof(rocket_settings));
+				archive_.SaveLocatorSettings(rocket_settings);
+				break;
+			}
+			case MsgType::ArmRequest :
+				if (device_state == DeviceState::Disarmed)
+					device_state = DeviceState::Armed;
+				break;
+			case MsgType::DisarmRequest :
+				if (flight_state == FlightStates::WaitingLaunch || flight_state == FlightStates::Landed) // Only allow disarm before/after flight
+					device_state = DeviceState::Disarmed;
+				break;
+			case MsgType::FlightMetadataRequest :
+				// To do: process flight metadata request
+				break;
+			case MsgType::FlightDataRequest : {
+				uint8_t flight_record = payload[sizeof(PacketHeader)];
+				// To do: read flight record data, transmit
+				break;
+			}
+			case MsgType::FlightDataAck : {
+				FlightDataAck ack{};
+				std::memcpy(&ack, payload, sizeof(ack));
+				OnAckReceived(ack);
+				break;
+			}
+			case MsgType::DeploymentTestRequest : {
+				if (flight_state == FlightStates::WaitingLaunch) { // Only allow test before flight
+					uint8_t channel = payload[sizeof(PacketHeader)];
+					if (channel >= 1 && channel <= 4) {
+						deploy_.ResetTestDeployment();
+						deploy_.SetActiveDeploymentChannel(channel);
 						device_state = DeviceState::Test;
-						break;
-					case UserInteractionState::TestDeploy2:
-			      deploy_.ResetTestDeployment();
-			    	deploy_.SetActiveDeploymentChannel(2);
-						device_state = DeviceState::Test;
-						break;
-					case UserInteractionState::TestDeploy3:
-			      deploy_.ResetTestDeployment();
-			    	deploy_.SetActiveDeploymentChannel(3);
-						device_state = DeviceState::Test;
-						break;
-					case UserInteractionState::TestDeploy4:
-			      deploy_.ResetTestDeployment();
-			    	deploy_.SetActiveDeploymentChannel(4);
-						device_state = DeviceState::Test;
-						break;
-					case UserInteractionState::WaitingForCommand:
-						device_state = DeviceState::Armed;
-						break;
-					default:
-						break;
 					}
+				}
+			}
+				break;
+			default :
+				break;
 		}
-  }
-//  if (device_state_ == DeviceState::kDisarmed || device_state_ == DeviceState::kDataRequested) {
-//    if (payload[0] == 'F' && payload[1] == 'P' && payload[2] == 'D') {
-//      start_time_ = HAL_GetTick();
-//      device_state_ = DeviceState::kDataRequested;
-//      flight_profile_archive_position_ = payload[3];
-//      if (flight_profile_archive_position_ < 0 || flight_profile_archive_position_ > ARCHIVE_POSITIONS)
-//        flight_profile_archive_position_ = 0;
-//      flight_profile_packet_index_ = payload[4];
-//      flight_profile_wait_count_ = 0;
-//    }
-//  }
-  HAL_GPIO_WritePin(SOFT_LED2_GPIO_Port, SOFT_LED2_Pin, GPIO_PIN_SET);
+//		GPIO_PinState usb_connected = HAL_GPIO_ReadPin(POWER_SENSE_GPIO_Port, POWER_SENSE_Pin);
+	}
+	HAL_GPIO_WritePin(SOFT_LED2_GPIO_Port, SOFT_LED2_Pin, GPIO_PIN_SET);
 }
 
 void Communication::BeginTransfer(const Sample* samples,
@@ -294,7 +250,7 @@ void Communication::BeginTransfer(const Sample* samples,
     complete_     = false;
 }
 
-bool Communication::TrySendPacket(const FlightProfilePacket& pkt,
+bool Communication::TrySendPacket(const FlightDataPacket& pkt,
                                         size_t size)
 {
     uint32_t now = HAL_GetTick();
@@ -313,9 +269,9 @@ bool Communication::TrySendPacket(const FlightProfilePacket& pkt,
 void Communication::SendDataPacket(uint16_t packet_index,
                                          uint32_t now_ms)
 {
-    FlightProfilePacket pkt{};
+    FlightDataPacket pkt{};
     pkt.packet_header.system_id = 1;
-    pkt.packet_header.msg_type  = MsgType::ProfileData;
+    pkt.packet_header.msg_type  = MsgType::FlightData;
     pkt.packet_header.msg_count = next_msg_count_++;
     pkt.packet_header.crc       = 0;
 
@@ -343,7 +299,7 @@ void Communication::SendDataPacket(uint16_t packet_index,
         (written > 1 ? (written - 1) * sizeof(FlightProfileCodec::CompressedDelta) : 0);
 
     const size_t msg_size =
-        sizeof(Header) + 2u + 2u + 2u + 4u + payload_used;
+        sizeof(PacketHeader) + 2u + 2u + 2u + 4u + payload_used;
 
     pkt.packet_header.crc = ComputeMessageCrcPartial(
         reinterpret_cast<const uint8_t*>(&pkt),
@@ -357,12 +313,12 @@ void Communication::SendDataPacket(uint16_t packet_index,
 }
 
 void Communication::SendParityPacket(uint16_t group_index,
-                                           const FlightProfilePacket group[4],
+                                           const FlightDataPacket group[4],
                                            uint32_t now_ms)
 {
-    FlightProfilePacket parity{};
+    FlightDataPacket parity{};
     parity.packet_header.system_id = 1;
-    parity.packet_header.msg_type  = MsgType::ProfileParity;
+    parity.packet_header.msg_type  = MsgType::FlightDataParity;
     parity.packet_header.msg_count = next_msg_count_++;
     parity.packet_header.crc       = 0;
 
@@ -394,7 +350,7 @@ bool Communication::AllAcked() const
     return true;
 }
 
-void Communication::OnAckReceived(const FlightProfileAck& ack)
+void Communication::OnAckReceived(const FlightDataAck& ack)
 {
     if (ack.transfer_id != transfer_id_) return;
 
@@ -421,7 +377,7 @@ void Communication::Process(uint32_t now_ms)
             ? window_start_ + kWindowSize
             : packet_count_;
 
-    FlightProfilePacket parity_group[4];
+    FlightDataPacket parity_group[4];
     bool parity_ready = false;
     uint16_t group_index = 0;
 
@@ -447,6 +403,77 @@ void Communication::Process(uint32_t now_ms)
             sent_[i] = false;
         }
     }
+}
+
+ParseResult Communication::ParseLoraFrame(const uint8_t* data,
+                           std::size_t   len,
+                           uint8_t       expected_system_id,
+                           ParsedMessage& out)
+{
+  if (len < sizeof(PacketHeader)) {
+    return ParseResult::TooShort;
+  }
+
+  // Extract header
+  PacketHeader hdr{};
+  std::memcpy(&hdr, data, sizeof(PacketHeader));
+  // System ID check
+  if (hdr.system_id != expected_system_id) {
+    return ParseResult::SystemIdMismatch;
+  }
+
+  // CRC check
+  if (!ValidateCRC(data, len)) {
+    return ParseResult::CrcMismatch;
+  }
+
+  // Dispatch by message type
+  switch (hdr.msg_type) {
+
+  case MsgType::LocatorCfgChgRequest :
+    if (len != sizeof(LocatorSettings)) {
+      return ParseResult::LengthMismatch;
+    }
+    std::memcpy(&out, data, sizeof(LocatorSettings));
+    out.type = MsgType::LocatorCfgChgRequest;
+    return ParseResult::Ok;
+
+  case MsgType::FlightDataAck :
+    if (len != sizeof(FlightDataAck)) {
+      return ParseResult::LengthMismatch;
+    }
+    std::memcpy(&out.flight_data_ack, data, sizeof(FlightDataAck));
+    out.type = MsgType::FlightDataAck;
+    return ParseResult::Ok;
+
+  case MsgType::ArmRequest :
+  case MsgType::DisarmRequest :
+  case MsgType::FlightMetadataRequest :
+    if (len != sizeof(PacketHeader)) {
+      return ParseResult::LengthMismatch;
+    }
+    out.type = hdr.msg_type;
+    return ParseResult::Ok;
+
+  case MsgType::FlightDataRequest :
+    if (len != sizeof(FlightDataRequest)) {
+      return ParseResult::LengthMismatch;
+    }
+    std::memcpy(&out.flight_data_request, data, sizeof(FlightDataRequest));
+    out.type = MsgType::FlightDataRequest;
+    return ParseResult::Ok;
+
+  case MsgType::DeploymentTestRequest :
+    if (len != sizeof(DeploymentTestRequest)) {
+      return ParseResult::LengthMismatch;
+    }
+    std::memcpy(&out.deployment_test_request, data, sizeof(DeploymentTestRequest));
+    out.type = MsgType::DeploymentTestRequest;
+    return ParseResult::Ok;
+
+  default:
+    return ParseResult::UnknownType;
+  }
 }
 
 } // namespace Communication

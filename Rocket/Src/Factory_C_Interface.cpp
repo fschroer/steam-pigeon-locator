@@ -14,8 +14,8 @@ extern "C" void RocketFactory_Init(const struct Radio_s* radio) {
 	factory.Init(radio);
 }
 
-extern "C" void RocketFactory_ProcessRocketEvents() {
-	factory.ProcessRocketEvents();
+extern "C" void RocketFactory_ProcessRocketEvents(uint8_t rocket_service_count) {
+	factory.ProcessRocketEvents(rocket_service_count);
 }
 
 extern "C" void RocketFactory_OnRadioTxDone() {

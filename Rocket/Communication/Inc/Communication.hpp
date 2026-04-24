@@ -24,6 +24,15 @@ namespace Communication {
 #define FLIGHT_STATS_MSG_SIZE 81
 #define FLIGHT_DATA_MESSAGE_SAMPLES 30
 
+enum class ParseResult {
+    Ok,
+    TooShort,
+    SystemIdMismatch,
+    CrcMismatch,
+    LengthMismatch,
+    UnknownType
+};
+
 // Simple radio interface so we don't hide globals
 class IRadio
 {
@@ -58,7 +67,7 @@ public:
   // Call periodically from main loop or task
   void Process(uint32_t now_ms);
 
-  void OnAckReceived(const FlightProfileAck& ack);
+  void OnAckReceived(const FlightDataAck& ack);
   bool IsComplete() const { return complete_; }
 
 private:
@@ -96,11 +105,16 @@ private:
 
   void SendDataPacket(uint16_t packet_index, uint32_t now_ms);
   void SendParityPacket(uint16_t group_index,
-                        const FlightProfilePacket group[4],
+                        const FlightDataPacket group[4],
                         uint32_t now_ms);
 
-  bool TrySendPacket(const FlightProfilePacket& pkt, size_t size);
+  bool TrySendPacket(const FlightDataPacket& pkt, size_t size);
   bool AllAcked() const;
+  ParseResult ParseLoraFrame(const uint8_t* data,
+                             std::size_t   len,
+                             uint8_t       expected_system_id,
+                             ParsedMessage& out);
+
 
   const char* lora_startup_message_ = "Rocket Locator v1.3.1\r\n\0";
   const char* usb_connected_ = "Disconnect USB cable before arming locator\r\n\0";
@@ -121,10 +135,6 @@ private:
 //  uint8_t flight_profile_wait_count_ = 0;
 //
 //  uint32_t start_time_ = 0;
-
-  void TransmitLEDsOn();
-  void TransmitLEDsOff();
-  uint16_t GetBatteryLevel();
 
   inline uint16_t Crc16Update(uint16_t crc, uint8_t data)
   {
@@ -198,5 +208,42 @@ private:
 
       return crc;
   }
+
+	inline bool ValidateCRC(const uint8_t* data, std::size_t len)
+	{
+	  if (len < sizeof(PacketHeader)) {
+		  return false;
+	  }
+
+	  const PacketHeader* hdr =
+		  reinterpret_cast<const PacketHeader*>(data);
+
+	  constexpr size_t header_size      = sizeof(PacketHeader);
+	  constexpr size_t crc_offset       = offsetof(PacketHeader, crc);
+	  constexpr size_t bytes_before_crc = crc_offset;            // 0..3
+
+	  uint16_t crc = kCrc16Key;
+
+	  // 1) First 4 bytes of PacketHeader (system_id, msg_type, msg_count LSB/MSB)
+	  for (size_t i = 0; i < bytes_before_crc; ++i) {
+		  crc = Crc16Update(crc, data[i]);
+	  }
+
+	  // 2) Skip CRC field (bytes 4–5)
+
+	  // 3) Header bytes AFTER CRC field
+	  for (size_t i = crc_offset + 2; i < header_size; ++i) {
+		  crc = Crc16Update(crc, data[i]);
+	  }
+
+	  // 4) Everything after the header
+	  for (size_t i = header_size; i < len; ++i) {
+		  crc = Crc16Update(crc, data[i]);
+	  }
+
+	  return crc == hdr->crc;
+	}
+
+
 };
 } // namespace Communication

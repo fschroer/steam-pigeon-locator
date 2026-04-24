@@ -35,7 +35,7 @@ struct RocketPersistentSettings
     uint8_t deploy_signal_duration = 10;          // tenths of a second
     uint8_t lora_channel = 0;
 
-    char device_name[device_name_length + 1] = {0};
+    char device_name[device_name_length] = {0};
 };
 
 struct RocketRuntimeMetadata

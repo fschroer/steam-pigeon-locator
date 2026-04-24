@@ -5,6 +5,11 @@ extern "C" {
 
 #include "Constants.hpp"
 
+enum class DeployState : uint8_t {
+	Off = 0,
+	On
+};
+
 enum class TestDeploymentState : uint8_t {
 	Idle = 0,
 	Countdown,
@@ -13,8 +18,9 @@ enum class TestDeploymentState : uint8_t {
 	Cancelled
 };
 
-void StartDeployment(uint8_t channel);
-void StopDeployment(uint8_t channel);
+void EnableDeployment();
+void DisableDeployment();
+void Deploy(uint8_t channel, DeployState deploy_state);
 bool IsDeploymentActive(uint8_t channel);
 uint8_t DeploymentChannelContinuity();
 

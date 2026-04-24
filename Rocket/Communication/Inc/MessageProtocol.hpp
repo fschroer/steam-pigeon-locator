@@ -22,19 +22,26 @@ enum class MsgState : uint8_t {
 	Disarm           = 2,
 	Test             = 3,
 	Config           = 4,
-	ProfileMetadata  = 5,
-	ProfileData      = 6
+	FlightMetadata  = 5,
+	FlightData      = 6
 };
 
 // Message type for the packet header
 enum class MsgType : uint8_t {
-    Prelaunch        = 1,
-    Telemetry        = 2,
-    ProfileMetadata  = 3,
-		ProfileData      = 4,
-		ProfileParity    = 5,
-		ProfileAck       = 6,
-		DeploymentTest   = 7
+	LocatorCfgChgRequest  = 1, // Request to update locator configuration sent from the app via the receiver.
+	ReceiverCfgChgRequest = 2, // Request to update receiver configuration sent from the app to the receiver.
+	ArmRequest            = 3, // Request to arm the locator sent from the app via the receiver.
+	DisarmRequest         = 4, // Request to disarm the locator sent from the app via the receiver.
+	PreLaunchData         = 5, // Unsolicited locator status sent from the locator while in an unarmed state.
+	TelemetryData         = 6, // Unsolicited locator status sent from the locator while in an armed state.
+	FlightMetadataRequest = 7, // Request from the app, via the receiver, for high-level information necessary to identify each flight profile record archived by the locator.
+	FlightMetadata        = 8, // Flight profile metadata response from the locator to the app via the receiver.
+	FlightDataRequest     = 9, // Request from the app, via the receiver, for the data in one flight profile.
+	FlightData            = 10, // Flight profile data response from the locator to the app via the receiver consisting of multiple packets, which the app acknowledges via the receiver.
+	FlightDataParity      = 11, // Parity packet to allow the app to reconstruct profile data if one packet is lost.
+	FlightDataAck         = 12, // Profile data acknowledgement sent from the app via the receiver.
+	DeploymentTestRequest = 13, // Request from the app, via the receiver, for the locator to execute a deployment test.
+	DeploymentTest        = 14 // Deployment test countdown sent from the locator to the app via the receiver.
 };
 
 #pragma pack(push, 1)
@@ -54,7 +61,7 @@ constexpr size_t kPayloadSize = kMaxPayloadBytes
     - 2u                     // packet_count
     - 4u;                    // total_samples
 
-struct PreLaunchMessage {
+struct PreLaunchData {
 	PacketHeader packet_header;
   double latitude;
   double longitude;
@@ -79,7 +86,7 @@ struct PreLaunchMessage {
   uint16_t battery_voltage_mvolt;
 };
 
-struct TelemetryMessage {
+struct TelemetryData {
 	PacketHeader packet_header;
   double latitude;
   double longitude;
@@ -106,13 +113,13 @@ struct FlightMetadataRecord {
 	uint16_t flight_time;
 };
 
-struct FlightMetadataMessage {
+struct FlightMetadata {
 	PacketHeader packet_header;
 	FlightMetadataRecord record[record_count];
 };
 
 // On-wire packet for flight profile transfer
-struct FlightProfilePacket {
+struct FlightDataPacket {
 	PacketHeader packet_header;
 
 	uint16_t transfer_id;   // identifies this flight profile transfer
@@ -124,7 +131,12 @@ struct FlightProfilePacket {
 //	FlightArchive::ExampleFlightSample flight_sample[max_msg_size / sizeof(FlightArchive::ExampleFlightSample)];
 };
 
-struct FlightProfileAck {
+struct LocatorSettings {
+	PacketHeader header;
+    RocketPersistentSettings settings;
+};
+
+struct FlightDataAck {
 	PacketHeader header;
 
     uint16_t transfer_id;
@@ -137,6 +149,25 @@ struct FlightProfileAck {
 struct DeploymentTestCountdownMessage {
 	PacketHeader packet_header;
 	uint8_t count;
+};
+
+struct FlightDataRequest {
+	PacketHeader packet_header;
+	uint8_t record;
+};
+
+struct DeploymentTestRequest {
+	PacketHeader packet_header;
+	uint8_t channel;
+};
+
+struct ParsedMessage {
+    MsgType type;
+    LocatorSettings locator_settings;
+    FlightDataAck flight_data_ack;
+    FlightDataRequest flight_data_request;
+    DeploymentTestRequest deployment_test_request;
+    PacketHeader packet_header;
 };
 
 #pragma pack(pop)

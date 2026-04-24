@@ -123,10 +123,24 @@ void MS5611::computeCompensated(uint32_t D1, uint32_t D2, float& pressure_pa, fl
     OFF -= OFF2;
     SENS -= SENS2;
 
-    const int64_t P = (((static_cast<int64_t>(D1) * SENS) >> 21) - OFF) >> 15;
+//    const int64_t P = (((static_cast<int64_t>(D1) * SENS) >> 21) - OFF) >> 15;
+//    const int64_t P = (((static_cast<int64_t>(D1) * SENS) / 2097152) - OFF) / 32768;
+//
+//    temp_c = static_cast<float>(TEMP) / 100.0f;
+//    pressure_pa = static_cast<float>(P);
 
-    temp_c = static_cast<float>(TEMP) / 100.0f;
-    pressure_pa = static_cast<float>(P);
+    // --- High Precision Pressure Calculation (alternate approach to above) ---
+	// Convert components to double to maintain precision during scaling
+	double d_D1 = static_cast<double>(D1);
+	double d_OFF = static_cast<double>(OFF);
+	double d_SENS = static_cast<double>(SENS);
+
+	// Apply the datasheet formula: P = (D1 * SENS / 2^21 - OFF) / 2^15
+	// 2^21 = 2097152.0, 2^15 = 32768.0
+	double P_double = ((d_D1 * d_SENS / 2097152.0) - d_OFF) / 32768.0;
+
+	temp_c = static_cast<float>(TEMP) / 100.0f;
+	pressure_pa = static_cast<float>(P_double);
 }
 
 bool MS5611::readSample(BaroSample& out) {

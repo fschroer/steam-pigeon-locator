@@ -20,10 +20,11 @@ public:
 
     bool Update();
     void CalibrateOnPadAndZeroAglUntilLaunch(FlightStates flight_state);
-    bool IsStationary(const ImuSample& imu) const;
+    bool IsStationary(const ImuSample& imu, const BaroSample& baro) const;
     bool IsLaunched();
     bool IsBurnout(FlightStates flight_state);
     bool IsApogee();
+    bool IsLanded(FlightStates flight_state);
 
     const ImuSample& getRawImu() const { return m_imu.raw(); }
     const BaroSample& getRawBaro() const { return m_baro.raw(); }

@@ -13,6 +13,8 @@ extern "C" {
 #include "StRadioAdapter.hpp"
 #include "Constants.hpp"
 #include "RgbLed.hpp"
+#include "Deployment.hpp"
+#include "Buzzer.hpp"
 //#include "UsartWrite.hpp"
 
 constexpr bool test_mode = false;
@@ -47,87 +49,77 @@ void Factory::Init(const Radio_s* radio) {
   RgbLed(RgbColor::Off);
 }
 
-void Factory::ProcessRocketEvents() {
+void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 	FlightStates flight_state = flight_.GetFlightState();
-  switch (device_state_){
-    case DeviceState::Disarmed:
-      navigation_.Update();
-      if (rocket_service_count_ == samples_per_second - 12)
-      	power_.enableDivider(); // Allow time for divider voltage to settle
-      if(rocket_service_count_ == samples_per_second - 10) {
-     		navigation_.CalibrateOnPadAndZeroAglUntilLaunch(flight_state);
-        TransmitLEDsOn();
-        comm_.SendPreLaunchData();
-        HAL_TIM_PWM_Stop(&htim16, TIM_CHANNEL_1);
-      }
-      break;
+	switch (device_state_) {
+		case DeviceState::Disarmed:
+			DisableDeployment();
+			navigation_.Update();
+			switch (rocket_service_count) {
+				case 0 : {
+					power_.enableDivider(); // Allow time for divider voltage to settle
+					break;
+				}
+				case 2 : {
+					navigation_.CalibrateOnPadAndZeroAglUntilLaunch(flight_state);
+					RgbLed(RgbColor::Blue);
+					comm_.SendPreLaunchData();
+					HAL_TIM_PWM_Stop(&htim16, TIM_CHANNEL_1);
+				}
+				case 8 :
+					RgbLed(RgbColor::Off);
+				    break;
+			}
+		  break;
     case DeviceState::Armed:
-      if (flight_state == FlightStates::WaitingLaunch && !archive_.IsActiveOpen()) {
-      	archive_.OpenNewFlight();
-      }
-      navigation_.Update();
-      flight_.UpdateFlightState();
-      if (flight_state >= FlightStates::Launched && !datestamp_saved_) {
-      	GpsSample gps_sample = navigation_.getRawGps();
-      	if (gps_sample.time_valid) {
-					archive_.WriteEvent(FlightArchive::ExampleStatId::FlightTimestampS, gps_sample.timestamp_s);
-					datestamp_saved_ = true;
-      	}
-      }
-      if (flight_state == FlightStates::Landed && archive_.IsActiveOpen()) {
-      	archive_.CloseCurrentFlight();
-      }
-//      if (rocket_service_count_ == SAMPLES_PER_SECOND / 2)
-//        if (flight_state > flightStates::kWaitingLaunch && flight_state < flightStates::kLanded)
-//          SendTelemetryData();
-      if (rocket_service_count_ == samples_per_second - 10){ // Lower frequency conserves battery.
-//        if (flight_state == FlightStates::kWaitingLaunch){ // Blink LoRa transmit LED for visual validation
-          TransmitLEDsOn();
-//        }
-        comm_.SendTelemetryData();
-      }
-      switch (rocket_service_count_) {
-        case 0:
-          HAL_TIM_PWM_Stop(&htim16, TIM_CHANNEL_1);
-          htim16.Instance->PSC = 420;
-          HAL_TIM_PWM_Start(&htim16, TIM_CHANNEL_1);
-          break;
-        case 1:
-          HAL_TIM_PWM_Stop(&htim16, TIM_CHANNEL_1);
-          htim16.Instance->PSC = 410;
-          HAL_TIM_PWM_Start(&htim16, TIM_CHANNEL_1);
-          break;
-        case 2:
-          HAL_TIM_PWM_Stop(&htim16, TIM_CHANNEL_1);
-          htim16.Instance->PSC = 400;
-          HAL_TIM_PWM_Start(&htim16, TIM_CHANNEL_1);
-          break;
-        case 3:
-          HAL_TIM_PWM_Stop(&htim16, TIM_CHANNEL_1);
-          htim16.Instance->PSC = 390;
-          HAL_TIM_PWM_Start(&htim16, TIM_CHANNEL_1);
-          break;
-        case 4:
-          HAL_TIM_PWM_Stop(&htim16, TIM_CHANNEL_1);
-          break;
-      }
-      break;
+		EnableDeployment();
+		navigation_.Update();
+		if (flight_state == FlightStates::WaitingLaunch && !archive_.IsActiveOpen()) {
+			archive_.OpenNewFlight();
+		}
+		flight_.UpdateFlightState();
+		if (flight_state >= FlightStates::Launched && !datestamp_saved_) {
+			GpsSample gps_sample = navigation_.getRawGps();
+			if (gps_sample.time_valid) {
+				archive_.WriteEvent(FlightArchive::ExampleStatId::FlightTimestampS, gps_sample.timestamp_s);
+				datestamp_saved_ = true;
+			}
+		}
+		if (flight_state == FlightStates::Landed && archive_.IsActiveOpen()) {
+			archive_.CloseCurrentFlight();
+		}
+		if (flight_state == FlightStates::WaitingLaunch || flight_state == FlightStates::Landed) {
+			BuzzerSequence();
+		}
+		switch (rocket_service_count) {
+			case 2:
+				if (flight_state == FlightStates::WaitingLaunch) { // Blink LoRa transmit LED for visual validation
+					navigation_.CalibrateOnPadAndZeroAglUntilLaunch(flight_state);
+					RgbLed(RgbColor::Blue);
+					comm_.SendTelemetryData();
+				}
+				break;
+			case 8 :
+				RgbLed(RgbColor::Off);
+			    break;
+		}
+		break;
     case DeviceState::Config:
       break;
     case DeviceState::Test: {
-      int16_t test_deploy_count = deploy_.GetTestDeployCount();
-      if (test_deploy_count >= 0 && test_deploy_count % SAMPLES_PER_SECOND == 0) {
-      	comm_.SendTestCountdownMessage(test_deploy_count);
-      }
-      deploy_.ServiceTestDeployment();
-      if (deploy_.GetTestDeploymentState() == TestDeploymentState::Complete) {
-    		config_.SetUserInteractionState(UserInteractionState::WaitingForCommand);
-    		deploy_.ResetTestDeployment();
-    		config_.NotifyTestComplete();
-    		device_state_ = DeviceState::Armed;
-      }
-      break;
-    }
+		int16_t test_deploy_count = deploy_.GetTestDeployCount();
+		if (test_deploy_count >= 0 && test_deploy_count % SAMPLES_PER_SECOND == 0) {
+			comm_.SendTestCountdownMessage(test_deploy_count);
+		}
+		deploy_.ServiceTestDeployment();
+		if (deploy_.GetTestDeploymentState() == TestDeploymentState::Complete) {
+			config_.SetUserInteractionState(UserInteractionState::WaitingForCommand);
+			deploy_.ResetTestDeployment();
+			config_.NotifyTestComplete();
+			device_state_ = DeviceState::Armed;
+		}
+		break;
+	}
     case DeviceState::DataRequested:
       if (flight_profile_wait_count_ == 0)
         comm_.SendFlightProfileData();
@@ -135,20 +127,6 @@ void Factory::ProcessRocketEvents() {
 //        device_state_ = DeviceState::Disarmed;
       break;
   }
-  if(rocket_service_count_ == samples_per_second - 8)
-    TransmitLEDsOff();
-  if (rocket_service_count_ < samples_per_second - 1)
-  	rocket_service_count_++;
-  else
-  	rocket_service_count_ = 0;
-}
-
-void Factory::TransmitLEDsOn() {
-  HAL_GPIO_WritePin(SOFT_LED3_GPIO_Port, SOFT_LED3_Pin, GPIO_PIN_RESET);
-}
-
-void Factory::TransmitLEDsOff() {
-  HAL_GPIO_WritePin(SOFT_LED3_GPIO_Port, SOFT_LED3_Pin, GPIO_PIN_SET);
 }
 
 void Factory::OnRadioTxDone() {

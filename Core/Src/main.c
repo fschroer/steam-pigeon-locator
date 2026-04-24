@@ -53,7 +53,6 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-const char* lora_startup_message_ = "Rocket Locator v1.3.1\r\n\0";
 volatile uint32_t processRocketEventsInterruptCount = 0;
 
 /* --- PPS timing state --- */
@@ -121,12 +120,12 @@ int main(void)
   MX_TIM2_Init();
   MX_TIM17_Init();
   /* USER CODE BEGIN 2 */
-  MX_USART2_UART_Init();
-  LL_USART_EnableIT_RXNE(USART2);
-  LL_USART_EnableIT_ERROR(USART2);
-  RocketFactory_Init(&Radio);
+	MX_USART2_UART_Init();
+	LL_USART_EnableIT_RXNE(USART2);
+	LL_USART_EnableIT_ERROR(USART2);
+	RocketFactory_Init(&Radio);
 
-  tim17_arr = htim17.Init.Period;
+	tim17_arr = htim17.Init.Period;
 	HAL_TIM_Base_Start(&htim2);
 	HAL_TIM_Base_Start_IT(&htim17);
 
@@ -134,28 +133,30 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  while (1) {
-  	if (processRocketEventsInterruptCount > 0) {
-  		processRocketEventsInterruptCount--;
-  		rocket_service_count++;
-  		if (rocket_service_count == SAMPLES_PER_SECOND)
+	while (1) {
+		if (processRocketEventsInterruptCount > 0) {
+			processRocketEventsInterruptCount--;
+			rocket_service_count++;
+			if (rocket_service_count == SAMPLES_PER_SECOND)
 				rocket_service_count = 0;
-  		uint32_t start = TIM2->CNT;
-      RocketFactory_ProcessRocketEvents();
-  		uint32_t end = TIM2->CNT;
-  		processTime = end - start;
-  	}
+			uint32_t start = TIM2->CNT;
+			RocketFactory_ProcessRocketEvents(rocket_service_count);
+			uint32_t end = TIM2->CNT;
+			processTime = end - start;
+		}
 
-    if (pps_update_pending) {
-        pps_update_pending = false;
+		if (pps_update_pending) {
+			pps_update_pending = false;
 //				printf("%.4lu Elapsed=%lu ARR:%lu, TIM17CNT:%lu\n"
 //						, pps_count, elapsed, tim17_arr, tim17_cnt_pps);
-    }
+		}
+#ifdef MX_SUBGHZ_PHY_PROCESS
     /* USER CODE END WHILE */
     MX_SubGHz_Phy_Process();
 
     /* USER CODE BEGIN 3 */
-  }
+#endif
+	}
   /* USER CODE END 3 */
 }
 

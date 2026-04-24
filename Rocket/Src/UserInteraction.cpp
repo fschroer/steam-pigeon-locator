@@ -50,7 +50,7 @@ void UserInteraction::ProcessChar(uint8_t uart_char, DeviceState& device_state){
         main_primary_deploy_altitude_ = locator_settings.main_primary_deploy_altitude;
         main_backup_deploy_altitude_ = locator_settings.main_backup_deploy_altitude;
         lora_channel_ = locator_settings.lora_channel;
-        for (uint8_t i = 0; i < device_name_length + 1; i++)
+        for (uint8_t i = 0; i < device_name_length; i++)
           device_name_[i] = locator_settings.device_name[i];
         DisplayConfigSettingsMenu();
       }
@@ -90,7 +90,7 @@ void UserInteraction::ProcessChar(uint8_t uart_char, DeviceState& device_state){
       locator_settings.main_primary_deploy_altitude = main_primary_deploy_altitude_;
       locator_settings.main_backup_deploy_altitude = main_backup_deploy_altitude_;
       locator_settings.lora_channel = lora_channel_;
-      for (uint8_t i = 0; i < device_name_length + 1; i++)
+      for (uint8_t i = 0; i < device_name_length; i++)
         locator_settings.device_name[i] = device_name_[i];
       archive_.SaveLocatorSettings(locator_settings);
       comm_.SetChannel(lora_channel_);
@@ -532,11 +532,11 @@ void UserInteraction::AdjustConfigTextSetting(uint8_t uart_char, char *config_mo
       uint16_t i = 0;
       for (; i < char_pos; i++)
         config_mode_setting[i] = user_input_[i];
-      for (; i < device_name_length + 1; i++)
+      for (; i < device_name_length; i++)
         config_mode_setting[i] = 0;
     }
     char_pos = 0;
-    for (uint8_t i = 0; i < device_name_length + 1; i++)
+    for (uint8_t i = 0; i < device_name_length; i++)
       user_input_[i] = 0;
     user_interaction_state_ = UserInteractionState::ConfigHome;
     DisplayConfigSettingsMenu();

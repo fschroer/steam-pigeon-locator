@@ -1,44 +1,31 @@
 #include "Deployment.hpp"
 #include "RgbLed.hpp"
 
-void StartDeployment(uint8_t channel) {
+void EnableDeployment() {
 	HAL_GPIO_WritePin(DARM_GPIO_Port, DARM_Pin, GPIO_PIN_SET); // Power on current limited load switch
-  switch (channel) {
-		case 1 :
-			HAL_GPIO_WritePin(D1_GPIO_Port, D1_Pin, GPIO_PIN_SET); // Activate deployment channel 1
-			break;
-		case 2 :
-			HAL_GPIO_WritePin(D2_GPIO_Port, D2_Pin, GPIO_PIN_SET); // Activate deployment channel 2
-			break;
-		case 3 :
-			HAL_GPIO_WritePin(D3_GPIO_Port, D3_Pin, GPIO_PIN_SET); // Activate deployment channel 3
-			break;
-		case 4 :
-			HAL_GPIO_WritePin(D4_GPIO_Port, D4_Pin, GPIO_PIN_SET); // Activate deployment channel 4
-			break;
-		default :
-			break;
-  }
 }
 
-void StopDeployment(uint8_t channel) {
+void DisableDeployment() {
+	HAL_GPIO_WritePin(DARM_GPIO_Port, DARM_Pin, GPIO_PIN_RESET); // Power off current limited load switch
+}
+
+void Deploy(uint8_t channel, DeployState deploy_state) {
   switch (channel) {
 		case 1 :
-			HAL_GPIO_WritePin(D1_GPIO_Port, D1_Pin, GPIO_PIN_RESET); // Deactivate deployment channel 1
+			HAL_GPIO_WritePin(D1_GPIO_Port, D1_Pin, deploy_state == DeployState::On ? GPIO_PIN_SET : GPIO_PIN_RESET);
 			break;
 		case 2 :
-			HAL_GPIO_WritePin(D2_GPIO_Port, D2_Pin, GPIO_PIN_RESET); // Deactivate deployment channel 2
+			HAL_GPIO_WritePin(D2_GPIO_Port, D2_Pin, deploy_state == DeployState::On ? GPIO_PIN_SET : GPIO_PIN_RESET);
 			break;
 		case 3 :
-			HAL_GPIO_WritePin(D3_GPIO_Port, D3_Pin, GPIO_PIN_RESET); // Deactivate deployment channel 3
+			HAL_GPIO_WritePin(D3_GPIO_Port, D3_Pin, deploy_state == DeployState::On ? GPIO_PIN_SET : GPIO_PIN_RESET);
 			break;
 		case 4 :
-			HAL_GPIO_WritePin(D4_GPIO_Port, D4_Pin, GPIO_PIN_RESET); // Deactivate deployment channel 4
+			HAL_GPIO_WritePin(D4_GPIO_Port, D4_Pin, deploy_state == DeployState::On ? GPIO_PIN_SET : GPIO_PIN_RESET);
 			break;
 		default :
 			break;
   }
-	HAL_GPIO_WritePin(DARM_GPIO_Port, DARM_Pin, GPIO_PIN_RESET); // Power off current limited load switch
 }
 
 bool IsDeploymentActive(uint8_t channel) {
@@ -99,12 +86,12 @@ void Deployment::ServiceTestDeployment(){
     test_deployment_state_ = TestDeploymentState::Countdown;
   }
   else if (test_deploy_count_ == 0) {
-    StartDeployment(active_deployment_channel_);
+    Deploy(active_deployment_channel_, DeployState::On);
     test_deployment_state_ = TestDeploymentState::Firing;
   }
   else if (IsDeploymentActive(active_deployment_channel_)){
     if (test_deploy_count_ <= -samples_per_second * (float)deploy_signal_duration / 10){ // Stop deploy signal
-      StopDeployment(active_deployment_channel_);
+      Deploy(active_deployment_channel_, DeployState::Off);
       test_deploy_count_ = deploy_signal_duration * samples_per_second;
       test_deployment_state_ = TestDeploymentState::Complete;
 //      device_state = DeviceState::Armed;

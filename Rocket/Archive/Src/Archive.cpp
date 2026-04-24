@@ -47,8 +47,8 @@ bool Archive::Init() {
 	if (!persistentStore_.Init()) {	return false;	}
 	if (!runtimeStore_.Init()) { return false; }
 	if (!archive_.Init()) { return false;	}
-	std::strncpy(default_settings_.device_name, "Locator", device_name_length);
-	default_settings_.device_name[device_name_length] = '\0';
+	std::strncpy(default_settings_.device_name, "Locator\0\0\0\0\0", device_name_length);
+//	default_settings_.device_name[device_name_length] = '\0';
 	if (!persistentStore_.LoadOrDefault(locator_settings_, default_settings_)) { return false; }
 	if (!runtimeStore_.LoadOrDefault(runtime_, runtime_defaults_)) { return false; }
 	runtime_.boot_count++;

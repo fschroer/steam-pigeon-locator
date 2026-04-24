@@ -34,7 +34,7 @@ public:
 	    I2C_HandleTypeDef& hi2c2,
 			ADC_HandleTypeDef& hadc);
   void Init(const Radio_s* radio);
-  void ProcessRocketEvents();
+  void ProcessRocketEvents(uint8_t rocket_service_count);
   void OnRadioTxDone();
   void OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t LoraSnr_FskCfo);
   void ProcessUART2Char(uint8_t uart_char);
@@ -64,7 +64,6 @@ private:
   const char* usb_connected_ = "Disconnect USB cable before arming locator\r\n\0";
   const char* bad_gps_data_ = "Bad GPS Data\r\n\0";
 
-  uint8_t rocket_service_count_ = 0;
   DeviceState device_state_ = DeviceState::Disarmed;
   int peripheral_interrupt_count_ = 0;
   int battery_level_ = 0;
@@ -81,9 +80,6 @@ private:
 
   uint32_t start_time_ = 0;
 
-  void TransmitLEDsOn();
-  void TransmitLEDsOff();
-  uint16_t GetBatteryLevel();
 //  void FlashTest(MX25L6436F& flash);
 };
 

@@ -106,8 +106,8 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin);
 #define D4_GPIO_Port GPIOA
 #define SCLK_Pin GPIO_PIN_13
 #define SCLK_GPIO_Port GPIOB
-#define IMU_INT1_Pin GPIO_PIN_2
-#define IMU_INT1_GPIO_Port GPIOB
+#define EN1_Pin GPIO_PIN_2
+#define EN1_GPIO_Port GPIOB
 #define SDO_Pin GPIO_PIN_14
 #define SDO_GPIO_Port GPIOB
 #define CSB_MEM_Pin GPIO_PIN_13
@@ -120,8 +120,8 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin);
 #define SCL_GPIO_Port GPIOA
 #define CS_IMU_Pin GPIO_PIN_2
 #define CS_IMU_GPIO_Port GPIOC
-#define IMU_INT2_Pin GPIO_PIN_9
-#define IMU_INT2_GPIO_Port GPIOB
+#define EN2_Pin GPIO_PIN_9
+#define EN2_GPIO_Port GPIOB
 #define CSB_ALT_Pin GPIO_PIN_15
 #define CSB_ALT_GPIO_Port GPIOB
 #define D1_Pin GPIO_PIN_6

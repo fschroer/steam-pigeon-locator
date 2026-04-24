@@ -254,7 +254,7 @@ void Navigation::CalibrateOnPadAndZeroAglUntilLaunch(FlightStates flight_state) 
     if (!m_imu.readSample(imu)) return;
     if (!m_baro.readSample(baro)) return;
 
-    if (flight_state < FlightStates::Launched && IsStationary(imu)) {
+    if (flight_state < FlightStates::Launched && IsStationary(imu, baro)) {
         m_imu.recalibrateGyroAtRest(imu.gyro_rps, m_cfg.gyro_pad_bias_alpha);
         m_ekf.applyPadGyroRecalibration(imu.gyro_rps, m_cfg.gyro_pad_bias_alpha);
         m_baro.zeroAglReference(m_cfg.baro_agl_lpf_alpha);
@@ -262,12 +262,13 @@ void Navigation::CalibrateOnPadAndZeroAglUntilLaunch(FlightStates flight_state) 
     }
 }
 
-bool Navigation::IsStationary(const ImuSample& imu) const {
+bool Navigation::IsStationary(const ImuSample& imu, const BaroSample& baro) const {
     const float accel_g = Math::norm(imu.accel_selected_mps2) / G0_F;
     const float gyro_dps = Math::norm(imu.gyro_rps) * RAD2DEG;
 
-    return (std::fabs(accel_g - 1.0f) <= m_cfg.pad_stationary_accel_tol_g) &&
-           (gyro_dps <= m_cfg.pad_stationary_gyro_tol_dps);
+    return baro.altitude_m_agl < m_cfg.pad_stationary_agl_tol_m &&
+    		(std::fabs(accel_g - 1.0f) <= m_cfg.pad_stationary_accel_tol_g) &&
+			(gyro_dps <= m_cfg.pad_stationary_gyro_tol_dps);
 }
 
 bool Navigation::IsLaunched() {
@@ -282,6 +283,7 @@ bool Navigation::IsLaunched() {
 				m_launch_candidate_start_ms = now;
 		} else if ((now - m_launch_candidate_start_ms) >= m_cfg.launch_detect_hold_ms) {
 				m_launch_detected = true;
+				m_cfg.baro_agl_lpf_alpha = 0.5;
 				return true;
 		}
 	} else {
@@ -348,6 +350,14 @@ bool Navigation::IsApogee()
     }
 
     return false;
+}
+
+bool Navigation::IsLanded(FlightStates flight_state) {
+	if (abs(m_baro.raw().velocity) < m_cfg.descent_rate_threshold) {
+		m_cfg.baro_agl_lpf_alpha = 0.02;
+		return true;
+	}
+	return false;
 }
 
 }

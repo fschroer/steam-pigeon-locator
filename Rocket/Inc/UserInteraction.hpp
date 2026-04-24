@@ -159,7 +159,7 @@ private:
   int main_primary_deploy_altitude_;
   int main_backup_deploy_altitude_;
   int lora_channel_;
-  char device_name_[device_name_length + 1];
+  char device_name_[device_name_length];
 
   int MakeLine(char *target, const char *source1);
   int MakeLine(char *target, const char *source1, const char *source2);

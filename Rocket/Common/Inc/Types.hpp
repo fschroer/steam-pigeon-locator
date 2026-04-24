@@ -195,8 +195,11 @@ struct NavConfig {
     float launch_detect_agl = 30.0f;
     uint32_t launch_detect_hold_ms = 80;
 
+    float pad_stationary_agl_tol_m = 15.0f;
     float pad_stationary_accel_tol_g = 0.15f;
     float pad_stationary_gyro_tol_dps = 5.0f;
+
+    float descent_rate_threshold = 0.25f;
 
     float baro_agl_lpf_alpha = 0.02f;
     float gyro_pad_bias_alpha = 0.01f;
