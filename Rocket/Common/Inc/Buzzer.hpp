@@ -4,7 +4,7 @@ extern "C" {
 #include <tim.h>
 }
 
-constexpr uint32_t TIMCLK = 48000000;
+constexpr uint32_t TIMCLK = HSI48_VALUE;
 constexpr uint32_t PSC    = 11;
 uint8_t note_index_ = -1;
 uint8_t duration_index_ = 0;
@@ -62,169 +62,193 @@ constexpr uint32_t getARR(Tone n) {
 struct Note {
     Tone tone;
     uint8_t duration;
+    uint8_t volume; // 1-3 valid
 };
 
-constexpr Note song1[] = {
-		{ Tone::A7, 3 }, // Bass intro
-		{ Tone::G7, 3 },
-
-		{ Tone::E7, 12 },
-		{ Tone::E7, 12 },
-		{ Tone::E7, 12 },
-		{ Tone::Rest, 9 },
-		{ Tone::E7, 3 },
-
-		{ Tone::E7, 6 },
-		{ Tone::E7, 6 },
-		{ Tone::G7, 6 },
-		{ Tone::E7, 3 },
-		{ Tone::A7, 3 },
-		{ Tone::Rest, 18 },
-		{ Tone::A7, 3 },
-		{ Tone::G7, 3 },
-
-		{ Tone::E7, 12 }, // Repeat
-		{ Tone::E7, 12 },
-		{ Tone::E7, 12 },
-		{ Tone::Rest, 9 },
-		{ Tone::E7, 3 },
-
-		{ Tone::E7, 6 },
-		{ Tone::E7, 6 },
-		{ Tone::G7, 6 },
-		{ Tone::E7, 3 },
-		{ Tone::A7, 3 },
-		{ Tone::Rest, 24 },
-
-		{ Tone::E7, 6 }, // Steve walks warily down the street with the
-		{ Tone::E7, 6 },
-		{ Tone::E7, 3 },
-		{ Tone::E7, 3 },
-		{ Tone::E7, 3 },
-		{ Tone::G7, 9 },
-		{ Tone::E7, 6 },
-		{ Tone::E7, 6 },
-		{ Tone::E7, 3 },
-		{ Tone::E7, 3 },
-
-		{ Tone::B7, 6 }, // brim pulled way down low
-		{ Tone::B7, 6 },
-		{ Tone::B7, 3 },
-		{ Tone::B7, 6 },
-		{ Tone::A7, 15 },
-		{ Tone::G7, 12 },
-
-		{ Tone::E7, 6 }, // Ain't no sound but the sound of his feet; ma-
-		{ Tone::E7, 6 },
-		{ Tone::E7, 6 },
-		{ Tone::E7, 3 },
-		{ Tone::E7, 3 },
-		{ Tone::G7, 3 },
-		{ Tone::G7, 3 },
-		{ Tone::G7, 3 },
-		{ Tone::D8, 9 },
-		{ Tone::Rest, 3 },
-		{ Tone::E7, 3 },
-
-		{ Tone::B7, 6 }, // -chine guns ready to go. Are you
-		{ Tone::B7, 6 },
-		{ Tone::B7, 3 },
-		{ Tone::B7, 3 },
-		{ Tone::B7, 3 },
-		{ Tone::A7, 15 },
-		{ Tone::Rest, 6 },
-		{ Tone::C8, 3 },
-		{ Tone::C8, 3 },
-
-		{ Tone::C8, 3 }, // read-y, hey! Are you ready for this? Are you
-		{ Tone::C8, 6 },
-		{ Tone::C8, 9 },
-		{ Tone::C8, 3 },
-		{ Tone::C8, 3 },
-		{ Tone::D8, 3 },
-		{ Tone::D8, 3 },
-		{ Tone::D8, 3 },
-		{ Tone::G8, 9 },
-		{ Tone::G7, 3 },
-		{ Tone::G7, 3 },
-
-		{ Tone::C8, 3 }, // hanging on the edge of your seat?
-		{ Tone::C8, 3 },
-		{ Tone::C8, 3 },
-		{ Tone::C8, 3 },
-		{ Tone::C8, 3 },
-		{ Tone::C8, 3 },
-		{ Tone::C8, 3 },
-		{ Tone::D8, 15 },
-		{ Tone::Rest, 12 },
-
-		{ Tone::C8, 3 }, // Out of the doorway the bullets rip
-		{ Tone::C8, 3 },
-		{ Tone::C8, 3 },
-		{ Tone::C8, 6 },
-		{ Tone::C8, 6 },
-		{ Tone::C8, 3 },
-		{ Tone::D8, 3 },
-		{ Tone::D8, 9 },
-		{ Tone::D8, 12 },
-
-		{ Tone::Rest, 6 }, // to the sound of the beat, yeah
-		{ Tone::A8, 3 },
-		{ Tone::A8, 3 },
-		{ Tone::A8, 3 },
-		{ Tone::A8, 3 },
-		{ Tone::A8, 3 },
-		{ Tone::D8, 9 },
-		{ Tone::E8, 18 },
-
-		{ Tone::Rest, 45 }, // An-
-		{ Tone::E7, 3 },
-
-		{ Tone::E7, 3 }, // -other one bites the dust.
-		{ Tone::E7, 3 },
-		{ Tone::E7, 6 },
-		{ Tone::G7, 6 },
-		{ Tone::E7, 3 },
-		{ Tone::A7, 15 },
-		{ Tone::Rest, 12 },
-
-		{ Tone::Rest, 45 }, // An-
-		{ Tone::E7, 3 },
-
-		{ Tone::E7, 3 }, // -other one bites the dust.
-		{ Tone::E7, 3 },
-		{ Tone::E7, 6 },
-		{ Tone::G7, 6 },
-		{ Tone::E7, 3 },
-		{ Tone::A7, 15 },
-		{ Tone::Rest, 12 },
+constexpr Note Armed[] = {
+		{ Tone::C8, 3, 1 },
+		{ Tone::A7, 3, 1 },
+		{ Tone::Rest, 15, 0 },
 };
 
-void BuzzerPlay(Tone n)
+constexpr Note Landed[] = {
+		{ Tone::As7, 3, 3 },
+		{ Tone::B7, 3, 3 },
+		{ Tone::C8, 3, 3 },
+		{ Tone::Rest, 15, 0 },
+};
+
+constexpr Note AnotherOneBitesTheDust[] = {
+		{ Tone::A7, 3, 3 }, // Bass intro
+		{ Tone::G7, 3, 3 },
+
+		{ Tone::E7, 12, 3 },
+		{ Tone::E7, 12, 3 },
+		{ Tone::E7, 12, 3 },
+		{ Tone::Rest, 9, 0 },
+		{ Tone::E7, 3, 3 },
+
+		{ Tone::E7, 6, 3 },
+		{ Tone::E7, 6, 3 },
+		{ Tone::G7, 6, 3 },
+		{ Tone::E7, 3, 3 },
+		{ Tone::A7, 3, 3 },
+		{ Tone::Rest, 18, 0 },
+		{ Tone::A7, 3, 3 },
+		{ Tone::G7, 3, 3 },
+
+		{ Tone::E7, 12, 3 }, // Repeat
+		{ Tone::E7, 12, 3 },
+		{ Tone::E7, 12, 3 },
+		{ Tone::Rest, 9, 0 },
+		{ Tone::E7, 3, 3 },
+
+		{ Tone::E7, 6, 3 },
+		{ Tone::E7, 6, 3 },
+		{ Tone::G7, 6, 3 },
+		{ Tone::E7, 3, 3 },
+		{ Tone::A7, 3, 3 },
+		{ Tone::Rest, 24, 0 },
+
+		{ Tone::E7, 6, 3 }, // Steve walks warily down the street with the
+		{ Tone::E7, 6, 3 },
+		{ Tone::E7, 3, 3 },
+		{ Tone::E7, 3, 3 },
+		{ Tone::E7, 3, 3 },
+		{ Tone::G7, 9, 3 },
+		{ Tone::E7, 6, 3 },
+		{ Tone::E7, 6, 3 },
+		{ Tone::E7, 3, 3 },
+		{ Tone::E7, 3, 3 },
+
+		{ Tone::B7, 6, 3 }, // brim pulled way down low
+		{ Tone::B7, 6, 3 },
+		{ Tone::B7, 3, 3 },
+		{ Tone::B7, 6, 3 },
+		{ Tone::A7, 15, 3 },
+		{ Tone::G7, 12, 3 },
+
+		{ Tone::E7, 6, 3 }, // Ain't no sound but the sound of his feet; ma-
+		{ Tone::E7, 6, 3 },
+		{ Tone::E7, 6, 3 },
+		{ Tone::E7, 3, 3 },
+		{ Tone::E7, 3, 3 },
+		{ Tone::G7, 3, 3 },
+		{ Tone::G7, 3, 3 },
+		{ Tone::G7, 3, 3 },
+		{ Tone::D8, 9, 3 },
+		{ Tone::Rest, 3, 0 },
+		{ Tone::E7, 3, 3 },
+
+		{ Tone::B7, 6, 3 }, // -chine guns ready to go. Are you
+		{ Tone::B7, 6, 3 },
+		{ Tone::B7, 3, 3 },
+		{ Tone::B7, 3, 3 },
+		{ Tone::B7, 3, 3 },
+		{ Tone::A7, 15, 3 },
+		{ Tone::Rest, 6, 0 },
+		{ Tone::C8, 3, 3 },
+		{ Tone::C8, 3, 3 },
+
+		{ Tone::C8, 3, 3 }, // read-y, hey! Are you ready for this? Are you
+		{ Tone::C8, 6, 3 },
+		{ Tone::C8, 9, 3 },
+		{ Tone::C8, 3, 3 },
+		{ Tone::C8, 3, 3 },
+		{ Tone::D8, 3, 3 },
+		{ Tone::D8, 3, 3 },
+		{ Tone::D8, 3, 3 },
+		{ Tone::G8, 9, 3 },
+		{ Tone::G7, 3, 3 },
+		{ Tone::G7, 3, 3 },
+
+		{ Tone::C8, 3, 3 }, // hanging on the edge of your seat?
+		{ Tone::C8, 3, 3 },
+		{ Tone::C8, 3, 3 },
+		{ Tone::C8, 3, 3 },
+		{ Tone::C8, 3, 3 },
+		{ Tone::C8, 3, 3 },
+		{ Tone::C8, 3, 3 },
+		{ Tone::D8, 15, 3 },
+		{ Tone::Rest, 12, 0 },
+
+		{ Tone::C8, 3, 3 }, // Out of the doorway the bullets rip
+		{ Tone::C8, 3, 3 },
+		{ Tone::C8, 3, 3 },
+		{ Tone::C8, 6, 3 },
+		{ Tone::C8, 6, 3 },
+		{ Tone::C8, 3, 3 },
+		{ Tone::D8, 3, 3 },
+		{ Tone::D8, 9, 3 },
+		{ Tone::D8, 12, 3 },
+
+		{ Tone::Rest, 6, 0 }, // to the sound of the beat, yeah
+		{ Tone::A8, 3, 3 },
+		{ Tone::A8, 3, 3 },
+		{ Tone::A8, 3, 3 },
+		{ Tone::A8, 3, 3 },
+		{ Tone::A8, 3, 3 },
+		{ Tone::D8, 9, 3 },
+		{ Tone::E8, 18, 3 },
+
+		{ Tone::Rest, 45, 0 }, // An-
+		{ Tone::E7, 3, 3 },
+
+		{ Tone::E7, 3, 3 }, // -other one bites the dust.
+		{ Tone::E7, 3, 3 },
+		{ Tone::E7, 6, 3 },
+		{ Tone::G7, 6, 3 },
+		{ Tone::E7, 3, 3 },
+		{ Tone::A7, 15, 3 },
+		{ Tone::Rest, 12, 0 },
+
+		{ Tone::Rest, 45, 0 }, // An-
+		{ Tone::E7, 3, 3 },
+
+		{ Tone::E7, 3, 3 }, // -other one bites the dust.
+		{ Tone::E7, 3, 3 },
+		{ Tone::E7, 6, 3 },
+		{ Tone::G7, 6, 3 },
+		{ Tone::E7, 3, 3 },
+		{ Tone::A7, 15, 3 },
+		{ Tone::Rest, 12, 0 },
+};
+
+void BuzzerPlay(Tone n, uint8_t volume)
 {
     HAL_TIM_PWM_Stop(&htim16, TIM_CHANNEL_1);
     __HAL_TIM_SET_AUTORELOAD(&htim16, getARR(n));
+    HAL_GPIO_WritePin(EN1_GPIO_Port, EN1_Pin, (GPIO_PinState)(volume & 0x02));
+    HAL_GPIO_WritePin(EN2_GPIO_Port, EN2_Pin, (GPIO_PinState)(volume & 0x01));
     HAL_TIM_PWM_Start(&htim16, TIM_CHANNEL_1);
 }
 
 void BuzzerStop()
 {
     HAL_TIM_PWM_Stop(&htim16, TIM_CHANNEL_1);
+    HAL_GPIO_WritePin(EN1_GPIO_Port, EN1_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(EN2_GPIO_Port, EN2_Pin, GPIO_PIN_RESET);
 }
 
-void BuzzerSequence() {
-	if (duration_index_ == 0) {
-		note_index_++;
-		if (note_index_ > sizeof(song1) / sizeof(song1[0]))
-			note_index_ = 0;
-		duration_index_ = song1[note_index_].duration;
-	}
-	if (song1[note_index_].tone != Tone::Rest) {
-		if (--duration_index_ > 0)
-			BuzzerPlay(song1[note_index_].tone);
-		else
-			BuzzerStop();
-	}
-	else
-		duration_index_--;
+template <size_t N>
+void BuzzerSequence(const Note (&sequence)[N])
+{
+    if (duration_index_ == 0) {
+        note_index_++;
+
+        if (note_index_ >= N)
+            note_index_ = 0;
+
+        duration_index_ = sequence[note_index_].duration;
+    }
+
+    if (sequence[note_index_].tone != Tone::Rest) {
+        if (--duration_index_ > 0)
+            BuzzerPlay(sequence[note_index_].tone, sequence[note_index_].volume);
+        else
+            BuzzerStop();
+    }
+    else {
+        duration_index_--;
+    }
 }

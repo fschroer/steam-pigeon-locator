@@ -216,3 +216,43 @@ bool StaticString<N>::AppendPadded(float value, std::size_t width, uint32_t frac
         return false;
     return AppendPadded(std::string_view(tmp.CStr(), tmp.Size()), width, pad_char);
 }
+
+// ─────────────────────────────────────────────
+// Append(FmtFloat)
+// ─────────────────────────────────────────────
+template <size_t N>
+bool StaticString<N>::Append(FmtFloat f) {
+    if (f.width == 0)
+        return Append(f.value, f.frac_digits);              // no padding, fast path
+    return AppendPadded(f.value, f.width, f.frac_digits, f.pad_char);
+}
+
+// ─────────────────────────────────────────────
+// Append(FmtUInt)
+// ─────────────────────────────────────────────
+template <size_t N>
+bool StaticString<N>::Append(FmtUInt f) {
+    if (f.width == 0)
+        return Append(f.value);
+    return AppendPadded(f.value, f.width, f.pad_char);
+}
+
+// ─────────────────────────────────────────────
+// Append(FmtInt)
+// ─────────────────────────────────────────────
+template <size_t N>
+bool StaticString<N>::Append(FmtInt f) {
+    if (f.width == 0)
+        return Append(f.value);
+    return AppendPadded(f.value, f.width, f.pad_char);
+}
+
+// ─────────────────────────────────────────────
+// Append(FmtStr)
+// ─────────────────────────────────────────────
+template <size_t N>
+bool StaticString<N>::Append(FmtStr f) {
+    if (f.width == 0)
+        return Append(f.value);
+    return AppendPadded(f.value, f.width, f.pad_char);
+}

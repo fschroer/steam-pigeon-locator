@@ -12,44 +12,44 @@ extern "C" {
 #include "Format.hpp"
 #include "Units.hpp"
 #include "UserInteraction.hpp"
+#include "version.h"
 
 namespace Communication {
 
 namespace FA = FlightArchive;
 
-using Sample  = FA::ExampleFlightSample;
+using Sample = FA::FlightSample;
 using MsgType = MsgType;
 
-static constexpr size_t SamplesPerPacket =
-    (kMaxPayloadBytes - sizeof(PacketHeader)) / sizeof(Sample);
+static constexpr size_t SamplesPerPacket = (kMaxPayloadBytes - sizeof(PacketHeader)) / sizeof(Sample);
 
-Communication::Communication(FlightManager& flight,
-		RocketNav::Navigation& nav,
-    Archive& archive,
-		PowerManagement& power,
-		Deployment& deploy)
-    : flight_(flight)
-    , nav_(nav)
-    , archive_(archive)
-    , power_(power)
-		, deploy_(deploy)
-{}
+Communication::Communication(FlightManager &flight, RocketNav::Navigation &nav, Archive &archive,
+		PowerManagement &power, Deployment &deploy) :
+		flight_(flight), nav_(nav), archive_(archive), power_(power), deploy_(deploy) {
+}
 
-void Communication::Init(IRadio& radio) {
+void Communication::Init(IRadio &radio) {
 	radio_ = &radio;
-  radio_->SetChannel(902300000 + archive_.GetLocatorSettings().lora_channel * 200000);
-  radio_->Send((uint8_t*)lora_startup_message_, strlen(lora_startup_message_));
+	radio_->SetChannel(902300000 + archive_.GetLocatorSettings().lora_channel * 200000);
+	StartupMessage msg;
+	msg.packet_header.system_id = system_id;
+	msg.packet_header.msg_type = MsgType::Startup;
+	msg.packet_header.msg_count = 0;
+	msg.packet_header.crc = 0; // must be zeroed before computing
+	std::memcpy(msg.version, GIT_VERSION, std::min(sizeof(msg.version), sizeof(GIT_VERSION)));
+	msg.packet_header.crc = ComputeMessageCrc(msg);
+	radio_->Send(reinterpret_cast<uint8_t*>(&msg), sizeof(msg));
 }
 
 void Communication::SetChannel(uint8_t channel) {
 	radio_->SetChannel(902300000 + channel * 200000);
 }
 
-void Communication::SendGenericPacket(const uint8_t* data, size_t len) {
+void Communication::SendGenericPacket(const uint8_t *data, size_t len) {
 	radio_->Send(data, len);
 }
 
-void Communication::SendPreLaunchData()	{
+void Communication::SendPreLaunchData() {
 	PreLaunchData msg;
 //	NavSolution nav_solution = nav_.getFused();
 	GpsSample gps_sample = nav_.getRawGps();
@@ -58,9 +58,9 @@ void Communication::SendPreLaunchData()	{
 	RocketPersistentSettings rocket_settings = archive_.GetLocatorSettings();
 
 	msg.packet_header.system_id = system_id;
-	msg.packet_header.msg_type  = MsgType::PreLaunchData;
+	msg.packet_header.msg_type = MsgType::PreLaunchData;
 	msg.packet_header.msg_count = 0;
-	msg.packet_header.crc       = 0; // must be zeroed before computing
+	msg.packet_header.crc = 0; // must be zeroed before computing
 
 //	msg.latitude = nav_solution.pos.lat_rad * RAD2DEG;
 	msg.latitude = gps_sample.lat_rad * RAD2DEG;
@@ -101,9 +101,9 @@ void Communication::SendTelemetryData() {
 	ImuSample imu_sample = nav_.getRawImu();
 
 	msg.packet_header.system_id = system_id;
-	msg.packet_header.msg_type  = MsgType::TelemetryData;
+	msg.packet_header.msg_type = MsgType::TelemetryData;
 	msg.packet_header.msg_count = 0;
-	msg.packet_header.crc       = 0; // must be zeroed before computing
+	msg.packet_header.crc = 0; // must be zeroed before computing
 
 //	msg.latitude = nav_solution.pos.lat_rad * RAD2DEG;
 	msg.latitude = gps_sample.lat_rad * RAD2DEG;
@@ -135,27 +135,26 @@ void Communication::SendTelemetryData() {
 }
 
 void Communication::SendTestCountdownMessage(uint16_t test_deploy_count) {
-	DeploymentTestCountdownMessage msg {};
+	DeploymentTestCountdownMessage msg { };
 	msg.packet_header.system_id = system_id;
-	msg.packet_header.msg_type  = MsgType::DeploymentTest;
+	msg.packet_header.msg_type = MsgType::DeploymentTest;
 	msg.packet_header.msg_count = 0;
-	msg.packet_header.crc       = 0; // must be zeroed before computing
+	msg.packet_header.crc = 0; // must be zeroed before computing
 
 	msg.count = test_deploy_count / SAMPLES_PER_SECOND;
 	msg.packet_header.crc = ComputeMessageCrc(msg);
-  radio_->Send(reinterpret_cast<uint8_t*>(&msg), sizeof(DeploymentTestCountdownMessage));
+	radio_->Send(reinterpret_cast<uint8_t*>(&msg), sizeof(DeploymentTestCountdownMessage));
 }
 
 void Communication::SendFlightProfileMetadata() {
 	FlightMetadata msg;
 	bool present = false;
-	uint16_t battery_mv = 0;
 	for (uint8_t i = 0; i < record_count; i++) {
 		archive_.ReadEvent(i, FlightArchive::ExampleStatId::FlightTimestampS, msg.record[i].timestamp, present);
 		archive_.ReadEvent(i, FlightArchive::ExampleStatId::ApogeeTimestampMs, msg.record[i].apogee, present);
 		archive_.ReadEvent(i, FlightArchive::ExampleStatId::LandingTimestampMs, msg.record[i].flight_time, present);
 	}
-  radio_->Send(reinterpret_cast<uint8_t*>(&msg), sizeof(FlightMetadata));
+	radio_->Send(reinterpret_cast<uint8_t*>(&msg), sizeof(FlightMetadata));
 }
 
 void Communication::SendFlightProfileData() {
@@ -165,315 +164,266 @@ void Communication::SendFlightProfileData() {
 	};
 }
 
-void Communication::OnRadioTxDone()
-{
-    radio_busy_ = false;
-    last_tx_end_ms_ = HAL_GetTick();   // your system tick
+void Communication::OnRadioTxDone() {
+	radio_busy_ = false;
+	last_tx_end_ms_ = HAL_GetTick();   // your system tick
 }
 
-void Communication::OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t LoraSnr_FskCfo, DeviceState& device_state) {
+void Communication::OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t LoraSnr_FskCfo,
+		DeviceState &device_state) {
 	HAL_GPIO_WritePin(SOFT_LED2_GPIO_Port, SOFT_LED2_Pin, GPIO_PIN_RESET);
 
-	ParsedMessage parsed{};
+	ParsedMessage parsed { };
 	if (ParseLoraFrame(payload, size, system_id, parsed) == ParseResult::Ok) {
 		FlightStates flight_state = flight_.GetFlightState();
 		switch (parsed.type) {
-			case MsgType::LocatorCfgChgRequest : {
-				RocketPersistentSettings rocket_settings{};
-				std::memcpy(&rocket_settings, payload + sizeof(PacketHeader), sizeof(rocket_settings));
-				archive_.SaveLocatorSettings(rocket_settings);
-				break;
-			}
-			case MsgType::ArmRequest :
-				if (device_state == DeviceState::Disarmed)
-					device_state = DeviceState::Armed;
-				break;
-			case MsgType::DisarmRequest :
-				if (flight_state == FlightStates::WaitingLaunch || flight_state == FlightStates::Landed) // Only allow disarm before/after flight
-					device_state = DeviceState::Disarmed;
-				break;
-			case MsgType::FlightMetadataRequest :
-				// To do: process flight metadata request
-				break;
-			case MsgType::FlightDataRequest : {
-				uint8_t flight_record = payload[sizeof(PacketHeader)];
-				// To do: read flight record data, transmit
-				break;
-			}
-			case MsgType::FlightDataAck : {
-				FlightDataAck ack{};
-				std::memcpy(&ack, payload, sizeof(ack));
-				OnAckReceived(ack);
-				break;
-			}
-			case MsgType::DeploymentTestRequest : {
-				if (flight_state == FlightStates::WaitingLaunch) { // Only allow test before flight
-					uint8_t channel = payload[sizeof(PacketHeader)];
-					if (channel >= 1 && channel <= 4) {
-						deploy_.ResetTestDeployment();
-						deploy_.SetActiveDeploymentChannel(channel);
-						device_state = DeviceState::Test;
-					}
+		case MsgType::LocatorCfgChgRequest: {
+			RocketPersistentSettings rocket_settings { };
+			std::memcpy(&rocket_settings, payload + sizeof(PacketHeader), sizeof(rocket_settings));
+			archive_.SaveLocatorSettings(rocket_settings);
+			break;
+		}
+		case MsgType::ArmRequest:
+			if (device_state == DeviceState::Disarmed)
+				device_state = DeviceState::Armed;
+			break;
+		case MsgType::DisarmRequest:
+			if (flight_state == FlightStates::WaitingLaunch || flight_state == FlightStates::Landed) // Only allow disarm before/after flight
+				device_state = DeviceState::Disarmed;
+			break;
+		case MsgType::FlightMetadataRequest:
+			// To do: process flight metadata request
+			break;
+		case MsgType::FlightDataRequest: {
+			//uint8_t flight_record = payload[sizeof(PacketHeader)];
+			// To do: read flight record data, transmit
+			break;
+		}
+		case MsgType::FlightDataAck: {
+			FlightDataAck ack { };
+			std::memcpy(&ack, payload, sizeof(ack));
+			OnAckReceived(ack);
+			break;
+		}
+		case MsgType::DeploymentTestRequest: {
+			if (flight_state == FlightStates::WaitingLaunch) { // Only allow test before flight
+				uint8_t channel = payload[sizeof(PacketHeader)];
+				if (channel >= 1 && channel <= 4) {
+					deploy_.ResetTestDeployment();
+					deploy_.SetActiveDeploymentChannel(channel);
+					device_state = DeviceState::Test;
 				}
 			}
-				break;
-			default :
-				break;
+		}
+			break;
+		default:
+			break;
 		}
 //		GPIO_PinState usb_connected = HAL_GPIO_ReadPin(POWER_SENSE_GPIO_Port, POWER_SENSE_Pin);
 	}
 	HAL_GPIO_WritePin(SOFT_LED2_GPIO_Port, SOFT_LED2_Pin, GPIO_PIN_SET);
 }
 
-void Communication::BeginTransfer(const Sample* samples,
-                                        uint32_t total_samples)
-{
-    samples_       = samples;
-    total_samples_ = total_samples;
+void Communication::BeginTransfer(const Sample *samples, uint32_t total_samples) {
+	samples_ = samples;
+	total_samples_ = total_samples;
 
-    transfer_id_++;
-    if (transfer_id_ == 0) transfer_id_ = 1;
+	transfer_id_++;
+	if (transfer_id_ == 0)
+		transfer_id_ = 1;
 
-    std::memset(sent_,  0, sizeof(sent_));
-    std::memset(acked_, 0, sizeof(acked_));
-    std::memset(last_tx_time_, 0, sizeof(last_tx_time_));
+	std::memset(sent_, 0, sizeof(sent_));
+	std::memset(acked_, 0, sizeof(acked_));
+	std::memset(last_tx_time_, 0, sizeof(last_tx_time_));
 
-    const size_t max_samples_per_packet = FlightProfileCodec::MaxSamplesPerPacket();
+	const size_t max_samples_per_packet = FlightProfileCodec::MaxSamplesPerPacket();
 
-    packet_count_ =
-        (total_samples_ + max_samples_per_packet - 1) / max_samples_per_packet;
+	packet_count_ = (total_samples_ + max_samples_per_packet - 1) / max_samples_per_packet;
 
-    if (packet_count_ > kMaxPackets)
-        packet_count_ = kMaxPackets;
+	if (packet_count_ > kMaxPackets)
+		packet_count_ = kMaxPackets;
 
-    window_start_ = 0;
-    complete_     = false;
+	window_start_ = 0;
+	complete_ = false;
 }
 
-bool Communication::TrySendPacket(const FlightDataPacket& pkt,
-                                        size_t size)
-{
-    uint32_t now = HAL_GetTick();
+bool Communication::TrySendPacket(const FlightDataPacket &pkt, size_t size) {
+	uint32_t now = HAL_GetTick();
 
-    if (radio_busy_)
-        return false;
+	if (radio_busy_)
+		return false;
 
-    if (now - last_tx_end_ms_ < kMinRxWindowMs)
-        return false;
+	if (now - last_tx_end_ms_ < kMinRxWindowMs)
+		return false;
 
-    radio_busy_ = true;
-    radio_->Send(reinterpret_cast<const uint8_t*>(&pkt), size);
-    return true;
+	radio_busy_ = true;
+	radio_->Send(reinterpret_cast<const uint8_t*>(&pkt), size);
+	return true;
 }
 
-void Communication::SendDataPacket(uint16_t packet_index,
-                                         uint32_t now_ms)
-{
-    FlightDataPacket pkt{};
-    pkt.packet_header.system_id = 1;
-    pkt.packet_header.msg_type  = MsgType::FlightData;
-    pkt.packet_header.msg_count = next_msg_count_++;
-    pkt.packet_header.crc       = 0;
+void Communication::SendDataPacket(uint16_t packet_index, uint32_t now_ms) {
+	FlightDataPacket pkt { };
+	pkt.packet_header.system_id = 1;
+	pkt.packet_header.msg_type = MsgType::FlightData;
+	pkt.packet_header.msg_count = next_msg_count_++;
+	pkt.packet_header.crc = 0;
 
-    pkt.transfer_id  = transfer_id_;
-    pkt.packet_index = packet_index;
-    pkt.packet_count = packet_count_;
-    pkt.total_samples = total_samples_;
+	pkt.transfer_id = transfer_id_;
+	pkt.packet_index = packet_index;
+	pkt.packet_count = packet_count_;
+	pkt.total_samples = total_samples_;
 
-    const size_t max_samples_per_packet = FlightProfileCodec::MaxSamplesPerPacket();
-    const size_t start     = packet_index * max_samples_per_packet;
-    const size_t remaining = total_samples_ - start;
-    const size_t count     = (remaining < max_samples_per_packet)
-                               ? remaining
-                               : max_samples_per_packet;
+	const size_t max_samples_per_packet = FlightProfileCodec::MaxSamplesPerPacket();
+	const size_t start = packet_index * max_samples_per_packet;
+	const size_t remaining = total_samples_ - start;
+	const size_t count = (remaining < max_samples_per_packet) ? remaining : max_samples_per_packet;
 
-    const size_t written = FlightProfileCodec::PackSamples(
-        &samples_[start],
-        count,
-        pkt.payload,
-        sizeof(pkt.payload)
-    );
+	const size_t written = FlightProfileCodec::PackSamples(&samples_[start], count, pkt.payload, sizeof(pkt.payload));
 
-    const size_t payload_used =
-        sizeof(FlightProfileCodec::CompressedHeader) +
-        (written > 1 ? (written - 1) * sizeof(FlightProfileCodec::CompressedDelta) : 0);
+	const size_t payload_used = sizeof(FlightProfileCodec::CompressedHeader)
+			+ (written > 1 ? (written - 1) * sizeof(FlightProfileCodec::CompressedDelta) : 0);
 
-    const size_t msg_size =
-        sizeof(PacketHeader) + 2u + 2u + 2u + 4u + payload_used;
+	const size_t msg_size = sizeof(PacketHeader) + 2u + 2u + 2u + 4u + payload_used;
 
-    pkt.packet_header.crc = ComputeMessageCrcPartial(
-        reinterpret_cast<const uint8_t*>(&pkt),
-        msg_size
-    );
+	pkt.packet_header.crc = ComputeMessageCrcPartial(reinterpret_cast<const uint8_t*>(&pkt), msg_size);
 
-    if (TrySendPacket(pkt, msg_size)) {
-        sent_[packet_index] = true;
-        last_tx_time_[packet_index] = now_ms;
-    }
+	if (TrySendPacket(pkt, msg_size)) {
+		sent_[packet_index] = true;
+		last_tx_time_[packet_index] = now_ms;
+	}
 }
 
-void Communication::SendParityPacket(uint16_t group_index,
-                                           const FlightDataPacket group[4],
-                                           uint32_t now_ms)
-{
-    FlightDataPacket parity{};
-    parity.packet_header.system_id = 1;
-    parity.packet_header.msg_type  = MsgType::FlightDataParity;
-    parity.packet_header.msg_count = next_msg_count_++;
-    parity.packet_header.crc       = 0;
+void Communication::SendParityPacket(uint16_t group_index, const FlightDataPacket group[4], uint32_t now_ms) {
+	FlightDataPacket parity { };
+	parity.packet_header.system_id = 1;
+	parity.packet_header.msg_type = MsgType::FlightDataParity;
+	parity.packet_header.msg_count = next_msg_count_++;
+	parity.packet_header.crc = 0;
 
-    parity.transfer_id  = transfer_id_;
-    parity.packet_index = group_index;
-    parity.packet_count = packet_count_;
-    parity.total_samples = total_samples_;
+	parity.transfer_id = transfer_id_;
+	parity.packet_index = group_index;
+	parity.packet_count = packet_count_;
+	parity.total_samples = total_samples_;
 
-    memset(parity.payload, 0, sizeof(parity.payload));
+	memset(parity.payload, 0, sizeof(parity.payload));
 
-    for (int i = 0; i < 4; ++i)
-        for (size_t b = 0; b < sizeof(parity.payload); ++b)
-            parity.payload[b] ^= group[i].payload[b];
+	for (int i = 0; i < 4; ++i)
+		for (size_t b = 0; b < sizeof(parity.payload); ++b)
+			parity.payload[b] ^= group[i].payload[b];
 
-    const size_t msg_size = kMaxPayloadBytes;
+	const size_t msg_size = kMaxPayloadBytes;
 
-    parity.packet_header.crc = ComputeMessageCrcPartial(
-        reinterpret_cast<const uint8_t*>(&parity),
-        msg_size
-    );
+	parity.packet_header.crc = ComputeMessageCrcPartial(reinterpret_cast<const uint8_t*>(&parity), msg_size);
 
-    TrySendPacket(parity, msg_size);
+	TrySendPacket(parity, msg_size);
 }
 
-bool Communication::AllAcked() const
-{
-    for (uint16_t i = 0; i < packet_count_; ++i)
-        if (!acked_[i]) return false;
-    return true;
+bool Communication::AllAcked() const {
+	for (uint16_t i = 0; i < packet_count_; ++i)
+		if (!acked_[i])
+			return false;
+	return true;
 }
 
-void Communication::OnAckReceived(const FlightDataAck& ack)
-{
-    if (ack.transfer_id != transfer_id_) return;
+void Communication::OnAckReceived(const FlightDataAck &ack) {
+	if (ack.transfer_id != transfer_id_)
+		return;
 
-    for (uint16_t i = 0; i < ack.packet_count; ++i) {
-        const uint16_t byte = i / 8;
-        const uint8_t  bit  = i % 8;
-        if (ack.bitmap[byte] & (1u << bit))
-            acked_[i] = true;
-    }
+	for (uint16_t i = 0; i < ack.packet_count; ++i) {
+		const uint16_t byte = i / 8;
+		const uint8_t bit = i % 8;
+		if (ack.bitmap[byte] & (1u << bit))
+			acked_[i] = true;
+	}
 
-    while (window_start_ < packet_count_ && acked_[window_start_])
-        ++window_start_;
+	while (window_start_ < packet_count_ && acked_[window_start_])
+		++window_start_;
 
-    if (AllAcked())
-        complete_ = true;
+	if (AllAcked())
+		complete_ = true;
 }
 
-void Communication::Process(uint32_t now_ms)
-{
-    if (complete_) return;
+void Communication::Process(uint32_t now_ms) {
+	if (complete_)
+		return;
 
-    const uint16_t window_end =
-        (window_start_ + kWindowSize < packet_count_)
-            ? window_start_ + kWindowSize
-            : packet_count_;
+	const uint16_t window_end =
+			(window_start_ + kWindowSize < packet_count_) ? window_start_ + kWindowSize : packet_count_;
 
-    FlightDataPacket parity_group[4];
-    bool parity_ready = false;
-    uint16_t group_index = 0;
+	FlightDataPacket parity_group[4];
+	bool parity_ready = false;
+	uint16_t group_index = 0;
 
-    for (uint16_t i = window_start_; i < window_end; ++i) {
-        if (!acked_[i] && !sent_[i]) {
-            SendDataPacket(i, now_ms);
+	for (uint16_t i = window_start_; i < window_end; ++i) {
+		if (!acked_[i] && !sent_[i]) {
+			SendDataPacket(i, now_ms);
 
-            uint16_t gi = i / kParityGroupSize;
-            uint16_t pos = i % kParityGroupSize;
-            parity_group[pos] = {}; // store built packet
-            parity_ready = (pos == kParityGroupSize - 1);
-            group_index = gi;
-        }
-    }
+			uint16_t gi = i / kParityGroupSize;
+			uint16_t pos = i % kParityGroupSize;
+			parity_group[pos] = { }; // store built packet
+			parity_ready = (pos == kParityGroupSize - 1);
+			group_index = gi;
+		}
+	}
 
-    if (parity_ready)
-        SendParityPacket(group_index, parity_group, now_ms);
+	if (parity_ready)
+		SendParityPacket(group_index, parity_group, now_ms);
 
-    for (uint16_t i = window_start_; i < window_end; ++i) {
-        if (sent_[i] && !acked_[i] &&
-            now_ms - last_tx_time_[i] > kRetxTimeoutMs)
-        {
-            sent_[i] = false;
-        }
-    }
+	for (uint16_t i = window_start_; i < window_end; ++i) {
+		if (sent_[i] && !acked_[i] && now_ms - last_tx_time_[i] > kRetxTimeoutMs) {
+			sent_[i] = false;
+		}
+	}
 }
 
 ParseResult Communication::ParseLoraFrame(const uint8_t* data,
-                           std::size_t   len,
-                           uint8_t       expected_system_id,
-                           ParsedMessage& out)
+                                          std::size_t len,
+                                          uint8_t expected_system_id,
+                                          ParsedMessage& out)
 {
-  if (len < sizeof(PacketHeader)) {
-    return ParseResult::TooShort;
-  }
+    using namespace Communication;
 
-  // Extract header
-  PacketHeader hdr{};
-  std::memcpy(&hdr, data, sizeof(PacketHeader));
-  // System ID check
-  if (hdr.system_id != expected_system_id) {
-    return ParseResult::SystemIdMismatch;
-  }
+    if (len < sizeof(PacketHeader))
+        return ParseResult::TooShort;
 
-  // CRC check
-  if (!ValidateCRC(data, len)) {
-    return ParseResult::CrcMismatch;
-  }
+    // Extract header
+    PacketHeader hdr{};
+    std::memcpy(&hdr, data, sizeof(PacketHeader));
 
-  // Dispatch by message type
-  switch (hdr.msg_type) {
+    // System ID check
+    if (hdr.system_id != expected_system_id)
+        return ParseResult::SystemIdMismatch;
 
-  case MsgType::LocatorCfgChgRequest :
-    if (len != sizeof(LocatorSettings)) {
-      return ParseResult::LengthMismatch;
+    // CRC check
+    if (!ValidateCRC(data, len))
+        return ParseResult::CrcMismatch;
+
+    // Dispatch by message type
+    switch (hdr.msg_type)
+    {
+    case MsgType::LocatorCfgChgRequest:
+        return decode_message<MsgType::LocatorCfgChgRequest>(data, len, out);
+
+    case MsgType::FlightDataAck:
+        return decode_message<MsgType::FlightDataAck>(data, len, out);
+
+    case MsgType::FlightDataRequest:
+        return decode_message<MsgType::FlightDataRequest>(data, len, out);
+
+    case MsgType::DeploymentTestRequest:
+        return decode_message<MsgType::DeploymentTestRequest>(data, len, out);
+
+    case MsgType::ArmRequest:
+    case MsgType::DisarmRequest:
+    case MsgType::FlightMetadataRequest:
+        if (len != sizeof(PacketHeader))
+            return ParseResult::LengthMismatch;
+        out.type = hdr.msg_type;
+        return ParseResult::Ok;
+
+    default:
+        return ParseResult::UnknownType;
     }
-    std::memcpy(&out, data, sizeof(LocatorSettings));
-    out.type = MsgType::LocatorCfgChgRequest;
-    return ParseResult::Ok;
-
-  case MsgType::FlightDataAck :
-    if (len != sizeof(FlightDataAck)) {
-      return ParseResult::LengthMismatch;
-    }
-    std::memcpy(&out.flight_data_ack, data, sizeof(FlightDataAck));
-    out.type = MsgType::FlightDataAck;
-    return ParseResult::Ok;
-
-  case MsgType::ArmRequest :
-  case MsgType::DisarmRequest :
-  case MsgType::FlightMetadataRequest :
-    if (len != sizeof(PacketHeader)) {
-      return ParseResult::LengthMismatch;
-    }
-    out.type = hdr.msg_type;
-    return ParseResult::Ok;
-
-  case MsgType::FlightDataRequest :
-    if (len != sizeof(FlightDataRequest)) {
-      return ParseResult::LengthMismatch;
-    }
-    std::memcpy(&out.flight_data_request, data, sizeof(FlightDataRequest));
-    out.type = MsgType::FlightDataRequest;
-    return ParseResult::Ok;
-
-  case MsgType::DeploymentTestRequest :
-    if (len != sizeof(DeploymentTestRequest)) {
-      return ParseResult::LengthMismatch;
-    }
-    std::memcpy(&out.deployment_test_request, data, sizeof(DeploymentTestRequest));
-    out.type = MsgType::DeploymentTestRequest;
-    return ParseResult::Ok;
-
-  default:
-    return ParseResult::UnknownType;
-  }
 }
 
 } // namespace Communication

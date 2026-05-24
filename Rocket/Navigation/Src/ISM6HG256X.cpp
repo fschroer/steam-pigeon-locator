@@ -103,11 +103,10 @@ bool ISM6HG256X::configureOdrAndRanges(float sample_rate_hz, ImuAccelSource acce
 }
 
 Vec3f ISM6HG256X::convertGyroRawToRps(int16_t gx, int16_t gy, int16_t gz) const {
-    constexpr float dps_to_rps = 0.01745329251994329577f;
     return {
-        (static_cast<float>(gx) * m_gyro_lsb_per_dps) * dps_to_rps - m_gyro_bias_rps.x,
-        (static_cast<float>(gy) * m_gyro_lsb_per_dps) * dps_to_rps - m_gyro_bias_rps.y,
-        (static_cast<float>(gz) * m_gyro_lsb_per_dps) * dps_to_rps - m_gyro_bias_rps.z
+        (static_cast<float>(gx) * m_gyro_lsb_per_dps) * DEG2RAD - m_gyro_bias_rps.x,
+        (static_cast<float>(gy) * m_gyro_lsb_per_dps) * DEG2RAD - m_gyro_bias_rps.y,
+        (static_cast<float>(gz) * m_gyro_lsb_per_dps) * DEG2RAD - m_gyro_bias_rps.z
     };
 }
 

@@ -38,7 +38,7 @@ struct CompressedDelta {
 
 // Encode samples into a compressed payload buffer.
 // Returns number of bytes written into out_payload.
-size_t PackSamples(const FlightArchive::ExampleFlightSample* samples,
+size_t PackSamples(const FlightArchive::FlightSample* samples,
 									 size_t max_samples,
 									 uint8_t* out_payload,
 									 size_t out_capacity);
@@ -46,7 +46,7 @@ size_t PackSamples(const FlightArchive::ExampleFlightSample* samples,
 // Returns number of samples written into out_samples.
 size_t UnpackSamples(const uint8_t* payload,
 										 size_t payload_size,
-										 FlightArchive::ExampleFlightSample* out_samples,
+										 FlightArchive::FlightSample* out_samples,
 										 size_t max_samples);
 
 // How many samples fit in one packet payload

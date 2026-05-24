@@ -91,8 +91,8 @@ bool Archive::SaveLocatorSettings(RocketPersistentSettings& locator_settings) {
 //	return archive_.WriteFlightDataSample(record_id_, s);
 //}
 //
-bool Archive::WriteData(const BaroSample& baro_sample, ImuSample& imu_sample, GpsSample& gps_sample) {
-	FlightArchive::ExampleFlightSample s{};
+bool Archive::WriteData(uint32_t flight_time_ms, const BaroSample& baro_sample, const ImuSample& imu_sample, const GpsSample& gps_sample) {
+	FlightArchive::FlightSample s{};
 	s.timestamp_ms = imu_sample.timestamp_ms;
 	s.accel = imu_sample.accel_selected_mps2;
 	s.gyro = imu_sample.gyro_rps;
@@ -117,6 +117,6 @@ bool Archive::GetFlightSampleCount(uint16_t record_id, uint32_t& sample_count_ou
 	return archive_.GetFlightSampleCount(record_id, sample_count_out);
 }
 
-bool Archive::ReadFlightData(uint16_t record_id, FlightArchive::ExampleFlightSample* out_samples, uint32_t max_samples, uint32_t& samples_read_out) const {
+bool Archive::ReadFlightData(uint16_t record_id, FlightArchive::FlightSample* out_samples, uint32_t max_samples, uint32_t& samples_read_out) const {
 	return archive_.ReadFlightData(record_id, out_samples, max_samples, samples_read_out);
 }

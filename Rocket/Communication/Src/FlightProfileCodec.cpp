@@ -5,7 +5,7 @@
 
 namespace FlightProfileCodec {
 
-inline size_t PackSamples(const FlightArchive::ExampleFlightSample* samples,
+inline size_t PackSamples(const FlightArchive::FlightSample* samples,
                           size_t max_samples,
                           uint8_t* out_payload,
                           size_t out_capacity)
@@ -29,7 +29,7 @@ inline size_t PackSamples(const FlightArchive::ExampleFlightSample* samples,
     std::memcpy(p, &hdr, sizeof(hdr));
     p += sizeof(hdr);
 
-    FlightArchive::ExampleFlightSample prev = samples[0];
+    FlightArchive::FlightSample prev = samples[0];
     size_t written = 1;
 
     for (size_t i = 1; i < max_samples; ++i) {
@@ -65,7 +65,7 @@ inline size_t PackSamples(const FlightArchive::ExampleFlightSample* samples,
 
 inline size_t UnpackSamples(const uint8_t* payload,
                             size_t payload_size,
-														FlightArchive::ExampleFlightSample* out_samples,
+														FlightArchive::FlightSample* out_samples,
                             size_t max_samples)
 {
     if (payload_size < sizeof(CompressedHeader) || max_samples == 0)
@@ -80,7 +80,7 @@ inline size_t UnpackSamples(const uint8_t* payload,
 
     size_t written = 0;
 
-    FlightArchive::ExampleFlightSample prev{};
+    FlightArchive::FlightSample prev{};
     prev.timestamp_ms = hdr.base_timestamp_ms;
     prev.altitude_m   = hdr.base_altitude_m;
     prev.accel        = hdr.base_accel_mps2;
@@ -95,7 +95,7 @@ inline size_t UnpackSamples(const uint8_t* payload,
         std::memcpy(&d, p, sizeof(d));
         p += sizeof(d);
 
-        FlightArchive::ExampleFlightSample s{};
+        FlightArchive::FlightSample s{};
 
         s.timestamp_ms = prev.timestamp_ms + d.d_timestamp_ms;
         s.altitude_m   = prev.altitude_m + d.d_alt_0p1m / 10.0f;

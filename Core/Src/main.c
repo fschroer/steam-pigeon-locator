@@ -1,20 +1,20 @@
 /* USER CODE BEGIN Header */
 /**
-  ******************************************************************************
-  * @file           : main.c
-  * @brief          : Main program body
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2026 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
+ ******************************************************************************
+ * @file           : main.c
+ * @brief          : Main program body
+ ******************************************************************************
+ * @attention
+ *
+ * Copyright (c) 2026 STMicroelectronics.
+ * All rights reserved.
+ *
+ * This software is licensed under terms that can be found in the LICENSE file
+ * in the root directory of this software component.
+ * If no LICENSE file comes with this software, it is provided AS-IS.
+ *
+ ******************************************************************************
+ */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
@@ -58,15 +58,11 @@ volatile uint32_t processRocketEventsInterruptCount = 0;
 /* --- PPS timing state --- */
 volatile static uint32_t pps_last_ts = 0;    // TIM2 timestamp of previous PPS
 volatile static uint32_t pps_this_ts = 0;    // TIM2 timestamp of current PPS
-volatile static int32_t  pps_period_err = 0; // Period error in microseconds
-volatile static bool pps_update_pending = false;
 volatile static bool arr_update_pending = false;
 volatile static uint32_t elapsed = 0;
 volatile static uint32_t tim17_arr = 49999;
-volatile static uint32_t pps_count = 0;
 volatile static uint8_t rocket_service_count = 0;
-volatile static uint32_t tim17_cnt_pps = 0;
-volatile uint32_t processTime = 0;
+volatile static float alpha = 0.05;
 
 //extern void RocketFactory_Init(void);
 
@@ -139,18 +135,10 @@ int main(void)
 			rocket_service_count++;
 			if (rocket_service_count == SAMPLES_PER_SECOND)
 				rocket_service_count = 0;
-			uint32_t start = TIM2->CNT;
 			RocketFactory_ProcessRocketEvents(rocket_service_count);
-			uint32_t end = TIM2->CNT;
-			processTime = end - start;
 		}
 
-		if (pps_update_pending) {
-			pps_update_pending = false;
-//				printf("%.4lu Elapsed=%lu ARR:%lu, TIM17CNT:%lu\n"
-//						, pps_count, elapsed, tim17_arr, tim17_cnt_pps);
-		}
-#ifdef MX_SUBGHZ_PHY_PROCESS
+#ifdef MX_SUBGHZ_PHY_PROCESS // CubeMX autogenerates the MX_SubGHz_Phy_Process which we don't want.
     /* USER CODE END WHILE */
     MX_SubGHz_Phy_Process();
 
@@ -210,7 +198,7 @@ void SystemClock_Config(void)
 
 /* USER CODE BEGIN 4 */
 void LoraTxCallback() {
-  RocketFactory_OnRadioTxDone();
+	RocketFactory_OnRadioTxDone();
 }
 
 void LoraRxCallback(uint8_t *payload, uint16_t size, int16_t rssi, int8_t LoraSnr_FskCfo) {
@@ -218,7 +206,7 @@ void LoraRxCallback(uint8_t *payload, uint16_t size, int16_t rssi, int8_t LoraSn
 }
 
 void UART2_CharReception_Callback(void) {
-  /* Read Received character. RXNE flag is cleared by reading of RDR register */
+	/* Read Received character. RXNE flag is cleared by reading of RDR register */
 	RocketFactory_ProcessUART2Char(LL_USART_ReceiveData8(USART2));
 }
 
@@ -229,64 +217,70 @@ void UART_CharTransmitComplete_Callback(void) {
 }
 
 void UART_Error_Callback(void) {
-  //__IO uint32_t isr_reg;
+	//__IO uint32_t isr_reg;
 
-  // Disable USARTx_IRQn
-  /*NVIC_DisableIRQ(USART1_IRQn);
+	// Disable USARTx_IRQn
+	/*NVIC_DisableIRQ(USART1_IRQn);
 
-  //Error handling example :
-  //  - Read USART ISR register to identify flag that leads to IT raising
-  //  - Perform corresponding error handling treatment according to flag
+	 //Error handling example :
+	 //  - Read USART ISR register to identify flag that leads to IT raising
+	 //  - Perform corresponding error handling treatment according to flag
 
-  isr_reg = LL_USART_ReadReg(USART1, ISR);
-  if (isr_reg & LL_USART_ISR_NE)
-  {
-    // Turn LED3 on: Transfer error in reception/transmission process
-    HAL_GPIO_TogglePin(LED3_GPIO_Port, LED3_Pin); // LED_RED
-  }
-  else
-  {
-    // Turn LED3 on: Transfer error in reception/transmission process
-    HAL_GPIO_TogglePin(LED3_GPIO_Port, LED3_Pin); // LED_RED
-  }*/
+	 isr_reg = LL_USART_ReadReg(USART1, ISR);
+	 if (isr_reg & LL_USART_ISR_NE)
+	 {
+	 // Turn LED3 on: Transfer error in reception/transmission process
+	 HAL_GPIO_TogglePin(LED3_GPIO_Port, LED3_Pin); // LED_RED
+	 }
+	 else
+	 {
+	 // Turn LED3 on: Transfer error in reception/transmission process
+	 HAL_GPIO_TogglePin(LED3_GPIO_Port, LED3_Pin); // LED_RED
+	 }*/
 }
 
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) {
-  if ((HAL_IS_BIT_SET(huart->Instance->CR3, USART_CR3_DMAR)) ||
-      ((huart->ErrorCode & (HAL_UART_ERROR_RTO | HAL_UART_ERROR_ORE)) != 0U))
-  {
-	  if (HAL_UART_Init(huart) != HAL_OK){
-	    Error_Handler();
-	  }
-	  LL_USART_EnableIT_RXNE(huart->Instance);
+	if ((HAL_IS_BIT_SET(huart->Instance->CR3, USART_CR3_DMAR))
+			|| ((huart->ErrorCode & (HAL_UART_ERROR_RTO | HAL_UART_ERROR_ORE)) != 0U)) {
+		if (HAL_UART_Init(huart) != HAL_OK) {
+			Error_Handler();
+		}
+		LL_USART_EnableIT_RXNE(huart->Instance);
 		LL_USART_EnableIT_ERROR(huart->Instance);
-  }
+	}
+}
+
+void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *htim) {
+	if (htim->Instance == TIM17) {
+		RocketFactory_MS5611OCCallback();
+	}
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
-    if (htim->Instance == TIM17) {
-    	processRocketEventsInterruptCount++;
-    	if (arr_update_pending) {
-    		TIM17->ARR = tim17_arr;
-    		arr_update_pending = false;
-    	}
-    }
+	if (htim->Instance == TIM17) {
+		processRocketEventsInterruptCount++;
+		if (arr_update_pending) {
+			TIM17->ARR = tim17_arr;
+			arr_update_pending = false;
+		}
+	}
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
-	if (GPIO_Pin == GPIO_PIN_6)	{
-    tim17_cnt_pps = TIM17->CNT;
+	if (GPIO_Pin == GPIO_PIN_6) {
 		pps_this_ts = TIM2->CNT;
-		elapsed = pps_this_ts - pps_last_ts;
-		pps_period_err = elapsed - 1000000;
+		if (pps_last_ts != 0) {
+			elapsed = pps_this_ts - pps_last_ts;
+			if (elapsed > 950000 && elapsed < 1050000) {
+				tim17_arr = (tim17_arr + 1) * (1 - alpha) + (elapsed / SAMPLES_PER_SECOND) * alpha - 1;
+				if (tim17_arr > 55000)
+					tim17_arr = 55000;
+				if (tim17_arr < 45000)
+					tim17_arr = 45000;
+				arr_update_pending = true;
+			}
+		}
 		pps_last_ts = pps_this_ts;
-
-    if (pps_period_err > -200 && pps_period_err < 200)
-        return;
-    tim17_arr = elapsed / SAMPLES_PER_SECOND - 1;
-    arr_update_pending = true;
-		pps_update_pending = true;
-		pps_count++;
 	}
 }
 
@@ -308,11 +302,10 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return state */
-  __disable_irq();
-  while (1)
-  {
-  }
+	/* User can add his own implementation to report the HAL error return state */
+	__disable_irq();
+	while (1) {
+	}
   /* USER CODE END Error_Handler_Debug */
 }
 #ifdef USE_FULL_ASSERT

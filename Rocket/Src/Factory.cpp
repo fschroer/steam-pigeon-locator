@@ -1,4 +1,3 @@
-
 extern "C" {
 #include "adc.h"
 //#include <stdio.h>
@@ -19,63 +18,57 @@ extern "C" {
 
 constexpr bool test_mode = false;
 
-PowerManagement* batt = new PowerManagement(&hadc);
+PowerManagement *batt = new PowerManagement(&hadc);
 
-Factory::Factory(UART_HandleTypeDef& huart2,
-    SPI_HandleTypeDef& hspi2,
-    I2C_HandleTypeDef& hi2c2,
-		ADC_HandleTypeDef& hadc)
-: huart2_(huart2),
-	hspi2_(hspi2),
-	hi2c2_(hi2c2),
-	hadc_(hadc),
-	flight_(navigation_, archive_, power_),
-	navigation_(&hspi2, &hi2c2, CS_IMU_GPIO_Port, CS_IMU_Pin, CSB_ALT_GPIO_Port, CSB_ALT_Pin),
-	comm_(flight_, navigation_, archive_, power_, deploy_),
-	flash_(&hspi2_, CSB_MEM_GPIO_Port, CSB_MEM_Pin),
-	archive_(flash_),
-	config_(flight_, comm_, archive_, deploy_, huart2_),
-	power_(&hadc),
-	deploy_() {
+Factory::Factory(UART_HandleTypeDef &huart2, SPI_HandleTypeDef &hspi2, I2C_HandleTypeDef &hi2c2,
+		ADC_HandleTypeDef &hadc, TIM_HandleTypeDef &htim17) :
+		huart2_(huart2), hspi2_(hspi2), hi2c2_(hi2c2), hadc_(hadc), flight_(navigation_, archive_, power_), navigation_(
+				&hspi2, &hi2c2, &htim17, CS_IMU_GPIO_Port, CS_IMU_Pin, CSB_ALT_GPIO_Port, CSB_ALT_Pin), comm_(flight_,
+				navigation_, archive_, power_, deploy_), flash_(&hspi2_, CSB_MEM_GPIO_Port, CSB_MEM_Pin), archive_(
+				flash_), config_(flight_, comm_, archive_, deploy_, huart2_), power_(&hadc), deploy_() {
 }
 
-void Factory::Init(const Radio_s* radio) {
+void Factory::Init(const Radio_s *radio) {
 //  usart_write_bind(USART2);
-  radio_adapter_ = new StRadioAdapter(radio);
-  comm_.Init(*radio_adapter_);
-  navigation_.Init(SAMPLES_PER_SECOND);
-  flight_.Init();
-  archive_.Init();
-  RgbLed(RgbColor::Off);
+	archive_.Init();
+	radio_adapter_ = new StRadioAdapter(radio);
+	comm_.Init(*radio_adapter_);
+	navigation_.Init(SAMPLES_PER_SECOND);
+	flight_.Init();
+	RgbLed(RgbColor::Off);
 }
 
 void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 	FlightStates flight_state = flight_.GetFlightState();
+	navigation_.SetD1Converted();
 	switch (device_state_) {
-		case DeviceState::Disarmed:
-			DisableDeployment();
-			navigation_.Update();
-			switch (rocket_service_count) {
-				case 0 : {
-					power_.enableDivider(); // Allow time for divider voltage to settle
-					break;
-				}
-				case 2 : {
-					navigation_.CalibrateOnPadAndZeroAglUntilLaunch(flight_state);
-					RgbLed(RgbColor::Blue);
-					comm_.SendPreLaunchData();
-					HAL_TIM_PWM_Stop(&htim16, TIM_CHANNEL_1);
-				}
-				case 8 :
-					RgbLed(RgbColor::Off);
-				    break;
-			}
-		  break;
-    case DeviceState::Armed:
+	case DeviceState::Disarmed:
+		DisableDeployment();
+		navigation_.Update();
+		switch (rocket_service_count) {
+		case 0: {
+			power_.enableDivider(); // Allow time for divider voltage to settle
+			break;
+		}
+		case 2: {
+			navigation_.CalibrateOnPadAndZeroAglUntilLaunch(flight_state);
+			RgbLed(RgbColor::Blue); // Blink LoRa transmit LED for visual validation
+			comm_.SendPreLaunchData();
+			HAL_TIM_PWM_Stop(&htim16, TIM_CHANNEL_1);
+			break;
+		}
+		case 5:
+			RgbLed(RgbColor::Off);
+			break;
+		}
+		break;
+	case DeviceState::Armed:
 		EnableDeployment();
 		navigation_.Update();
-		if (flight_state == FlightStates::WaitingLaunch && !archive_.IsActiveOpen()) {
-			archive_.OpenNewFlight();
+		if (flight_state == FlightStates::WaitingLaunch) {
+			if (!archive_.IsActiveOpen())
+				archive_.OpenNewFlight();
+			BuzzerSequence(Armed);
 		}
 		flight_.UpdateFlightState();
 		if (flight_state >= FlightStates::Launched && !datestamp_saved_) {
@@ -85,28 +78,27 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 				datestamp_saved_ = true;
 			}
 		}
-		if (flight_state == FlightStates::Landed && archive_.IsActiveOpen()) {
-			archive_.CloseCurrentFlight();
-		}
-		if (flight_state == FlightStates::WaitingLaunch || flight_state == FlightStates::Landed) {
-			BuzzerSequence();
+		if (flight_state == FlightStates::Landed) {
+			if (archive_.IsActiveOpen())
+				archive_.CloseCurrentFlight();
+			BuzzerSequence(Landed);
 		}
 		switch (rocket_service_count) {
-			case 2:
-				if (flight_state == FlightStates::WaitingLaunch) { // Blink LoRa transmit LED for visual validation
-					navigation_.CalibrateOnPadAndZeroAglUntilLaunch(flight_state);
-					RgbLed(RgbColor::Blue);
-					comm_.SendTelemetryData();
-				}
-				break;
-			case 8 :
-				RgbLed(RgbColor::Off);
-			    break;
+		case 2:
+			if (flight_state == FlightStates::WaitingLaunch) {
+				navigation_.CalibrateOnPadAndZeroAglUntilLaunch(flight_state);
+			}
+			RgbLed(RgbColor::Blue); // Blink LoRa transmit LED for visual validation
+			comm_.SendTelemetryData();
+			break;
+		case 5:
+			RgbLed(RgbColor::Off);
+			break;
 		}
 		break;
-    case DeviceState::Config:
-      break;
-    case DeviceState::Test: {
+	case DeviceState::Config:
+		break;
+	case DeviceState::Test: {
 		int16_t test_deploy_count = deploy_.GetTestDeployCount();
 		if (test_deploy_count >= 0 && test_deploy_count % SAMPLES_PER_SECOND == 0) {
 			comm_.SendTestCountdownMessage(test_deploy_count);
@@ -120,13 +112,13 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 		}
 		break;
 	}
-    case DeviceState::DataRequested:
-      if (flight_profile_wait_count_ == 0)
-        comm_.SendFlightProfileData();
+	case DeviceState::DataRequested:
+		if (flight_profile_wait_count_ == 0)
+			comm_.SendFlightProfileData();
 //      if (flight_profile_wait_count_++ > FLIGHT_DATA_REQUEST_TIMEOUT) // Revert to idle state if no additional flight data requests received
 //        device_state_ = DeviceState::Disarmed;
-      break;
-  }
+		break;
+	}
 }
 
 void Factory::OnRadioTxDone() {
@@ -138,57 +130,9 @@ void Factory::OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_
 }
 
 void Factory::ProcessUART2Char(uint8_t uart_char) {
-  config_.ProcessChar(uart_char, device_state_);
+	config_.ProcessChar(uart_char, device_state_);
 }
 
-//int _write(int file, char *ptr, int len) {
-//    for (int i = 0; i < len; i++) {
-//        while (!LL_USART_IsActiveFlag_TXE(USART2));
-//        LL_USART_TransmitData8(USART2, ptr[i]);
-//    }
-//    while (!LL_USART_IsActiveFlag_TC(USART2));
-//    return len;
-//}
-//
-//void RocketFactory::FlashTest(MX25L6436F& flash)
-//{
-//    const uint32_t testAddr = 0x00010000;   // pick a safe 4K sector
-//    const size_t   testLen  = 256;          // one page
-//    uint8_t writeBuf[testLen];
-//    uint8_t readBuf[testLen];
-//
-//    // Fill write buffer with a pattern
-//    for (size_t i = 0; i < testLen; i++)
-//        writeBuf[i] = static_cast<uint8_t>(i);
-//
-//    printf("Erasing 4K sector...\n");
-//    if (!flash.EraseSector4K(testAddr)) {
-//        printf("Erase FAILED\n");
-//        return;
-//    }
-//    printf("Erase OK\n");
-//
-//    printf("Writing %u bytes...\n", (unsigned)testLen);
-//    if (!flash.Write(testAddr, writeBuf, testLen)) {
-//        printf("Write FAILED\n");
-//        return;
-//    }
-//    printf("Write OK\n");
-//
-//    printf("Reading back...\n");
-//    if (!flash.Read(testAddr, readBuf, testLen)) {
-//        printf("Read FAILED\n");
-//        return;
-//    }
-//
-//    // Verify
-//    for (size_t i = 0; i < testLen; i++) {
-//        if (readBuf[i] != writeBuf[i]) {
-//            printf("VERIFY FAIL at %u: wrote %02X, read %02X\n",
-//                   (unsigned)i, writeBuf[i], readBuf[i]);
-//            return;
-//        }
-//    }
-//
-//    printf("Flash test PASSED\n");
-//}
+void Factory::MS5611OCCallback() {
+	navigation_.MS5611OCCallback();
+}

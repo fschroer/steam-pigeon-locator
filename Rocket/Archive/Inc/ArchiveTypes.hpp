@@ -38,7 +38,7 @@ namespace FlightArchive
 
 #pragma pack(push, 1)
 
-struct ExampleFlightSample
+struct FlightSample
 {
 		uint32_t timestamp_ms;
 		Vec3f accel;
@@ -50,7 +50,7 @@ struct ExampleFlightSample
 
 #pragma pack(pop)
 
-    static_assert(IsSerializable<ExampleFlightSample>(), "ExampleFlightSample must be serializable.");
+    static_assert(IsSerializable<FlightSample>(), "ExampleFlightSample must be serializable.");
 
     using ExampleEventStats = EventStatTraits<ExampleStatId, 8u>;
 }

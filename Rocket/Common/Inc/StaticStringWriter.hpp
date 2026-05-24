@@ -18,8 +18,23 @@ public:
 
     constexpr void Clear() { buffer_.Clear(); }
 
+    // Flush buffer to USART (blocking)
+    HAL_StatusTypeDef Flush(uint32_t timeout = HAL_MAX_DELAY) {
+        return HAL_UART_Transmit(
+            uart_,
+            reinterpret_cast<const uint8_t*>(buffer_.CStr()),
+            buffer_.Size(),
+            timeout
+        );
+    }
+
     template <typename... Args>
-    bool WriteMany(const Args&... args) { return buffer_.AppendMany(args...); }
+    bool WriteMany(const Args&... args) {
+    	Clear();
+    	bool success = buffer_.AppendMany(args...);
+    	Flush();
+    	return success;
+    }
 
     bool WritePadded(std::string_view sv, std::size_t width, char pad_char = ' ') {
         return buffer_.AppendPadded(sv, width, pad_char);
@@ -35,16 +50,6 @@ public:
 
     bool WritePadded(float value, std::size_t width, uint32_t frac_digits, char pad_char = ' ') {
         return buffer_.AppendPadded(value, width, frac_digits, pad_char);
-    }
-
-    // Flush buffer to USART (blocking)
-    HAL_StatusTypeDef Flush(uint32_t timeout = HAL_MAX_DELAY) {
-        return HAL_UART_Transmit(
-            uart_,
-            reinterpret_cast<const uint8_t*>(buffer_.CStr()),
-            buffer_.Size(),
-            timeout
-        );
     }
 
 private:

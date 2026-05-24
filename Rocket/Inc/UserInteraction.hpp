@@ -107,7 +107,7 @@ private:
   const char* test_menu_intro_ = "Rocket Locator Test Menu\r\n\r\n\0";
   const char* test_deploy1_text_ = "1) Test Deployment Channel 1\r\n\0";
   const char* test_deploy2_text_ = "2) Test Deployment Channel 2\r\n\0";
-  const char* test_exit_text_ = "Exiting Data Menu\r\n\r\n\0";
+  const char* test_exit_text_ = "Exiting Test Menu\r\n\r\n\0";
   const char* test_guidance_text_ = "\r\nSelect an option and deployment test will fire in 10 seconds\r\n";
   const char* test_complete_text_ = "Test complete, exiting test mode.\r\n\r\n\0";
 

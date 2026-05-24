@@ -16,6 +16,34 @@ void FormatUint(char* out, uint32_t value)
     out[count] = '\0';
 }
 
+void FormatUintRight(char* out, uint32_t value, uint32_t width)
+{
+    char tmp[10];
+    uint32_t count = 0;
+
+    // Convert to reversed decimal into tmp[]
+    do {
+        tmp[count++] = '0' + (value % 10);
+        value /= 10;
+    } while (value);
+
+    // Compute left padding
+    uint32_t pad = 0;
+    if (width > count)
+        pad = width - count;
+
+    // Fill left padding with spaces
+    for (uint32_t i = 0; i < pad; i++)
+        out[i] = ' ';
+
+    // Copy digits in correct order
+    for (uint32_t i = 0; i < count; i++)
+        out[pad + i] = tmp[count - 1 - i];
+
+    // Null‑terminate
+    out[pad + count] = '\0';
+}
+
 void FormatFloat(char* out, float value, uint32_t frac_digits)
 {
     char* p = out;
@@ -63,6 +91,76 @@ void FormatFloat(char* out, float value, uint32_t frac_digits)
     }
 
     *p = '\0';
+}
+
+void FormatFloatRight(char* out, float value, uint32_t frac_digits, uint32_t width)
+{
+    char tmp[32];   // temporary full formatted float
+    char* p = tmp;
+
+    // ---- Sign ----
+    if (value < 0.0f) {
+        *p++ = '-';
+        value = -value;
+    }
+
+    // ---- Integer part ----
+    uint32_t ip = (uint32_t)value;
+
+    float scale_f = 1.0f;
+    for (uint32_t i = 0; i < frac_digits; i++)
+        scale_f *= 10.0f;
+
+    // ---- Fractional part with rounding ----
+    uint32_t fp = (uint32_t)((value - (float)ip) * scale_f + 0.5f);
+    if (fp >= (uint32_t)scale_f) {
+        fp = 0;
+        ip += 1;
+    }
+
+    // ---- Convert integer part into reversed tmp2 ----
+    char tmp2[10];
+    uint32_t count = 0;
+    do {
+        tmp2[count++] = '0' + (ip % 10);
+        ip /= 10;
+    } while (ip);
+
+    // ---- Write integer digits in correct order ----
+    for (uint32_t i = 0; i < count; i++)
+        *p++ = tmp2[count - 1 - i];
+
+    // ---- Fractional digits ----
+    if (frac_digits > 0) {
+        *p++ = '.';
+
+        uint32_t pow10 = 1;
+        for (uint32_t i = 1; i < frac_digits; i++)
+            pow10 *= 10;
+
+        for (uint32_t i = 0; i < frac_digits; i++) {
+            uint32_t digit = fp / pow10;
+            *p++ = '0' + digit;
+            fp -= digit * pow10;
+            pow10 /= 10;
+        }
+    }
+
+    *p = '\0';
+
+    // ---- Right‑justify into output buffer ----
+    uint32_t len = (uint32_t)(p - tmp);
+    uint32_t pad = (width > len) ? (width - len) : 0;
+
+    // left padding
+    for (uint32_t i = 0; i < pad; i++)
+        out[i] = ' ';
+
+    // copy formatted float
+    for (uint32_t i = 0; i < len; i++)
+        out[pad + i] = tmp[i];
+
+    out[pad + len] = '\0';
 }
 
 // Converts a Unix timestamp (seconds since 1970-01-01 UTC)

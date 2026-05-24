@@ -33,6 +33,53 @@ enum class ParseResult {
     UnknownType
 };
 
+template<typename T>
+ParseResult decode_into(const uint8_t* data, std::size_t len, T& out)
+{
+    static_assert(std::is_trivially_copyable_v<T>,
+                  "Message type must be trivially copyable");
+
+    if (len != sizeof(T))
+        return ParseResult::LengthMismatch;
+
+    std::memcpy(&out, data, sizeof(T));
+    return ParseResult::Ok;
+}
+
+template<MsgType M> struct MsgTraits;
+
+template<> struct MsgTraits<MsgType::LocatorCfgChgRequest> {
+    using type = LocatorSettings;
+    static constexpr auto field = &ParsedMessage::locator_settings;
+};
+
+template<> struct MsgTraits<MsgType::FlightDataAck> {
+    using type = FlightDataAck;
+    static constexpr auto field = &ParsedMessage::flight_data_ack;
+};
+
+template<> struct MsgTraits<MsgType::FlightDataRequest> {
+    using type = FlightDataRequest;
+    static constexpr auto field = &ParsedMessage::flight_data_request;
+};
+
+template<> struct MsgTraits<MsgType::DeploymentTestRequest> {
+    using type = DeploymentTestRequest;
+    static constexpr auto field = &ParsedMessage::deployment_test_request;
+};
+
+template<MsgType M>
+ParseResult decode_message(const uint8_t* data, std::size_t len, ParsedMessage& out)
+{
+    auto field = MsgTraits<M>::field;
+
+    auto result = decode_into(data, len, out.*field);
+    if (result == ParseResult::Ok)
+        out.type = M;
+
+    return result;
+}
+
 // Simple radio interface so we don't hide globals
 class IRadio
 {
@@ -61,7 +108,7 @@ public:
   void SendTestCountdownMessage(uint16_t test_deploy_count);
   void SendFlightProfileMetadata();
   void SendFlightProfileData();
-  void BeginTransfer(const FlightArchive::ExampleFlightSample* samples,
+  void BeginTransfer(const FlightArchive::FlightSample* samples,
       uint32_t total_samples);
 
   // Call periodically from main loop or task
@@ -80,7 +127,7 @@ private:
 
   static constexpr uint32_t kRetxTimeoutMs   = 200;
   static constexpr uint16_t kMaxPackets      = 256;
-  const FlightArchive::ExampleFlightSample* samples_ = nullptr;
+  const FlightArchive::FlightSample* samples_ = nullptr;
   size_t sample_count_;
   uint32_t total_samples_ = 0;
 
@@ -174,7 +221,7 @@ private:
       // 2) Skip CRC field (bytes 4–5)
       // 3) Hash everything after header
       const size_t payload_offset = sizeof(PacketHeader);
-      const size_t payload_len    = sizeof(TMsg) - payload_offset;
+//      const size_t payload_len    = sizeof(TMsg) - payload_offset;
 
       for (size_t i = payload_offset; i < sizeof(TMsg); ++i)
           crc = Crc16Update(crc, bytes[i]);
@@ -243,7 +290,6 @@ private:
 
 	  return crc == hdr->crc;
 	}
-
 
 };
 } // namespace Communication
