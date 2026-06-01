@@ -130,6 +130,13 @@ SECTIONS
     . = ALIGN(4);
   } >FLASH
 
+	.noinit (NOLOAD) : /* Added for fault logger 5/28/2026 */
+   	{
+	  . = ALIGN(4);
+	  KEEP(*(.noinit))
+	  . = ALIGN(4);
+   	} >RAM
+
   /* Used by the startup to initialize data */
   _sidata = LOADADDR(.data);
 

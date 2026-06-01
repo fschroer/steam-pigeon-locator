@@ -56,6 +56,7 @@ constexpr size_t kPayloadSize = kMaxPayloadBytes - sizeof(PacketHeader)   // hea
 
 struct StartupMessage {
 	PacketHeader packet_header;
+	uint32_t serial_number;
 	uint8_t version[64];
 };
 

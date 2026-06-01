@@ -8,6 +8,7 @@ extern "C" {
 }
 
 #include "FlightManager.hpp"
+#include "DeviceUID.hpp"
 #include "Navigation.hpp"
 #include "Communication.hpp"
 #include "Archive.hpp"
@@ -17,7 +18,6 @@ extern "C" {
 #include "MX25L6436F.hpp"
 #include "StRadioAdapter.hpp"
 #include "Deployment.hpp"
-//#include <Speaker.hpp>
 
 enum FlightProfileState {
 	kIdle = 0, kMetadataRequested = 1
@@ -43,12 +43,15 @@ public:
 	};
 	void MS5611OCCallback();
 private:
+	void UartSend(const char* msg);
+
 	UART_HandleTypeDef &huart2_;
 	SPI_HandleTypeDef &hspi2_;
 	I2C_HandleTypeDef &hi2c2_;
 	ADC_HandleTypeDef &hadc_;
 	const Radio_s *radio_ = nullptr;
 
+    DeviceUID deviceUID_;
 	FlightManager flight_;
 	RocketNav::Navigation navigation_;
 	Communication::Communication comm_;
@@ -60,10 +63,6 @@ private:
 	Deployment deploy_;
 
 	RocketPersistentSettings rocket_settings_;
-
-	const char *lora_startup_message_ = "Rocket Locator v1.3.1\r\n\0";
-	const char *usb_connected_ = "Disconnect USB cable before arming locator\r\n\0";
-	const char *bad_gps_data_ = "Bad GPS Data\r\n\0";
 
 	DeviceState device_state_ = DeviceState::Disarmed;
 	int peripheral_interrupt_count_ = 0;
@@ -80,5 +79,5 @@ private:
 	uint8_t flight_profile_wait_count_ = 0;
 
 	uint32_t start_time_ = 0;
-
+	bool nav_test_requested_ = false;
 };

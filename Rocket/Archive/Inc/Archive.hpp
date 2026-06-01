@@ -1,5 +1,6 @@
 #pragma once
 #include <ArchiveTypes.hpp>
+#include "DeviceUID.hpp"
 #include "FlashDriver.hpp"
 #include "FlightArchive.hpp"
 #include "RocketSettings.hpp"
@@ -15,22 +16,26 @@ FlightArchive::ExampleEventStats,
 
 class Archive {
 public:
-	explicit Archive(IFlashDriver &flash);
+	explicit Archive(DeviceUID& deviceUID, IFlashDriver &flash);
 	bool Init();
 	bool OpenNewFlight();
 	bool InitializeArchive();
 	bool IsInitialized();
 	template<typename TValue>
 	bool WriteEvent(FlightArchive::ExampleStatId stat_id, const TValue &value);
-//  bool WriteData(const NavSolution& nav_solution);
-	bool WriteData(uint32_t flight_time_ms, const BaroSample &baro_sample, const ImuSample &imu_sample,
-			const GpsSample &gps_sample);
+	bool WriteData(uint32_t flight_time_ms, const NavSolution &nav_solution, const float raw_baro_altitude_agl,
+			const float raw_baro_velocity);
 	bool CloseCurrentFlight();
 	template<typename TValue>
 	bool ReadEvent(uint16_t record_id, FlightArchive::ExampleStatId statId, TValue &valueOut, bool &presentOut) const;
 	bool GetFlightSampleCount(uint16_t record_id, uint32_t &sample_count_out) const;
 	bool ReadFlightData(uint16_t record_id, FlightArchive::FlightSample *out_samples, uint32_t max_samples,
 			uint32_t &samples_read_out) const;
+	bool ReadFlightDataRange(uint16_t recordId,
+	                         uint32_t startSampleIndex,
+							 FlightArchive::FlightSample *out_samples,
+	                         uint32_t maxSamplesToRead,
+	                         uint32_t& samplesReadOut) const;
 
 	RocketPersistentSettings& GetLocatorSettings() {
 		return locator_settings_;
@@ -48,6 +53,7 @@ private:
 	static FlightArchive::PersistentSettingsJournal::Config MakePersistentStore();
 	static FlightArchive::RuntimeMetadataJournal::Config MakeRuntimeStore();
 
+	DeviceUID &deviceUID_;
 	IFlashDriver &flash_;
 	RocketArchive archive_;
 	FlightArchive::PersistentSettingsJournal persistentStore_;

@@ -8,53 +8,155 @@
 
 namespace RocketNav {
 
+// ---------------------------------------------------------------------------
+// EKF phase parameter table indexed by FlightStates enum value.
+//
+// Q and R rationale per phase:
+//
+//   WaitingLaunch / Landed:
+//     Q_vel=0.01   Pad vibration is the only unmodelled acceleration.
+//     Q_att=5e-6   Matches typical ISM6HG256X low-g gyro ARW.
+//     Q_gbias=1e-9 Bias nearly constant when cold and still.
+//     Q_abias=1e-6 Same.
+//     R_baro=0.25  Sigma=0.5m.  Baro fully equalized; trust it.
+//
+//   Launched (powered):
+//     Q_vel=50.0   Motor thrust variation + high-g accel channel noise.
+//     Q_att=5e-3   Vibration corrupts gyro; widen to allow GPS correction
+//                  at burnout.
+//     Q_gbias=1e-7 Vibration transiently shifts bias.
+//     Q_abias=1e-4 Same.
+//     R_baro=25.0  Sigma=5m.  Port-hole lag causes baro to read behind
+//                  true altitude during fast ascent; let IMU drive altitude.
+//
+//   Burnout (quiet coast, baro recovering):
+//     Q_vel=1.0    Drag variation; no motor disturbance.
+//     Q_att=5e-6   Low-g channel re-selected; quiet air.
+//     Q_gbias=1e-9
+//     Q_abias=1e-6
+//     R_baro=1.0   Sigma=1m.  Baro catching up; moderate trust.
+//
+//   Noseover through MainBackupEvent (descent under canopy):
+//     Q_vel=3.0    Parachute oscillation.
+//     Q_att=1e-4   Pendulum motion under canopy.
+//     Q_gbias=1e-9
+//     Q_abias=1e-6
+//     R_baro=0.25  Sigma=0.5m.  Slow descent; fully equalized baro;
+//                  critical phase for deployment altitude accuracy.
+//
+// TUNING NOTE: R_baro for the Launched phase is the most impactful parameter
+// to adjust from flight data.  See flight tuning guide for procedure.
+// ---------------------------------------------------------------------------
+struct PhaseParams {
+    float q_vel;
+    float q_att;
+    float q_gbias;
+    float q_abias;
+    float r_baro;
+    float q_alt;    // altitude process noise (m²/s) — drives P[2,2] at steady state
+};
+
+static constexpr PhaseParams kPhaseParams[] = {
+    { 0.01f,  5e-6f,  1e-9f,  1e-6f,  0.25f,  0.05f },  // WaitingLaunch [0]
+    { 50.0f,  5e-3f,  1e-7f,  1e-4f,  25.0f,  1.0f  },  // Launched      [1]
+    {  1.0f,  5e-6f,  1e-9f,  1e-6f,   1.0f,  0.2f  },  // Burnout       [2]
+    {  3.0f,  1e-4f,  1e-9f,  1e-6f,  0.25f,  0.1f  },  // Noseover      [3]
+    {  3.0f,  1e-4f,  1e-9f,  1e-6f,  0.25f,  0.1f  },  // DroguePrimary [4]
+    {  3.0f,  1e-4f,  1e-9f,  1e-6f,  0.25f,  0.1f  },  // DrogueBackup  [5]
+    {  3.0f,  1e-4f,  1e-9f,  1e-6f,  0.25f,  0.1f  },  // MainPrimary   [6]
+    {  3.0f,  1e-4f,  1e-9f,  1e-6f,  0.25f,  0.1f  },  // MainBackup    [7]
+    { 0.01f,  5e-6f,  1e-9f,  1e-6f,  0.25f,  0.05f },  // Landed        [8]
+};
+
+// ---------------------------------------------------------------------------
+// Constructor
+// ---------------------------------------------------------------------------
 InsEkf15::InsEkf15() {
-    setIdentityP(1.0f);
+    initializePDiagonal();
     std::memset(Q, 0, sizeof(Q));
-
-    // Process noise defaults.
-    Q[3*15+3] = 2.0f;
-    Q[4*15+4] = 2.0f;
-    Q[5*15+5] = 2.0f;
-    Q[6*15+6] = 0.01f;
-    Q[7*15+7] = 0.01f;
-    Q[8*15+8] = 0.01f;
-    Q[9*15+9] = 1e-5f;
-    Q[10*15+10] = 1e-5f;
-    Q[11*15+11] = 1e-5f;
-    Q[12*15+12] = 1e-4f;
-    Q[13*15+13] = 1e-4f;
-    Q[14*15+14] = 1e-4f;
+    setPhase(FlightStates::WaitingLaunch);
 }
 
-void InsEkf15::setIdentityP(float diag) {
+// ---------------------------------------------------------------------------
+// initializePDiagonal
+// Replaces the original setIdentityP(1.0f) which set accel bias uncertainty
+// to 1 m/s2 (~100g) and gyro bias to 1 rad/s (~57 deg/s), causing large
+// spurious bias corrections in the first several seconds after power-on.
+// ---------------------------------------------------------------------------
+void InsEkf15::initializePDiagonal() {
     std::memset(P, 0, sizeof(P));
-    for (int i = 0; i < 15; ++i) P[i*15 + i] = diag;
+    // Position: 5m CEP GPS accuracy at startup
+    P[0*15+0] = 25.0f;  P[1*15+1] = 25.0f;  P[2*15+2] = 25.0f;
+    // Velocity: 0.5 m/s assumed initial error
+    P[3*15+3] = 0.25f;  P[4*15+4] = 0.25f;  P[5*15+5] = 0.25f;
+    // Attitude: 5 deg roll/pitch from accel-init; yaw is unobservable without
+    // a magnetometer so P[8,8] starts 10x larger to allow GPS to correct it.
+    P[6*15+6] = 0.0076f; P[7*15+7] = 0.0076f; P[8*15+8] = 0.076f;
+    // Gyro bias: 0.01 rad/s = ~0.6 deg/s initial uncertainty
+    P[9*15+9] = 1e-4f;  P[10*15+10] = 1e-4f; P[11*15+11] = 1e-4f;
+    // Accel bias: 0.05 m/s2 = ~5 mg initial uncertainty
+    P[12*15+12] = 2.5e-3f; P[13*15+13] = 2.5e-3f; P[14*15+14] = 2.5e-3f;
 }
 
+// ---------------------------------------------------------------------------
+// setPhase
+// ---------------------------------------------------------------------------
+void InsEkf15::setPhase(FlightStates state) {
+    const uint8_t idx = static_cast<uint8_t>(state);
+    if (idx >= sizeof(kPhaseParams) / sizeof(kPhaseParams[0])) return;
+    const PhaseParams& p = kPhaseParams[idx];
+    for (int i = 3;  i <= 5;  ++i) Q[i*15+i] = p.q_vel;
+    for (int i = 6;  i <= 8;  ++i) Q[i*15+i] = p.q_att;
+    for (int i = 9;  i <= 11; ++i) Q[i*15+i] = p.q_gbias;
+    for (int i = 12; i <= 14; ++i) Q[i*15+i] = p.q_abias;
+    m_R_baro  = p.r_baro;
+    m_q_alt   = p.q_alt;
+
+    // Enable horizontal position propagation only during flight.
+    // On the pad and after landing, lat/lon are held entirely by GPS corrections.
+    // This prevents attitude-error gravity leakage from causing drift.
+    switch (state) {
+        case FlightStates::Launched:
+        case FlightStates::Burnout:
+        case FlightStates::Noseover:
+        case FlightStates::DroguePrimaryEvent:
+        case FlightStates::DrogueBackupEvent:
+        case FlightStates::MainPrimaryEvent:
+        case FlightStates::MainBackupEvent:
+            m_propagate_horiz_pos_ = true;
+            break;
+        default:
+            m_propagate_horiz_pos_ = false;
+            break;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// initialize
+// ---------------------------------------------------------------------------
 bool InsEkf15::initialize(const ImuSample& imu, const BaroSample* baro, const GpsSample* gps) {
-    m_sol.timestamp_ms = imu.timestamp_ms;
-    m_sol.q_bn = Math::quatFromAccel(imu.accel_selected_mps2);
-    m_sol.euler = Math::quatToEuler(m_sol.q_bn);
-    m_sol.body_rates_rps = imu.gyro_rps;
+    m_sol.timestamp_ms    = imu.timestamp_ms;
+    m_sol.q_bn            = Math::quatFromAccel(imu.accel_selected_mps2);
+    m_sol.euler           = Math::quatToEuler(m_sol.q_bn);
+    m_sol.body_rates_rps  = imu.gyro_rps;
     m_sol.body_accel_mps2 = imu.accel_selected_mps2;
-    m_sol.nav_accel_mps2 = {0,0,0};
-    m_sol.vel_ned_mps = {0,0,0};
+    m_sol.nav_accel_mps2  = {0,0,0};
+    m_sol.vel_ned_mps     = {0,0,0};
 
     if (gps && gps->position_valid) {
-        m_sol.pos.lat_rad = gps->lat_rad;
-        m_sol.pos.lon_rad = gps->lon_rad;
-        m_sol.pos.alt_m = gps->alt_m_msl;
-        m_ref_lat_rad = gps->lat_rad;
-        m_ref_lon_rad = gps->lon_rad;
+        m_sol.pos.lat_rad    = gps->lat_rad;
+        m_sol.pos.lon_rad    = gps->lon_rad;
+        m_sol.pos.alt_m      = gps->alt_m_msl;
+        m_ref_lat_rad        = gps->lat_rad;
+        m_ref_lon_rad        = gps->lon_rad;
         m_sol.position_valid = true;
     } else {
-        m_sol.pos.alt_m = baro ? baro->altitude_m_msl : 0.0;
+        m_sol.pos.alt_m      = baro ? baro->altitude_m_msl : 0.0;
         m_sol.position_valid = false;
     }
 
     if (gps && gps->velocity_valid) {
-        m_sol.vel_ned_mps = {gps->vel_n_mps, gps->vel_e_mps, gps->vel_d_mps};
+        m_sol.vel_ned_mps    = {gps->vel_n_mps, gps->vel_e_mps, gps->vel_d_mps};
         m_sol.velocity_valid = true;
     }
 
@@ -67,364 +169,301 @@ bool InsEkf15::initialize(const ImuSample& imu, const BaroSample* baro, const Gp
     }
 
     m_sol.altitude_agl_m = 0.0f;
-    m_sol.attitude_valid = true;
-    m_initialized = true;
+    m_sol.attitude_valid  = true;
+    m_initialized         = true;
+    m_geo_cache_dirty     = true;
+
+    initializePDiagonal();
+    setPhase(FlightStates::WaitingLaunch);
     return true;
 }
 
+// ---------------------------------------------------------------------------
+// predict
+// ---------------------------------------------------------------------------
 void InsEkf15::predict(const ImuSample& imu, float dt_s) {
-    if (!m_initialized) {
-        return;
-    }
-
+    if (!m_initialized) return;
     constexpr int n = 15;
+    if (!std::isfinite(dt_s) || dt_s <= 0.0f) return;
+    if (dt_s > 0.1f) dt_s = 0.1f;
 
-    if (!std::isfinite(dt_s) || dt_s <= 0.0f) {
-        return;
-    }
-
-    // Clamp dt to something reasonable for a 20-100 Hz loop.
-    if (dt_s > 0.1f) {
-        dt_s = 0.1f;
-    }
-
-    m_sol.timestamp_ms = imu.timestamp_ms;
-    m_sol.body_rates_rps = imu.gyro_rps;
+    m_sol.timestamp_ms    = imu.timestamp_ms;
+    m_sol.body_rates_rps  = imu.gyro_rps;
     m_sol.body_accel_mps2 = imu.accel_selected_mps2;
 
-    // 1) Attitude propagation
     const Vec3f omega_b = {
         imu.gyro_rps.x - m_sol.gyro_bias_rps.x,
         imu.gyro_rps.y - m_sol.gyro_bias_rps.y,
         imu.gyro_rps.z - m_sol.gyro_bias_rps.z
     };
-
     m_sol.q_bn = Math::quatIntegrateBodyRates(m_sol.q_bn, omega_b, dt_s);
     m_sol.q_bn = Math::quatNormalize(m_sol.q_bn);
     m_sol.euler = Math::quatToEuler(m_sol.q_bn);
 
-    // 2) Specific force in body frame with accel bias removed
     const Vec3f f_b = {
         imu.accel_selected_mps2.x - m_sol.accel_bias_mps2.x,
         imu.accel_selected_mps2.y - m_sol.accel_bias_mps2.y,
         imu.accel_selected_mps2.z - m_sol.accel_bias_mps2.z
     };
-
-    // 3) Rotate specific force into NED frame
     const Vec3f f_n = Math::rotateBodyToNav(m_sol.q_bn, f_b);
 
-    // 4) Gravity in NED frame is +Down
-    const float g = static_cast<float>(WGS84::gravity(m_sol.pos.lat_rad, m_sol.pos.alt_m));
-    const Vec3f g_n{0.0f, 0.0f, g};
-
-    // Accelerometers measure specific force, so inertial acceleration is:
-    // a_n = f_n - g_n
-    Vec3f a_n = {
-        f_n.x - g_n.x,
-        f_n.y - g_n.y,
-        f_n.z - g_n.z
-    };
-
-    // Optional sanity clamp against absurd values when sitting still or during startup.
-    if (!std::isfinite(a_n.x) || !std::isfinite(a_n.y) || !std::isfinite(a_n.z)) {
-        a_n = {0.0f, 0.0f, 0.0f};
+    const double lat = m_sol.pos.lat_rad;
+    const double alt = m_sol.pos.alt_m;
+    if (m_geo_cache_dirty || std::fabs(lat - m_cached_lat) > 0.001) {
+        m_cached_RM     = WGS84::meridianRadius(lat);
+        m_cached_RN     = WGS84::primeVerticalRadius(lat);
+        m_cached_cosLat = std::cos(lat);
+        m_cached_g      = static_cast<float>(WGS84::gravity(lat, alt));
+        m_cached_lat    = lat;
+        m_geo_cache_dirty = false;
     }
 
+    Vec3f a_n = { f_n.x, f_n.y, f_n.z - m_cached_g };
+    if (!std::isfinite(a_n.x) || !std::isfinite(a_n.y) || !std::isfinite(a_n.z))
+        a_n = {0.0f, 0.0f, 0.0f};
     m_sol.nav_accel_mps2 = a_n;
 
-    // 5) Velocity update in NED
     m_sol.vel_ned_mps.x += a_n.x * dt_s;
     m_sol.vel_ned_mps.y += a_n.y * dt_s;
     m_sol.vel_ned_mps.z += a_n.z * dt_s;
 
-    // 6) Position update
-    //
-    // NED:
-    //   vN = north velocity
-    //   vE = east velocity
-    //   vD = down velocity
-    //
-    // Geodetic altitude is positive upward, so:
-    //   alt_dot = -vD
-    const double RM = WGS84::meridianRadius(m_sol.pos.lat_rad);
-    const double RN = WGS84::primeVerticalRadius(m_sol.pos.lat_rad);
-    const double cosLat = std::cos(m_sol.pos.lat_rad);
+    if (std::fabs(m_cached_cosLat) > 1e-8) {
+        // Suppress ALL inertial position propagation on the pad and after landing.
+        // The same gravity-leakage mechanism that caused horizontal drift also
+        // affects altitude: a tilt causes vel_z to spike, which integrates
+        // directly into pos.alt_m and must be corrected by baro.  With this
+        // gate in place, altitude is held purely by baro updates when on the
+        // pad -- no inertial input means no tilt-induced altitude accumulation.
+        // During flight all three axes are propagated for dead-reckoning between
+        // GPS and baro updates.
+        if (m_propagate_horiz_pos_) {
+            const double alt_dot = -static_cast<double>(m_sol.vel_ned_mps.z);
+            m_sol.pos.alt_m += alt_dot * dt_s;
 
-    if (std::fabs(cosLat) > 1e-8) {
-        const double lat_dot = static_cast<double>(m_sol.vel_ned_mps.x) / (RM + m_sol.pos.alt_m);
-        const double lon_dot = static_cast<double>(m_sol.vel_ned_mps.y) / ((RN + m_sol.pos.alt_m) * cosLat);
-        const double alt_dot = -static_cast<double>(m_sol.vel_ned_mps.z);
-
-        m_sol.pos.lat_rad += lat_dot * dt_s;
-        m_sol.pos.lon_rad += lon_dot * dt_s;
-        m_sol.pos.alt_m += alt_dot * dt_s;
+            if (m_sol.position_valid) {
+                const double lat_dot = static_cast<double>(m_sol.vel_ned_mps.x)
+                                       / (m_cached_RM + alt);
+                const double lon_dot = static_cast<double>(m_sol.vel_ned_mps.y)
+                                       / ((m_cached_RN + alt) * m_cached_cosLat);
+                m_sol.pos.lat_rad += lat_dot * dt_s;
+                m_sol.pos.lon_rad += lon_dot * dt_s;
+            }
+        }
     }
 
-    // 7) Derived outputs
-    m_sol.altitude_msl_m = static_cast<float>(m_sol.pos.alt_m);
-    m_sol.altitude_agl_m = m_sol.altitude_msl_m - m_pad_altitude_msl_m + m_pad_altitude_agl_zero_m;
-
-    m_sol.speed_mps =
-        std::sqrt(m_sol.vel_ned_mps.x * m_sol.vel_ned_mps.x +
-                  m_sol.vel_ned_mps.y * m_sol.vel_ned_mps.y +
-                  m_sol.vel_ned_mps.z * m_sol.vel_ned_mps.z);
-
-    // Positive upward vertical speed for reporting
+    m_sol.altitude_msl_m     = static_cast<float>(m_sol.pos.alt_m);
+    m_sol.altitude_agl_m     = m_sol.altitude_msl_m - m_pad_altitude_msl_m
+                                + m_pad_altitude_agl_zero_m;
+    m_sol.speed_mps          = std::sqrt(
+        m_sol.vel_ned_mps.x * m_sol.vel_ned_mps.x +
+        m_sol.vel_ned_mps.y * m_sol.vel_ned_mps.y +
+        m_sol.vel_ned_mps.z * m_sol.vel_ned_mps.z);
     m_sol.vertical_speed_mps = -m_sol.vel_ned_mps.z;
+    m_sol.attitude_valid     = true;
 
-    m_sol.attitude_valid = true;
-
-    // 8) Covariance propagation
-    //
-    // This is still simplified, but slightly less fragile than pure diagonal growth.
-    // A full 15-state INS propagation should use a properly derived F and G matrix.
-    for (int i = 0; i < n; ++i) {
+    for (int i = 0; i < n; ++i)
         P[i * n + i] += Q[i * n + i] * dt_s;
-    }
-
-    // Position error driven by velocity error uncertainty
-    P[0 * n + 0] += P[3 * n + 3] * dt_s * dt_s;
-    P[1 * n + 1] += P[4 * n + 4] * dt_s * dt_s;
-    P[2 * n + 2] += P[5 * n + 5] * dt_s * dt_s;
-
+    P[0*n+0] += P[3*n+3] * dt_s * dt_s;
+    P[1*n+1] += P[4*n+4] * dt_s * dt_s;
+    // Altitude variance growth = velocity-position coupling + explicit process noise.
+    // Without m_q_alt, baro updates at 20Hz shrink P[2,2] toward ~0.001 m², giving
+    // K_baro ≈ 0.004 and a 12+ second correction time constant for tilt events.
+    // m_q_alt (set per phase by setPhase()) keeps P[2,2] at a level where K_baro
+    // remains effective (~0.09 on pad with m_q_alt=0.05, giving ~0.5s recovery).
+    P[2*n+2] += P[5*n+5] * dt_s * dt_s + m_q_alt * dt_s;
     symmetrizeP();
 }
 
+// ---------------------------------------------------------------------------
+// updateBaro — sparse rank-1 update with 5-sigma innovation gate.
+// The 5-sigma gate rejects single-sample baro spikes (pressure transients
+// from thermal boundaries or transient port blockage) while passing
+// 99.9994% of valid measurements.
+// ---------------------------------------------------------------------------
 void InsEkf15::updateBaro(const BaroSample& baro) {
-    if (!m_initialized || !baro.valid) {
-        return;
-    }
-
-    // Measurement model:
-    // z = altitude_msl
-    // state error component uses vertical position error state at index 2
-    //
-    // This implementation assumes dx[2] is the altitude correction in meters,
-    // consistent with injectErrorState() and initialization logic.
-
+    if (!m_initialized || !baro.valid) return;
     constexpr int n = 15;
 
     const float z = baro.altitude_m_msl;
     const float h = static_cast<float>(m_sol.pos.alt_m);
-    const float y[1] = { z - h };
+    const float y = z - h;
 
-    // Tunable barometric altitude measurement noise variance.
-    // Replace with a better model if desired.
-    const float R[1] = { 4.0f }; // sigma = 2 m
+    const float S = P[2*n + 2] + m_R_baro;
+    if (S < 1e-9f || !std::isfinite(S)) return;
 
-    // H is [0 0 1 0 ... 0]
-    float PHt[n] = {0.0f};
-    for (int r = 0; r < n; ++r) {
-        PHt[r] = P[r * n + 2];
-    }
+    // Fixed absolute gate rather than the P-dependent 5-sigma gate.
+    // The 5-sigma gate (y² > 25*S) caused a ratchet failure: as ZUPT
+    // tightened P[2,2] toward a small value, the gate threshold shrank to
+    // ~3-4m.  Repeated shaking accumulated altitude past this threshold,
+    // after which every subsequent baro correction was permanently rejected
+    // and altitude drifted without bound.
+    //
+    // The MS5611 does not produce outliers when stationary — a fixed
+    // 50m threshold catches only genuine sensor failures (stuck reading,
+    // I2C error) without the ratchet problem.
+    if (std::fabs(y) > 50.0f) return;
 
-    float S[1] = { P[2 * n + 2] + R[0] };
-    if (S[0] < 1e-9f || !std::isfinite(S[0])) {
-        return;
-    }
+    const float S_inv = 1.0f / S;
+    float K[n];
+    for (int r = 0; r < n; ++r)
+        K[r] = P[r*n + 2] * S_inv;
 
-    float K[n] = {0.0f};
-    for (int r = 0; r < n; ++r) {
-        K[r] = PHt[r] / S[0];
-    }
-
-    float dx[n] = {0.0f};
-    for (int r = 0; r < n; ++r) {
-        dx[r] = K[r] * y[0];
-    }
-
+    float dx[n];
+    for (int r = 0; r < n; ++r)
+        dx[r] = K[r] * y;
     injectErrorState(dx);
 
-    // Joseph covariance update:
-    // P = (I-KH)P(I-KH)^T + KRK^T
-    float A[n * n] = {0.0f};      // A = I - K H
-    float AP[n * n] = {0.0f};
-    float Pnew[n * n] = {0.0f};
-
+    float HP[n];
+    for (int c = 0; c < n; ++c)
+        HP[c] = P[2*n + c];
     for (int r = 0; r < n; ++r) {
-        for (int c = 0; c < n; ++c) {
-            A[r * n + c] = (r == c) ? 1.0f : 0.0f;
-        }
-        A[r * n + 2] -= K[r];
+        const float kr = K[r];
+        float* Pr = &P[r*n];
+        for (int c = 0; c < n; ++c)
+            Pr[c] -= kr * HP[c];
     }
-
-    for (int r = 0; r < n; ++r) { // To do: reduce ~7.25ms processing time
-        for (int c = 0; c < n; ++c) {
-            float sum = 0.0f;
-            for (int k = 0; k < n; ++k) {
-                sum += A[r * n + k] * P[k * n + c];
-            }
-            AP[r * n + c] = sum;
-        }
-    }
-
-    for (int r = 0; r < n; ++r) { // To do: reduce ~7.3ms processing time
-        for (int c = 0; c < n; ++c) {
-            float sum = 0.0f;
-            for (int k = 0; k < n; ++k) {
-                sum += AP[r * n + k] * A[c * n + k];
-            }
-            Pnew[r * n + c] = sum + K[r] * R[0] * K[c];
-        }
-    }
-
-    std::memcpy(P, Pnew, sizeof(P));
     symmetrizeP();
 
-    m_sol.altitude_msl_m = static_cast<float>(m_sol.pos.alt_m);
-    m_sol.altitude_agl_m = m_sol.altitude_msl_m - m_pad_altitude_msl_m + m_pad_altitude_agl_zero_m;
+    m_sol.altitude_msl_m   = static_cast<float>(m_sol.pos.alt_m);
+    m_sol.altitude_agl_m   = m_sol.altitude_msl_m - m_pad_altitude_msl_m
+                              + m_pad_altitude_agl_zero_m;
     m_sol.baro_aiding_used = true;
 }
 
+// ---------------------------------------------------------------------------
+// updateGpsPosition — sparse rank-3 update with 5-sigma innovation gate.
+//
+// First-fix handling: when no GPS position has been obtained yet,
+// m_sol.pos.lat_rad/lon_rad are 0.0 (equator/prime meridian).  The
+// innovation to a real position is millions of meters, which the 5-sigma
+// gate correctly rejects — permanently, since position_valid never becomes
+// true.  The fix: on the first valid GPS fix, initialize position directly
+// rather than applying a Kalman correction.
+// ---------------------------------------------------------------------------
 void InsEkf15::updateGpsPosition(const GpsSample& gps) {
-    if (!m_initialized || !gps.position_valid) {
-        return;
-    }
-
+    if (!m_initialized || !gps.position_valid) return;
     constexpr int n = 15;
     constexpr int m = 3;
 
-    const double RM = WGS84::meridianRadius(m_sol.pos.lat_rad);
-    const double RN = WGS84::primeVerticalRadius(m_sol.pos.lat_rad);
-    const double cosLat = std::cos(m_sol.pos.lat_rad);
+    const float hAcc2 = gps.h_acc_m * gps.h_acc_m;
+    const float vAcc2 = gps.v_acc_m * gps.v_acc_m;
+    if (!std::isfinite(hAcc2) || !std::isfinite(vAcc2) || hAcc2 <= 0.0f || vAcc2 <= 0.0f) return;
 
-    if (std::fabs(cosLat) < 1e-8) {
+    // --- First fix: initialize position directly, skip Kalman correction ---
+    if (!m_sol.position_valid) {
+        m_sol.pos.lat_rad    = gps.lat_rad;
+        m_sol.pos.lon_rad    = gps.lon_rad;
+        m_sol.pos.alt_m      = gps.alt_m_msl;
+        m_ref_lat_rad        = gps.lat_rad;
+        m_ref_lon_rad        = gps.lon_rad;
+        m_sol.position_valid  = true;
+        m_sol.altitude_msl_m  = static_cast<float>(m_sol.pos.alt_m);
+        m_sol.altitude_agl_m  = m_sol.altitude_msl_m - m_pad_altitude_msl_m
+                                 + m_pad_altitude_agl_zero_m;
+        m_sol.gps_aiding_used = true;
+        m_geo_cache_dirty     = true;
+        // Set position covariance to a fixed 5 m (25 m²), NOT to hAcc2.
+        //
+        // If the GPS driver does not populate h_acc_m, it stays at its
+        // default of 9999.0f → hAcc2 ≈ 1e8 m².  Setting P = 1e8 gives
+        // K = P/(P+R) = 0.5 on every subsequent GPS update, so 1 m of GPS
+        // measurement noise at 10 Hz appears as 5 m/s position drift.
+        // Using a fixed 25 m² decouples P from the unparsed h_acc_m field.
+        P[0*n+0] = 25.0f;
+        P[1*n+1] = 25.0f;
+        P[2*n+2] = 25.0f;
         return;
     }
 
-    // Residual expressed in local meters:
-    // north, east, altitude
+    // --- Subsequent fixes: normal Kalman update with 5-sigma gate ---
+    const double RM     = WGS84::meridianRadius(m_sol.pos.lat_rad);
+    const double RN     = WGS84::primeVerticalRadius(m_sol.pos.lat_rad);
+    const double cosLat = std::cos(m_sol.pos.lat_rad);
+    if (std::fabs(cosLat) < 1e-8) return;
+
     const float y[m] = {
         static_cast<float>((gps.lat_rad - m_sol.pos.lat_rad) * (RM + m_sol.pos.alt_m)),
         static_cast<float>((gps.lon_rad - m_sol.pos.lon_rad) * (RN + m_sol.pos.alt_m) * cosLat),
         static_cast<float>(gps.alt_m_msl - m_sol.pos.alt_m)
     };
 
-    const float hAcc2 = gps.h_acc_m * gps.h_acc_m;
-    const float vAcc2 = gps.v_acc_m * gps.v_acc_m;
+    // Floor h_acc to kGpsHAccFloor regardless of what the GPS reports.
+    //
+    // Rationale: GPS position noise is typically 0.5-3 m RMS outdoors.
+    // With P[0,0] = 25 m² (5 m sigma from first-fix) and a small reported
+    // hAcc (say 2 m → hAcc2 = 4 m²), K = 25/29 = 0.86 — far too high.
+    // Each GPS noise sample of 1 m moves the EKF 0.86 m, appearing as
+    // 8.6 m/s drift at 10 Hz.  Flooring hAcc at kGpsHAccFloor ensures
+    // K ≤ P_init / (P_init + kGpsHAccFloor²) = 25/2525 ≈ 1%:
+    //   1 m GPS noise × 0.01 × 10 Hz = 0.1 m/s → effectively invisible.
+    //
+    // For the locator application (recovery accuracy ~10-50 m) this floor
+    // is conservative and appropriate.  Tune kGpsHAccFloor down toward
+    // 10-20 m for tighter trajectory tracking if desired.
+    constexpr float kGpsHAccFloor = 50.0f;   // metres — tune from flight data
+    const float hAccR = std::max(gps.h_acc_m, kGpsHAccFloor);
+    const float hAcc2R = hAccR * hAccR;
 
-    if (!std::isfinite(hAcc2) || !std::isfinite(vAcc2) || hAcc2 <= 0.0f || vAcc2 <= 0.0f) {
-        return;
-    }
+    const float R[m*m] = { hAcc2R, 0.f, 0.f,  0.f, hAcc2R, 0.f,  0.f, 0.f, vAcc2 };
 
-    const float R[m * m] = {
-        hAcc2, 0.0f,  0.0f,
-        0.0f,  hAcc2, 0.0f,
-        0.0f,  0.0f,  vAcc2
-    };
+    float S[m*m];
+    for (int r = 0; r < m; ++r)
+        for (int c = 0; c < m; ++c)
+            S[r*m+c] = P[r*n + c] + R[r*m+c];
 
-    // H selects state error position components [0 1 2]
-    float PHt[n * m] = {0.0f};
-    for (int r = 0; r < n; ++r) {
-        PHt[r * m + 0] = P[r * n + 0];
-        PHt[r * m + 1] = P[r * n + 1];
-        PHt[r * m + 2] = P[r * n + 2];
-    }
+    // 5-sigma gate: reject outliers (multipath, momentary fix loss)
+    if ((S[0*m+0] > 1e-9f && y[0]*y[0] > 25.0f * S[0*m+0]) ||
+        (S[1*m+1] > 1e-9f && y[1]*y[1] > 25.0f * S[1*m+1])) return;
 
-    float S[m * m] = {0.0f};
-    for (int r = 0; r < m; ++r) {
+    float L[m*m] = {0.f};
+    if (!Cholesky::decompose(S, L, m)) return;
+    float Sinv[m*m] = {0.f};
+    if (!Cholesky::invertFromCholesky(L, Sinv, m)) return;
+
+    float K[n*m];
+    for (int r = 0; r < n; ++r)
         for (int c = 0; c < m; ++c) {
-            S[r * m + c] = P[r * n + c] + R[r * m + c];
+            float sum = 0.f;
+            for (int k = 0; k < m; ++k)
+                sum += P[r*n + k] * Sinv[k*m + c];
+            K[r*m + c] = sum;
         }
-    }
 
-    float L[m * m] = {0.0f};
-    if (!Cholesky::decompose(S, L, m)) {
-        return;
-    }
-
-    float Sinv[m * m] = {0.0f};
-    if (!Cholesky::invertFromCholesky(L, Sinv, m)) {
-        return;
-    }
-
-    float K[n * m] = {0.0f};
-    for (int r = 0; r < n; ++r) {
-        for (int c = 0; c < m; ++c) {
-            float sum = 0.0f;
-            for (int k = 0; k < m; ++k) {
-                sum += PHt[r * m + k] * Sinv[k * m + c];
-            }
-            K[r * m + c] = sum;
-        }
-    }
-
-    float dx[n] = {0.0f};
-    for (int r = 0; r < n; ++r) {
-        dx[r] =
-            K[r * m + 0] * y[0] +
-            K[r * m + 1] * y[1] +
-            K[r * m + 2] * y[2];
-    }
-
+    float dx[n] = {0.f};
+    for (int r = 0; r < n; ++r)
+        for (int j = 0; j < m; ++j)
+            dx[r] += K[r*m + j] * y[j];
     injectErrorState(dx);
 
-    // Joseph covariance update:
-    // P = (I-KH)P(I-KH)^T + K R K^T
-    float A[n * n] = {0.0f};
-    float AP[n * n] = {0.0f};
-    float Pnew[n * n] = {0.0f};
-
+    float HP[m][n];
+    for (int i = 0; i < m; ++i)
+        for (int c = 0; c < n; ++c)
+            HP[i][c] = P[i*n + c];
     for (int r = 0; r < n; ++r) {
-        for (int c = 0; c < n; ++c) {
-            A[r * n + c] = (r == c) ? 1.0f : 0.0f;
-        }
-
-        // H = [I3 0 ...]
-        A[r * n + 0] -= K[r * m + 0];
-        A[r * n + 1] -= K[r * m + 1];
-        A[r * n + 2] -= K[r * m + 2];
+        float* Pr = &P[r*n];
+        const float k0 = K[r*m+0], k1 = K[r*m+1], k2 = K[r*m+2];
+        for (int c = 0; c < n; ++c)
+            Pr[c] -= k0*HP[0][c] + k1*HP[1][c] + k2*HP[2][c];
     }
-
-    for (int r = 0; r < n; ++r) {
-        for (int c = 0; c < n; ++c) {
-            float sum = 0.0f;
-            for (int k = 0; k < n; ++k) {
-                sum += A[r * n + k] * P[k * n + c];
-            }
-            AP[r * n + c] = sum;
-        }
-    }
-
-    for (int r = 0; r < n; ++r) {
-        for (int c = 0; c < n; ++c) {
-            float sum = 0.0f;
-            for (int k = 0; k < n; ++k) {
-                sum += AP[r * n + k] * A[c * n + k];
-            }
-
-            float KRKt = 0.0f;
-            for (int i = 0; i < m; ++i) {
-                for (int j = 0; j < m; ++j) {
-                    KRKt += K[r * m + i] * R[i * m + j] * K[c * m + j];
-                }
-            }
-
-            Pnew[r * n + c] = sum + KRKt;
-        }
-    }
-
-    std::memcpy(P, Pnew, sizeof(P));
     symmetrizeP();
 
-    m_sol.altitude_msl_m = static_cast<float>(m_sol.pos.alt_m);
-    m_sol.altitude_agl_m = m_sol.altitude_msl_m - m_pad_altitude_msl_m + m_pad_altitude_agl_zero_m;
+    m_sol.altitude_msl_m  = static_cast<float>(m_sol.pos.alt_m);
+    m_sol.altitude_agl_m  = m_sol.altitude_msl_m - m_pad_altitude_msl_m
+                             + m_pad_altitude_agl_zero_m;
     m_sol.gps_aiding_used = true;
-    m_sol.position_valid = true;
+    m_sol.position_valid  = true;
 }
 
+// ---------------------------------------------------------------------------
+// updateGpsVelocity — sparse rank-3 update with 5-sigma innovation gate.
+// ---------------------------------------------------------------------------
 void InsEkf15::updateGpsVelocity(const GpsSample& gps) {
-    if (!m_initialized || !gps.velocity_valid) {
-        return;
-    }
-
+    if (!m_initialized || !gps.velocity_valid) return;
     constexpr int n = 15;
     constexpr int m = 3;
 
     const float sAcc2 = gps.s_acc_mps * gps.s_acc_mps;
-    if (!std::isfinite(sAcc2) || sAcc2 <= 0.0f) {
-        return;
-    }
+    if (!std::isfinite(sAcc2) || sAcc2 <= 0.0f) return;
 
     const float y[m] = {
         gps.vel_n_mps - m_sol.vel_ned_mps.x,
@@ -432,117 +471,132 @@ void InsEkf15::updateGpsVelocity(const GpsSample& gps) {
         gps.vel_d_mps - m_sol.vel_ned_mps.z
     };
 
-    const float R[m * m] = {
-        sAcc2, 0.0f,  0.0f,
-        0.0f,  sAcc2, 0.0f,
-        0.0f,  0.0f,  sAcc2
-    };
+    const float R[m*m] = { sAcc2, 0.f, 0.f,  0.f, sAcc2, 0.f,  0.f, 0.f, sAcc2 };
 
-    // H selects velocity error states [3 4 5]
-    float PHt[n * m] = {0.0f};
-    for (int r = 0; r < n; ++r) {
-        PHt[r * m + 0] = P[r * n + 3];
-        PHt[r * m + 1] = P[r * n + 4];
-        PHt[r * m + 2] = P[r * n + 5];
-    }
+    float S[m*m];
+    for (int r = 0; r < m; ++r)
+        for (int c = 0; c < m; ++c)
+            S[r*m+c] = P[(r+3)*n + (c+3)] + R[r*m+c];
 
-    float S[m * m] = {0.0f};
-    for (int r = 0; r < m; ++r) {
+    if (S[0*m+0] > 1e-9f && y[0]*y[0] > 25.0f * S[0*m+0]) return; // 5-sigma gate
+
+    float L[m*m] = {0.f};
+    if (!Cholesky::decompose(S, L, m)) return;
+    float Sinv[m*m] = {0.f};
+    if (!Cholesky::invertFromCholesky(L, Sinv, m)) return;
+
+    float K[n*m];
+    for (int r = 0; r < n; ++r)
         for (int c = 0; c < m; ++c) {
-            S[r * m + c] = P[(r + 3) * n + (c + 3)] + R[r * m + c];
+            float sum = 0.f;
+            for (int k = 0; k < m; ++k)
+                sum += P[r*n + (k+3)] * Sinv[k*m + c];
+            K[r*m + c] = sum;
         }
-    }
 
-    float L[m * m] = {0.0f};
-    if (!Cholesky::decompose(S, L, m)) {
-        return;
-    }
-
-    float Sinv[m * m] = {0.0f};
-    if (!Cholesky::invertFromCholesky(L, Sinv, m)) {
-        return;
-    }
-
-    float K[n * m] = {0.0f};
-    for (int r = 0; r < n; ++r) {
-        for (int c = 0; c < m; ++c) {
-            float sum = 0.0f;
-            for (int k = 0; k < m; ++k) {
-                sum += PHt[r * m + k] * Sinv[k * m + c];
-            }
-            K[r * m + c] = sum;
-        }
-    }
-
-    float dx[n] = {0.0f};
-    for (int r = 0; r < n; ++r) {
-        dx[r] =
-            K[r * m + 0] * y[0] +
-            K[r * m + 1] * y[1] +
-            K[r * m + 2] * y[2];
-    }
-
+    float dx[n] = {0.f};
+    for (int r = 0; r < n; ++r)
+        for (int j = 0; j < m; ++j)
+            dx[r] += K[r*m + j] * y[j];
     injectErrorState(dx);
 
-    // Joseph covariance update:
-    // P = (I-KH)P(I-KH)^T + K R K^T
-    float A[n * n] = {0.0f};
-    float AP[n * n] = {0.0f};
-    float Pnew[n * n] = {0.0f};
-
+    float HP[m][n];
+    for (int i = 0; i < m; ++i)
+        for (int c = 0; c < n; ++c)
+            HP[i][c] = P[(i+3)*n + c];
     for (int r = 0; r < n; ++r) {
-        for (int c = 0; c < n; ++c) {
-            A[r * n + c] = (r == c) ? 1.0f : 0.0f;
-        }
-
-        // H selects states [3 4 5]
-        A[r * n + 3] -= K[r * m + 0];
-        A[r * n + 4] -= K[r * m + 1];
-        A[r * n + 5] -= K[r * m + 2];
+        float* Pr = &P[r*n];
+        const float k0 = K[r*m+0], k1 = K[r*m+1], k2 = K[r*m+2];
+        for (int c = 0; c < n; ++c)
+            Pr[c] -= k0*HP[0][c] + k1*HP[1][c] + k2*HP[2][c];
     }
-
-    for (int r = 0; r < n; ++r) {
-        for (int c = 0; c < n; ++c) {
-            float sum = 0.0f;
-            for (int k = 0; k < n; ++k) {
-                sum += A[r * n + k] * P[k * n + c];
-            }
-            AP[r * n + c] = sum;
-        }
-    }
-
-    for (int r = 0; r < n; ++r) {
-        for (int c = 0; c < n; ++c) {
-            float sum = 0.0f;
-            for (int k = 0; k < n; ++k) {
-                sum += AP[r * n + k] * A[c * n + k];
-            }
-
-            float KRKt = 0.0f;
-            for (int i = 0; i < m; ++i) {
-                for (int j = 0; j < m; ++j) {
-                    KRKt += K[r * m + i] * R[i * m + j] * K[c * m + j];
-                }
-            }
-
-            Pnew[r * n + c] = sum + KRKt;
-        }
-    }
-
-    std::memcpy(P, Pnew, sizeof(P));
     symmetrizeP();
 
     m_sol.gps_aiding_used = true;
-    m_sol.velocity_valid = true;
+    m_sol.velocity_valid  = true;
 }
 
+// ---------------------------------------------------------------------------
+// applyZupt
+// FIX: previous version corrected only velocity/bias states while the full
+// covariance update covered all 15 states, causing P[2,2] (altitude variance)
+// to be artificially reduced, weakening baro corrections.
+// Fix: accumulate dx across all three axes and apply via injectErrorState()
+// so state and covariance remain consistent.
+// ---------------------------------------------------------------------------
+void InsEkf15::applyZupt(float sigma_mps) {
+    if (!m_initialized) return;
+
+    // ZUPT is a velocity aiding source only.  Position states are excluded:
+    //
+    //   Altitude (2): owned by baro.  Including altitude in ZUPT causes two
+    //     problems: (a) ZUPT tightens P[2,2] via the P[2,5] cross-covariance,
+    //     reducing K_baro to near-zero so the barometer loses authority to
+    //     correct altitude transients from device motion; (b) each ZUPT cycle
+    //     applies a small altitude shift via K[2]*(-vel_z), which ratchets
+    //     altitude upward when the device is repeatedly shaken.
+    //
+    //   Horizontal position (0,1): owned by GPS.  On the pad lat/lon are not
+    //     inertially propagated (m_propagate_horiz_pos_=false) so there is no
+    //     position error for ZUPT to correct here.
+    //
+    // Zeroing K[0..2] before the P update protects P[2,2] from tightening,
+    // preserving K_baro = P[2,2]/(P[2,2]+R_baro) at a useful level.
+    // Velocity (3-5) and bias (9-14) states are corrected normally.
+    // Attitude (6-8) is corrected indirectly through P[att,vel] cross-terms.
+
+    const float R = sigma_mps * sigma_mps;
+    float dx_total[15] = {0.0f};
+
+    for (int axis = 0; axis < 3; ++axis) {
+        const int vi = axis + 3;
+        const float vel_axis = (&m_sol.vel_ned_mps.x)[axis];
+        const float y = -vel_axis;
+
+        const float S = P[vi*15 + vi] + R;
+        if (S < 1e-9f || !std::isfinite(S)) continue;
+        const float S_inv = 1.0f / S;
+
+        float K[15];
+        for (int r = 0; r < 15; ++r)
+            K[r] = P[r*15 + vi] * S_inv;
+
+        // Zero position gains — ZUPT must not correct or tighten position states.
+        K[0] = 0.0f;  // lat
+        K[1] = 0.0f;  // lon
+        K[2] = 0.0f;  // alt — baro owns this exclusively
+
+        for (int r = 0; r < 15; ++r)
+            dx_total[r] += K[r] * y;
+
+        // With K[0..2]=0, rows 0-2 of P are unchanged, protecting P[2,2].
+        float HP[15];
+        for (int c = 0; c < 15; ++c)
+            HP[c] = P[vi*15 + c];
+        for (int r = 0; r < 15; ++r) {
+            const float kr = K[r];
+            if (kr == 0.0f) continue;
+            float* Pr = &P[r*15];
+            for (int c = 0; c < 15; ++c)
+                Pr[c] -= kr * HP[c];
+        }
+    }
+
+    // dx_total[0..2] are 0.0f so injectErrorState leaves position unchanged.
+    injectErrorState(dx_total);
+    symmetrizeP();
+}
+
+// ---------------------------------------------------------------------------
+// injectErrorState
+// ---------------------------------------------------------------------------
 void InsEkf15::injectErrorState(const float dx[15]) {
     const double RM = WGS84::meridianRadius(m_sol.pos.lat_rad);
     const double RN = WGS84::primeVerticalRadius(m_sol.pos.lat_rad);
 
     m_sol.pos.lat_rad += dx[0] / (RM + m_sol.pos.alt_m);
     m_sol.pos.lon_rad += dx[1] / ((RN + m_sol.pos.alt_m) * std::cos(m_sol.pos.lat_rad));
-    m_sol.pos.alt_m += dx[2];
+    m_sol.pos.alt_m   += dx[2];
 
     m_sol.vel_ned_mps.x += dx[3];
     m_sol.vel_ned_mps.y += dx[4];
@@ -552,28 +606,35 @@ void InsEkf15::injectErrorState(const float dx[15]) {
     Quaternionf dq = Math::quatFromSmallAngle(dtheta);
     m_sol.q_bn = Math::quatNormalize(Math::quatMultiply(m_sol.q_bn, dq));
 
-    m_sol.gyro_bias_rps.x += dx[9];
-    m_sol.gyro_bias_rps.y += dx[10];
-    m_sol.gyro_bias_rps.z += dx[11];
-
+    m_sol.gyro_bias_rps.x   += dx[9];
+    m_sol.gyro_bias_rps.y   += dx[10];
+    m_sol.gyro_bias_rps.z   += dx[11];
     m_sol.accel_bias_mps2.x += dx[12];
     m_sol.accel_bias_mps2.y += dx[13];
     m_sol.accel_bias_mps2.z += dx[14];
 
-    m_sol.euler = Math::quatToEuler(m_sol.q_bn);
+    m_sol.euler          = Math::quatToEuler(m_sol.q_bn);
     m_sol.altitude_msl_m = static_cast<float>(m_sol.pos.alt_m);
+    m_geo_cache_dirty    = true;
 }
 
-void InsEkf15::zeroPadReferenceAgl(float agl_m) {
-    m_pad_altitude_msl_m = m_sol.altitude_msl_m;
+// ---------------------------------------------------------------------------
+// zeroPadReferenceAgl
+// ---------------------------------------------------------------------------
+void InsEkf15::zeroPadReferenceAgl(float pad_msl_m, float agl_m) {
+    m_pad_altitude_msl_m      = pad_msl_m;
     m_pad_altitude_agl_zero_m = agl_m;
-    m_sol.altitude_agl_m = agl_m;
+    m_sol.altitude_agl_m      = m_sol.altitude_msl_m - m_pad_altitude_msl_m
+                                 + m_pad_altitude_agl_zero_m;
 }
 
+// ---------------------------------------------------------------------------
+// applyPadGyroRecalibration / symmetrizeP
+// ---------------------------------------------------------------------------
 void InsEkf15::applyPadGyroRecalibration(const Vec3f& gyro_rps, float alpha) {
-    m_sol.gyro_bias_rps.x = (1.0f - alpha) * m_sol.gyro_bias_rps.x + alpha * gyro_rps.x;
-    m_sol.gyro_bias_rps.y = (1.0f - alpha) * m_sol.gyro_bias_rps.y + alpha * gyro_rps.y;
-    m_sol.gyro_bias_rps.z = (1.0f - alpha) * m_sol.gyro_bias_rps.z + alpha * gyro_rps.z;
+    m_sol.gyro_bias_rps.x = (1.0f - alpha)*m_sol.gyro_bias_rps.x + alpha*gyro_rps.x;
+    m_sol.gyro_bias_rps.y = (1.0f - alpha)*m_sol.gyro_bias_rps.y + alpha*gyro_rps.y;
+    m_sol.gyro_bias_rps.z = (1.0f - alpha)*m_sol.gyro_bias_rps.z + alpha*gyro_rps.z;
 }
 
 void InsEkf15::symmetrizeP() {
@@ -587,4 +648,4 @@ void InsEkf15::symmetrizeP() {
     }
 }
 
-}
+} // namespace RocketNav

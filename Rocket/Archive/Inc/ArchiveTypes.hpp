@@ -38,15 +38,28 @@ namespace FlightArchive
 
 #pragma pack(push, 1)
 
-struct FlightSample
-{
-		uint32_t timestamp_ms;
-		Vec3f accel;
-		Vec3f gyro;
-		float altitude_m;
-		double lat_rad;
-		double lon_rad;
-};
+	struct FlightSample
+	{
+			uint32_t timestamp_ms;
+			Vec3f accel;
+			Vec3f gyro;
+			float raw_baro_altitude_agl;
+			double lat_rad;
+			double lon_rad;
+	};
+
+//	struct FlightSample // new telemetry data
+//	{
+//		uint32_t timestamp_ms;
+//		float raw_baro_altitude_agl;
+//		float fused_altitude_agl;
+//		float raw_baro_velocity;
+//		float fused_vertical_speed_mps;
+//		Vec3f accel;
+//		Vec3f gyro;
+//		double lat_rad;
+//		double lon_rad;
+//	};
 
 #pragma pack(pop)
 

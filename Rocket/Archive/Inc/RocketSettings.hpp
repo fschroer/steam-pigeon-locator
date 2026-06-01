@@ -5,7 +5,7 @@
 #include <type_traits>
 #include <cstring>
 
-constexpr std::size_t device_name_length = 12;
+constexpr std::size_t device_name_length = 20;
 
 //enum class DeployMode : uint8_t
 //{

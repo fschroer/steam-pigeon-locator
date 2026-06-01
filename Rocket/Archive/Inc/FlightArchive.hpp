@@ -80,6 +80,11 @@ namespace FlightArchive
         bool ReadStat(uint16_t recordId, StatId statId, TValue& valueOut, bool& presentOut) const;
 
         bool ReadFlightData(uint16_t recordId, TSample* outSamples, uint32_t maxSamples, uint32_t& samplesReadOut) const;
+    	bool ReadFlightDataRange(uint16_t recordId,
+    	                         uint32_t startSampleIndex,
+								 TSample* out_samples,
+    	                         uint32_t maxSamplesToRead,
+    	                         uint32_t& samplesReadOut) const;
         bool RecoverFlightData(uint16_t recordId, TSample* outSamples, uint32_t maxSamples, uint32_t& samplesReadOut) const;
 
         bool GetFlightSampleCount(uint16_t recordId, uint32_t& sampleCountOut) const;

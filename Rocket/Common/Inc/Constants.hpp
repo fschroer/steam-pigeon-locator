@@ -5,7 +5,6 @@
 static constexpr uint16_t samples_per_second = SAMPLES_PER_SECOND;
 constexpr uint16_t millis_per_second = 1000;
 constexpr uint8_t altimeter_scale = 10;
-//constexpr uint8_t device_name_length = 12;
 constexpr uint8_t deploy_signal_duration = 10; // tenths of a second
 constexpr uint8_t bit_shift_mode = 0; // three bits for deployment mode
 constexpr uint8_t bit_shift_fired = 3; // one bit for deployment event

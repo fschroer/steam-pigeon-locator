@@ -52,7 +52,10 @@
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
+#define HardFault_Handler    HardFault_Handler_Unused
+#define BusFault_Handler     BusFault_Handler_Unused
+#define UsageFault_Handler   UsageFault_Handler_Unused
+#define MemManage_Handler    MemManage_Handler_Unused
 /* USER CODE END 0 */
 
 /* External variables --------------------------------------------------------*/

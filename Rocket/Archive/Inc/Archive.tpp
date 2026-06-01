@@ -6,6 +6,7 @@ bool Archive::WriteEvent(FlightArchive::ExampleStatId stat_id, const TValue& val
 }
 
 template<typename TValue>
+__attribute__((noinline))
 bool Archive::ReadEvent(uint16_t record_id, FlightArchive::ExampleStatId statId, TValue& valueOut, bool& presentOut) const {
     return archive_.ReadStat(record_id, static_cast<RocketArchive::StatId>(statId), valueOut, presentOut);
 }

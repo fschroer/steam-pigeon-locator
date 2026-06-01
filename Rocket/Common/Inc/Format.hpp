@@ -9,6 +9,7 @@ void FormatUintRight(char* out, uint32_t value, uint32_t width);
 void FormatFloat(char* out, float value, uint32_t frac_digits);
 void FormatFloatRight(char* out, float value, uint32_t frac_digits, uint32_t width);
 void FormatUnixUtc(char* out, uint32_t ts);
+void Uint32ToHex(char* out, uint32_t value);
 
 // ─────────────────────────────────────────────
 // Format descriptor structs

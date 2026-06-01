@@ -13,14 +13,26 @@ public:
     void updateGpsPosition(const GpsSample& gps);
     void updateGpsVelocity(const GpsSample& gps);
 
-    void zeroPadReferenceAgl(float agl_m = 0.0f);
+    // Zero-velocity pseudo-measurement applied when stationary on the pad.
+    // Drives all velocity states toward zero via injectErrorState so that
+    // the state vector and covariance remain consistent.
+    void applyZupt(float sigma_mps = 0.05f);
+
+    // Set EKF process noise (Q) and baro measurement noise (R) for the given
+    // flight phase.  Call from Navigation::setPhase() at each state transition.
+    void setPhase(FlightStates state);
+
+    // Set pad MSL reference.  pad_msl_m should be m_solution.altitude_msl_m
+    // (the EKF's current baro-corrected altitude) to avoid discontinuities.
+    void zeroPadReferenceAgl(float pad_msl_m, float agl_m = 0.0f);
     void applyPadGyroRecalibration(const Vec3f& gyro_rps, float alpha);
 
-    NavSolution getSolution() const { return m_sol; }
-    bool isInitialized() const { return m_initialized; }
+    NavSolution getSolution()    const { return m_sol; }
+    bool isInitialized()         const { return m_initialized; }
+    float getPadAltitudeMsl()    const { return m_pad_altitude_msl_m; }
 
 private:
-    void setIdentityP(float diag);
+    void initializePDiagonal();
     void symmetrizeP();
     void injectErrorState(const float dx[15]);
 
@@ -30,10 +42,40 @@ private:
     float P[15*15]{};
     float Q[15*15]{};
 
-    double m_ref_lat_rad = 0.0;
-    double m_ref_lon_rad = 0.0;
-    float m_pad_altitude_msl_m = 0.0f;
-    float m_pad_altitude_agl_zero_m = 0.0f;
+    double m_ref_lat_rad             = 0.0;
+    double m_ref_lon_rad             = 0.0;
+    float  m_pad_altitude_msl_m      = 0.0f;
+    float  m_pad_altitude_agl_zero_m = 0.0f;
+
+    // When false, lat/lon are NOT propagated in predict().
+    // This prevents attitude-error gravity leakage from causing horizontal
+    // position drift on the pad, where the attitude quaternion may have
+    // accumulated error before gyro bias estimation converges.
+    // Set true only during flight (Launched through MainBackupEvent) by setPhase().
+    // On the pad: GPS-only horizontal position.
+    // During flight: IMU dead-reckoning between GPS updates.
+    bool m_propagate_horiz_pos_      = false;
+
+    // Altitude process noise spectral density (m²/s).
+    // This is the primary driver of P[2,2] (altitude variance) at steady state.
+    // Without it, baro updates shrink P[2,2] toward zero, driving K_baro to ~0.004
+    // and making baro corrections take 12+ seconds — too slow to counter tilt events.
+    // Set per phase by setPhase(). Larger during powered flight (thrust variation);
+    // smaller on pad and descent (relatively stable vertical dynamics).
+    float  m_q_alt                   = 0.05f;
+
+    // Active baro noise variance — switched by setPhase() per FlightState.
+    // Increase during powered flight to reduce baro influence when port-hole
+    // lag causes the barometer to read behind the true altitude.
+    float  m_R_baro                  = 0.25f;
+
+    // WGS84 geometry cache
+    double  m_cached_RM              = 6.356752e6;
+    double  m_cached_RN              = 6.378137e6;
+    double  m_cached_cosLat          = 1.0;
+    float   m_cached_g               = 9.80665f;
+    double  m_cached_lat             = 0.0;
+    bool    m_geo_cache_dirty        = true;
 };
 
-}
+} // namespace RocketNav

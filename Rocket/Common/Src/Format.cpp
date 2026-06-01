@@ -214,3 +214,13 @@ void FormatUnixUtc(char* out, uint32_t ts)
     put2(sec,  out + 17);
     out[19] = '\0';
 }
+
+void Uint32ToHex(char *out, uint32_t value) {
+	static const char lut[] = "0123456789ABCDEF";
+
+	for (int i = 0; i < 8; i++) {
+		uint32_t shift = (7 - i) * 4;
+		out[i] = lut[(value >> shift) & 0xF];
+	}
+	out[8] = '\0';
+}

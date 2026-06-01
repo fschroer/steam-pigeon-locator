@@ -347,7 +347,8 @@ namespace FlightArchive
 
     template<typename TSample, typename TStatTraits, size_t ChunkPayloadBytes>
     template<typename TValue>
-    bool Archive<TSample, TStatTraits, ChunkPayloadBytes>::ReadStat(uint16_t recordId, StatId statId, TValue& valueOut, bool& presentOut) const
+    __attribute__((noinline))
+	bool Archive<TSample, TStatTraits, ChunkPayloadBytes>::ReadStat(uint16_t recordId, StatId statId, TValue& valueOut, bool& presentOut) const
     {
         static_assert(IsSerializable<TValue>(), "Stat value must be trivially copyable and standard layout.");
 
@@ -614,6 +615,129 @@ namespace FlightArchive
             return Crc32::Compute(outSamples, samplesReadOut * sizeof(TSample)) == t.dataCrc32;
         }
 
+        return true;
+    }
+
+    template<typename TSample, typename TStatTraits, size_t ChunkPayloadBytes>
+    bool Archive<TSample, TStatTraits, ChunkPayloadBytes>::ReadFlightDataRange(uint16_t recordId,
+                                                                               uint32_t startSampleIndex,
+                                                                               TSample* outSamples,
+                                                                               uint32_t maxSamplesToRead,
+                                                                               uint32_t& samplesReadOut) const
+    {
+        samplesReadOut = 0u;
+
+        if (!m_rt.initialized || !IsRecordIdValid(recordId) || outSamples == nullptr)
+        {
+            return false;
+        }
+
+        if (maxSamplesToRead == 0u)
+        {
+            return true;
+        }
+
+        RecordHeader h{};
+        if (!ReadHeader(recordId, h))
+        {
+            return false;
+        }
+
+        if (!ValidateHeaderForConfig(h, recordId))
+        {
+            return false;
+        }
+
+        RecordCloseTrailer t{};
+        if (!ReadCloseTrailer(recordId, t))
+        {
+            return false;
+        }
+
+        if (t.magic != CLOSE_MAGIC)
+        {
+            return false;
+        }
+
+        if (startSampleIndex >= t.committedSampleCount)
+        {
+            return true;
+        }
+
+        const Geometry g = GetGeometry();
+
+        uint32_t remainingToRead = t.committedSampleCount - startSampleIndex;
+        if (remainingToRead > maxSamplesToRead)
+        {
+            remainingToRead = maxSamplesToRead;
+        }
+
+        uint32_t globalSampleIndex = 0u;
+        uint32_t outIndex = 0u;
+
+        for (uint32_t chunk = 0u; chunk < t.committedChunkCount && outIndex < remainingToRead; ++chunk)
+        {
+            SampleChunkCommitHeader ch{};
+            if (!ReadChunkCommitHeader(recordId, static_cast<uint16_t>(chunk), ch))
+            {
+                return false;
+            }
+
+            if (ch.magic != CHUNK_MAGIC || ch.chunkIndex != chunk)
+            {
+                return false;
+            }
+
+            if (ch.sampleCount == 0u || ch.sampleCount > g.samplesPerChunk)
+            {
+                return false;
+            }
+
+            if (ch.payloadBytes != static_cast<uint32_t>(ch.sampleCount) * sizeof(TSample))
+            {
+                return false;
+            }
+
+            const uint32_t chunkStartIndex = globalSampleIndex;
+            const uint32_t chunkEndIndex = chunkStartIndex + ch.sampleCount;
+
+            // Skip chunks entirely before the requested window.
+            if (chunkEndIndex <= startSampleIndex)
+            {
+                globalSampleIndex = chunkEndIndex;
+                continue;
+            }
+
+            if (!m_flash.Read(GetChunkPayloadAddress(recordId, static_cast<uint16_t>(chunk)),
+                              m_rt.scratchBuffer,
+                              ch.payloadBytes))
+            {
+                return false;
+            }
+
+            if (Crc32::Compute(m_rt.scratchBuffer, ch.payloadBytes) != ch.payloadCrc32)
+            {
+                return false;
+            }
+
+            const uint32_t firstNeededInChunk =
+                (startSampleIndex > chunkStartIndex) ? (startSampleIndex - chunkStartIndex) : 0u;
+
+            const uint32_t availableFromChunk = ch.sampleCount - firstNeededInChunk;
+            const uint32_t neededNow = remainingToRead - outIndex;
+            const uint32_t samplesFromChunk = (availableFromChunk < neededNow) ? availableFromChunk : neededNow;
+
+            const TSample* chunkSamples = reinterpret_cast<const TSample*>(m_rt.scratchBuffer);
+
+            std::memcpy(&outSamples[outIndex],
+                        &chunkSamples[firstNeededInChunk],
+                        samplesFromChunk * sizeof(TSample));
+
+            outIndex += samplesFromChunk;
+            globalSampleIndex = chunkEndIndex;
+        }
+
+        samplesReadOut = outIndex;
         return true;
     }
 

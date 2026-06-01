@@ -45,8 +45,7 @@ void UserInteraction::ProcessChar(uint8_t uart_char, DeviceState &device_state) 
 					main_primary_deploy_altitude_ = locator_settings.main_primary_deploy_altitude;
 					main_backup_deploy_altitude_ = locator_settings.main_backup_deploy_altitude;
 					lora_channel_ = locator_settings.lora_channel;
-					for (uint8_t i = 0; i < device_name_length; i++)
-						device_name_[i] = locator_settings.device_name[i];
+					std::memcpy(device_name_, locator_settings.device_name, device_name_length);
 					DisplayConfigSettingsMenu();
 				} else if (StrCmp(user_input_, data_command_, char_pos)) {
 					device_state = DeviceState::Config;
@@ -82,8 +81,7 @@ void UserInteraction::ProcessChar(uint8_t uart_char, DeviceState &device_state) 
 			locator_settings.main_primary_deploy_altitude = main_primary_deploy_altitude_;
 			locator_settings.main_backup_deploy_altitude = main_backup_deploy_altitude_;
 			locator_settings.lora_channel = lora_channel_;
-			for (uint8_t i = 0; i < device_name_length; i++)
-				locator_settings.device_name[i] = device_name_[i];
+			std::memcpy(locator_settings.device_name, device_name_, device_name_length);
 			archive_.SaveLocatorSettings(locator_settings);
 			comm_.SetChannel(lora_channel_);
 			device_state = DeviceState::Disarmed;
@@ -533,7 +531,7 @@ void UserInteraction::AdjustConfigTextSetting(uint8_t uart_char, char *config_mo
 	} else if (uart_char == 8 && char_pos > 0) {
 		HAL_UART_Transmit(&huart2_, (uint8_t*) bs_, 3, uart_timeout);
 		user_input_[--char_pos] = 0;
-	} else if (uart_char >= ' ' && uart_char <= '~' && char_pos < device_name_length) {
+	} else if (uart_char >= ' ' && uart_char <= '~' && char_pos < device_name_length - 1) {
 		HAL_UART_Transmit(&huart2_, &uart_char, 1, uart_timeout);
 		user_input_[char_pos++] = uart_char;
 	}
@@ -546,19 +544,31 @@ void UserInteraction::ExportData(uint16_t archive_position) {
 	uint32_t sample_count_out = 0;
 	bool success = archive_.GetFlightSampleCount(archive_position, sample_count_out);
 	if (success) {
-		FlightArchive::FlightSample sample_buffer[sample_count_out] { };
-		uint32_t samples_read_out = 0;
-		if (archive_.ReadFlightData(archive_position, sample_buffer, sample_count_out, samples_read_out)) {
-			for (uint32_t i = 0; i < samples_read_out; i++) {
-				export_line.WriteMany(sample_buffer[i].timestamp_ms, ",", Fmt(sample_buffer[i].altitude_m, 0, 1), ",",
+		FlightArchive::FlightSample sample_buffer[64];
+//		FlightArchive::FlightSample sample_buffer[sample_count_out] { };
+		uint32_t got = 0u;
+		uint32_t start = 0u;
+
+		while (true) {
+		    if (!archive_.ReadFlightDataRange(archive_position, start, sample_buffer, 64u, got)) {break;}
+		    if (got == 0u) {break;}
+		    for (uint32_t i = 0u; i < got; ++i) {
+//				export_line.WriteMany(sample_buffer[i].timestamp_ms, ",", Fmt(sample_buffer[i].fused_altitude_agl, 0, 1), ",", // new telemetry data. Add other new elements when uncommenting
+				export_line.WriteMany(sample_buffer[i].timestamp_ms, ",", Fmt(sample_buffer[i].raw_baro_altitude_agl, 0, 1), ",",
 						Fmt(sample_buffer[i].accel.x / G0_F, 0, 1), ",", Fmt(sample_buffer[i].accel.y / G0_F, 0, 1),
 						",", Fmt(sample_buffer[i].accel.z / G0_F, 0, 1), ",",
 						Fmt(sample_buffer[i].gyro.x * RAD2DEG, 0, 1), ",", Fmt(sample_buffer[i].gyro.y * RAD2DEG, 0, 1),
 						",", Fmt(sample_buffer[i].gyro.z * RAD2DEG, 0, 1), ",",
 						Fmt(sample_buffer[i].lat_rad * RAD2DEG, 0, 7), ",",
 						Fmt(sample_buffer[i].lon_rad * RAD2DEG, 0, 7), crlf_);
-			}
+		    }
+		    start += got;
 		}
+//		uint32_t samples_read_out = 0;
+//		if (archive_.ReadFlightData(archive_position, sample_buffer, sample_count_out, samples_read_out)) {
+//			for (uint32_t i = 0; i < samples_read_out; i++) {
+//			}
+//		}
 	}
 }
 

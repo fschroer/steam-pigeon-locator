@@ -18,6 +18,7 @@ enum class DeviceState : uint8_t {
   Armed,
   Config,
   Test,
+  MetadataRequested,
   DataRequested
 };
 
