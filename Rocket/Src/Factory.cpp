@@ -36,6 +36,7 @@ void Factory::Init(const Radio_s *radio) {
 	comm_.Init(*radio_adapter_);
 	navigation_.Init(SAMPLES_PER_SECOND);
 	flight_.Init();
+	BuzzerStop();  // Guarantee timer and EN pins are in a known-off state before first arm
 	RgbLed(RgbColor::Off);
 	nav_test_requested_ = true;
 
@@ -47,10 +48,26 @@ void Factory::Init(const Radio_s *radio) {
 void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 	FlightStates flight_state = flight_.GetFlightState();
 	navigation_.SetD1Converted();
+
+	if (device_state_ != prev_device_state_) {
+		if (device_state_ == DeviceState::Armed) {
+			BuzzerReset();
+			buzzer_phase_ = BuzzerPhase::Arming;
+		} else if (prev_device_state_ == DeviceState::Armed) {
+			BuzzerReset();
+			buzzer_phase_ = BuzzerPhase::Disarming;
+		}
+		prev_device_state_ = device_state_;
+	}
+
 	switch (device_state_) {
 	case DeviceState::Disarmed:
 		DisableDeployment();
 		navigation_.Update();
+		if (buzzer_phase_ == BuzzerPhase::Disarming) {
+			if (BuzzerSequenceOnce(Disarming))
+				buzzer_phase_ = BuzzerPhase::Idle;
+		}
 		switch (rocket_service_count) {
 		case 0: {
 			power_.enableDivider(); // Allow time for divider voltage to settle
@@ -59,7 +76,8 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 		case 2: {
 			navigation_.CalibrateOnPadAndZeroAglUntilLaunch(flight_state);
 			comm_.SendPreLaunchData();
-			HAL_TIM_PWM_Stop(&htim16, TIM_CHANNEL_1);
+			if (buzzer_phase_ == BuzzerPhase::Idle)
+				HAL_TIM_PWM_Stop(&htim16, TIM_CHANNEL_1);
 			break;
 		}
 		case 5:
@@ -83,12 +101,23 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 #endif
 		EnableDeployment();
 		navigation_.Update();
-		if (flight_state == FlightStates::WaitingLaunch) {
+
+		// Arming one-shot plays once immediately on arm, regardless of flight state.
+		// Armed beacon and archive open happen only after Arming completes, so that
+		// the blocking flash sector-erase inside OpenNewFlight() does not stall the
+		// CPU while the Arming notes are playing.
+		// Buzzer is silenced during flight; Landed beacon is handled below.
+		if (buzzer_phase_ == BuzzerPhase::Arming) {
+			if (BuzzerSequenceOnce(Arming))
+				buzzer_phase_ = BuzzerPhase::Armed;
+		} else if (flight_state == FlightStates::WaitingLaunch && buzzer_phase_ == BuzzerPhase::Armed) {
 #ifndef NAV_TEST
 			if (!archive_.IsActiveOpen())
 				archive_.OpenNewFlight();
 #endif
 			BuzzerSequence(Armed);
+		} else if (flight_state > FlightStates::WaitingLaunch && flight_state != FlightStates::Landed) {
+			BuzzerStop();
 		}
 		flight_.UpdateFlightState();
 		if (flight_state >= FlightStates::Launched && !datestamp_saved_) {
@@ -133,13 +162,11 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 	}
 	case DeviceState::MetadataRequested:
 		comm_.SendFlightProfileMetadata(device_state_);
+		comm_.CheckFlightProfileTimeout(device_state_);
 		break;
 	case DeviceState::DataRequested:
-//		if (flight_profile_wait_count_ == 0)
-//			comm_.SendFlightProfileData();
-//      if (flight_profile_wait_count_++ > FLIGHT_DATA_REQUEST_TIMEOUT) // Revert to idle state if no additional flight data requests received
-//        device_state_ = DeviceState::Disarmed;
 		comm_.Process();
+		comm_.CheckFlightProfileTimeout(device_state_);
 		break;
 	}
 }

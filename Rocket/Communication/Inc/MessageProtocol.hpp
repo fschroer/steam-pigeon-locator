@@ -7,12 +7,21 @@
 
 namespace Communication {
 
-// Max total bytes for one packet (header + fields + payload)
-constexpr size_t kMaxPayloadBytes = 256;
+// Max total bytes for one LoRa packet.  The radio's payload-length register
+// is 8 bits, so the hard limit is 255.  Using 256 wraps to 0 and causes the
+// radio to transmit an empty packet.
+constexpr size_t kMaxPayloadBytes = 255;
 constexpr uint8_t system_id = 0x44;
 constexpr uint16_t kCrc16Poly = 0xA001;   // CRC‑16/IBM reflected polynomial
 constexpr uint16_t kCrc16Key = 0xFFFF;   // standard initial value
-static constexpr uint16_t kWindowSize = 8;
+// Stop-and-wait: the locator sends ONE flight-data packet, then stays in RX
+// (idle, listening) until the app's ACK is relayed back through the receiver.
+// A larger window blasts packets back-to-back; because the link is half-duplex
+// AND relayed (locator <-LoRa-> receiver <-BT-> app), the locator is deaf while
+// transmitting the next window packet, so the relayed ACK collides with the
+// outgoing data and is lost — the transfer stalls after packet 0.  Window of 1
+// guarantees the locator is listening exactly when the ACK comes back.
+static constexpr uint16_t kWindowSize = 1;
 static constexpr uint16_t kParityGroupSize = 4;
 
 enum class MsgState : uint8_t {

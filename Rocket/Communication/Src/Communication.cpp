@@ -156,13 +156,15 @@ void Communication::SendFlightProfileMetadata(DeviceState &device_state) {
 		bool present = false;
 		for (uint8_t i = 0; i < record_count; i++) {
 			archive_.ReadEvent(i, FlightArchive::ExampleStatId::FlightTimestampS, msg.record[i].timestamp, present);
-			archive_.ReadEvent(i, FlightArchive::ExampleStatId::ApogeeTimestampMs, msg.record[i].apogee, present);
+			archive_.ReadEvent(i, FlightArchive::ExampleStatId::MaxAltitudeM, msg.record[i].apogee, present);
 			archive_.ReadEvent(i, FlightArchive::ExampleStatId::LandingTimestampMs, msg.record[i].flight_time, present);
 		}
 		msg.packet_header.crc = ComputeMessageCrc(msg);
 		RgbLed(RgbColor::Blue); // Blink LoRa transmit LED for visual validation
 		radio_->Send(reinterpret_cast<uint8_t*>(&msg), sizeof(FlightMetadata));
-		device_state = DeviceState::Disarmed;
+		flight_profile_active_ms_ = HAL_GetTick();
+		// Stay in MetadataRequested so PreLaunchData is not resumed until the
+		// app explicitly exits the flight profile screen (sends DisarmRequest).
 	}
 }
 
@@ -182,7 +184,7 @@ void Communication::OnRadioTxDone() {
 
 void Communication::OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t LoraSnr_FskCfo,
 		DeviceState &device_state) {
-	HAL_GPIO_WritePin(SOFT_LED2_GPIO_Port, SOFT_LED2_Pin, GPIO_PIN_RESET);
+	RgbLed(RgbColor::Green);
 
 	ParsedMessage parsed { };
 	if (ParseLoraFrame(payload, size, system_id, parsed) == ParseResult::Ok) {
@@ -208,18 +210,31 @@ void Communication::OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
 			break;
 
 		case MsgType::FlightMetadataRequest:
-			if (device_state == DeviceState::Disarmed) {
+			// Accept from any non-Armed state: Disarmed (initial entry),
+			// MetadataRequested (re-request before prior response was used),
+			// or DataRequested (user returned to the flight list).
+			if (device_state == DeviceState::Disarmed || device_state == DeviceState::MetadataRequested
+					|| device_state == DeviceState::DataRequested) {
 				device_state = DeviceState::MetadataRequested;
 				send_metadata_ = true;
 				send_metadata_request_time_ = HAL_GetTick();
+				flight_profile_active_ms_ = HAL_GetTick();
 			}
 			break;
 
 		case MsgType::FlightDataRequest: {
-			if (device_state == DeviceState::Disarmed) {
+			// Accept from Disarmed, MetadataRequested, or DataRequested (retry /
+			// select a different flight record while already in data mode).
+			if (device_state == DeviceState::Disarmed || device_state == DeviceState::MetadataRequested
+					|| device_state == DeviceState::DataRequested) {
 				device_state = DeviceState::DataRequested;
 				const FlightDataRequest &req = parsed.flight_data_request;
 				BeginTransfer(req.record);
+				// If the archive record is missing or empty, BeginTransfer leaves
+				// transfer_active_ false.  Fall back to MetadataRequested so the
+				// app can pick a different record without needing to disarm.
+				if (!transfer_active_)
+					device_state = DeviceState::MetadataRequested;
 			}
 			break;
 		}
@@ -248,7 +263,7 @@ void Communication::OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
 		}
 	}
 
-	HAL_GPIO_WritePin(SOFT_LED2_GPIO_Port, SOFT_LED2_Pin, GPIO_PIN_SET);
+	RgbLed(RgbColor::Off);
 }
 
 // ============================================================================
@@ -292,6 +307,7 @@ void Communication::BeginTransfer(uint8_t record_id) {
 	window_start_ = 0;
 	transfer_active_ = true;
 	transfer_ready_ms_ = HAL_GetTick() + kPreTransferGuardMs;
+	flight_profile_active_ms_ = HAL_GetTick();
 }
 
 // ============================================================================
@@ -441,9 +457,13 @@ void Communication::OnAckReceived(const FlightDataAck &ack, DeviceState &device_
 	while (window_start_ < packet_count_ && acked_[window_start_])
 		++window_start_;
 
+	flight_profile_active_ms_ = HAL_GetTick();
+
 	if (AllAcked()) {
 		complete_ = true;
-		device_state = DeviceState::Disarmed;
+		// Stay in DataRequested so PreLaunchData is not resumed until the app
+		// explicitly exits the flight profile screen (sends DisarmRequest) or
+		// the idle timeout fires.
 	}
 }
 
@@ -531,6 +551,11 @@ ParseResult Communication::ParseLoraFrame(const uint8_t *data, std::size_t len, 
 	default:
 		return ParseResult::UnknownType;
 	}
+}
+
+void Communication::CheckFlightProfileTimeout(DeviceState &device_state) {
+	if (HAL_GetTick() - flight_profile_active_ms_ > kFlightProfileTimeoutMs)
+		device_state = DeviceState::Disarmed;
 }
 
 } // namespace Communication

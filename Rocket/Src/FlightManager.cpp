@@ -43,11 +43,16 @@ void FlightManager::Init() {
 bool FlightManager::DetectLaunch(const NavSolution& sol) {
     const RocketPersistentSettings settings = archive_.GetLocatorSettings();
 
-    const float accel_g  = RocketNav::Math::norm(sol.body_accel_mps2) / G0_F;
-    const BaroSample& baro = nav_.getRawBaro();
+    // Use the EKF fused accel (= raw IMU as set by Navigation::Update) and the
+    // EKF fused AGL (initialized to 0.0 in InsEkf15::initialize, always valid)
+    // rather than getRawBaro().altitude_m_agl, which is only zeroed after
+    // CalibrateOnPadAndZeroAglUntilLaunch has converged.  Before that converges
+    // (e.g. when the user arms before GPS lock), the raw baro AGL can read an
+    // unzeroed MSL altitude (hundreds of metres), falsely triggering launch.
+    const float accel_g = RocketNav::Math::norm(sol.body_accel_mps2) / G0_F;
 
     const bool threshold = (accel_g >= 5.0f)
-                        || (baro.altitude_m_agl >= settings.launch_detect_altitude);
+                        || (sol.altitude_agl_m >= settings.launch_detect_altitude);
 
     const uint32_t now = HAL_GetTick();
     if (threshold) {
@@ -69,7 +74,7 @@ bool FlightManager::DetectLaunch(const NavSolution& sol) {
 // it sees archived sensor data and advances state correctly.
 // ---------------------------------------------------------------------------
 bool FlightManager::DetectBurnout(const NavSolution& sol) {
-    const float accel_g = RocketNav::Math::norm(nav_.getRawImu().accel_selected_mps2) / G0_F;
+    const float accel_g = RocketNav::Math::norm(sol.body_accel_mps2) / G0_F;
     return accel_g < kBurnoutAccelG;
 }
 

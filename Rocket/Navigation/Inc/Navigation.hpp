@@ -7,7 +7,7 @@
 
 // Define NAV_TEST to compile in flight-archive replay support.
 // Leave undefined in production builds to save ~800 bytes of RAM.
-#define NAV_TEST
+//#define NAV_TEST
 
 #ifdef NAV_TEST
 #include "Archive.hpp"

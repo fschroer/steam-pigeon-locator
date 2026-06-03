@@ -107,6 +107,10 @@ public:
 
 	void OnAckReceived(const FlightDataAck &ack, DeviceState &device_state);
 	bool IsComplete() const { return complete_; }
+	// Call from the main loop while in MetadataRequested or DataRequested.
+	// Reverts to Disarmed if the session has been idle too long (e.g. the app's
+	// DisarmRequest was missed).
+	void CheckFlightProfileTimeout(DeviceState &device_state);
 
 private:
 	DeviceUID            &deviceUID_;
@@ -122,6 +126,13 @@ private:
 	static constexpr uint32_t kPreTransferGuardMs = 50u;
 	uint32_t transfer_ready_ms_ = 0;
 
+	// Timestamp of the last meaningful flight-profile activity (ACK received,
+	// metadata sent, or transfer started).  Used to detect an abandoned session
+	// and automatically revert to Disarmed so PreLaunchData resumes.
+	uint32_t flight_profile_active_ms_ = 0;
+	// After this many ms without activity in Metadata/DataRequested, revert.
+	static constexpr uint32_t kFlightProfileTimeoutMs = 10000u;
+
 	// -----------------------------------------------------------------------
 	// Transfer protocol constants
 	// -----------------------------------------------------------------------
@@ -129,8 +140,14 @@ private:
 	// in MessageProtocol.hpp and are intentionally not redefined here.
 
 	// Milliseconds before an unacknowledged sent packet is eligible for
-	// retransmission.
-	static constexpr uint32_t kRetxTimeoutMs = 200;
+	// retransmission.  Must exceed the full relay round-trip:
+	//   data packet airtime is already over when this timer starts; the ACK
+	//   then travels receiver->app (BT) + app->receiver (BT) + receiver->locator
+	//   (LoRa ~90 ms), which with BT SPP jitter can reach several hundred ms.
+	//   Too small a value retransmits before the ACK arrives, creating
+	//   duplicate traffic that re-collides.  1500 ms gives solid margin while
+	//   still recovering from a genuinely lost packet within ~1.5 s.
+	static constexpr uint32_t kRetxTimeoutMs = 1500;
 
 	// Maximum number of packets in a single transfer.
 	// Sized to match the 256-bit ACK bitmap in FlightDataAck.
