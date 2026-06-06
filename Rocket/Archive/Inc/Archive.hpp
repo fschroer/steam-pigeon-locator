@@ -19,15 +19,17 @@ public:
 	explicit Archive(DeviceUID& deviceUID, IFlashDriver &flash);
 	bool Init();
 	bool OpenNewFlight();
+	bool StartOpenNewFlight();
+	bool PollOpenNewFlight();
 	bool InitializeArchive();
 	bool IsInitialized();
 	template<typename TValue>
-	bool WriteEvent(FlightArchive::ExampleStatId stat_id, const TValue &value);
+	bool WriteEvent(FlightArchive::Statistic stat_id, const TValue &value);
 	bool WriteData(uint32_t flight_time_ms, const NavSolution &nav_solution, const float raw_baro_altitude_agl,
 			const float raw_baro_velocity);
 	bool CloseCurrentFlight();
 	template<typename TValue>
-	bool ReadEvent(uint16_t record_id, FlightArchive::ExampleStatId statId, TValue &valueOut, bool &presentOut) const;
+	bool ReadEvent(uint16_t record_id, FlightArchive::Statistic statId, TValue &valueOut, bool &presentOut) const;
 	bool GetFlightSampleCount(uint16_t record_id, uint32_t &sample_count_out) const;
 	bool ReadFlightData(uint16_t record_id, FlightArchive::FlightSample *out_samples, uint32_t max_samples,
 			uint32_t &samples_read_out) const;
@@ -66,6 +68,9 @@ private:
 	uint32_t flight_num_ = 0;
 	bool runtime_saved_ = false;
 	bool settings_saved_ = false;
+
+	enum class OpenFlightState : uint8_t { Idle, Erasing, Done, Failed };
+	OpenFlightState open_flight_state_ = OpenFlightState::Idle;
 };
 
 #include "Archive.tpp"

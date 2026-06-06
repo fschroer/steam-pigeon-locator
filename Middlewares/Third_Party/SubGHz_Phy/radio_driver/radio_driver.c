@@ -1087,6 +1087,11 @@ void HAL_SUBGHZ_TxCpltCallback(SUBGHZ_HandleTypeDef *hsubghz)
 
 void HAL_SUBGHZ_RxCpltCallback(SUBGHZ_HandleTypeDef *hsubghz)
 {
+    if (hsubghz->ErrorCode & HAL_SUBGHZ_ERROR_CRC_MISMATCH)
+    {
+        hsubghz->ErrorCode &= ~HAL_SUBGHZ_ERROR_CRC_MISMATCH;
+        return;  // discard — CRCErrorCallback fires next and handles it
+    }
     RadioOnDioIrqCb( IRQ_RX_DONE );
 }
 

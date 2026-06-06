@@ -40,6 +40,8 @@ void UserInteraction::ProcessChar(uint8_t uart_char, DeviceState &device_state) 
 					user_interaction_state_ = UserInteractionState::ConfigHome;
 					deployment_ch1_mode_ = locator_settings.deployment_ch1_mode;
 					deployment_ch2_mode_ = locator_settings.deployment_ch2_mode;
+					deployment_ch3_mode_ = locator_settings.deployment_ch3_mode;
+					deployment_ch4_mode_ = locator_settings.deployment_ch4_mode;
 					drogue_primary_deploy_delay_ = locator_settings.drogue_primary_deploy_delay;
 					drogue_backup_deploy_delay_ = locator_settings.drogue_backup_deploy_delay;
 					main_primary_deploy_altitude_ = locator_settings.main_primary_deploy_altitude;
@@ -64,8 +66,10 @@ void UserInteraction::ProcessChar(uint8_t uart_char, DeviceState &device_state) 
 				user_input_[0] = 0;
 				break;
 			case 8: // Backspace
-				HAL_UART_Transmit(&huart2_, &uart_char, 1, uart_timeout);
-				user_input_[--char_pos] = 0;
+				if (char_pos > 0) {
+					HAL_UART_Transmit(&huart2_, &uart_char, 1, uart_timeout);
+					user_input_[--char_pos] = 0;
+				}
 				break;
 			}
 		break;
@@ -109,7 +113,7 @@ void UserInteraction::ProcessChar(uint8_t uart_char, DeviceState &device_state) 
 					DeployModeString(deployment_ch3_mode_));
 			break;
 		case 51: // 3 = Edit deployment channel 4 mode
-			user_interaction_state_ = UserInteractionState::EditDeployChannel3Mode;
+			user_interaction_state_ = UserInteractionState::EditDeployChannel4Mode;
 			uart_line_len = MakeLine(uart_line_, deploy_mode_edit_text_, num_edit_guidance_text_,
 					DeployModeString(deployment_ch4_mode_));
 			break;
@@ -387,15 +391,15 @@ void UserInteraction::DisplayDataMenu() {
 	for (uint8_t i = 0; i < record_count; i++) {
 		bool valid_record = false;
 		uint32_t flight_timestamp = 0;
-		archive_.ReadEvent(i, FlightArchive::ExampleStatId::FlightTimestampS, flight_timestamp, valid_record);
+		archive_.ReadEvent(i, FlightArchive::Statistic::FlightTimestampS, flight_timestamp, valid_record);
 //    if (valid_record){
 		archive_position[0] = i + '0';
 		char flight_date_time[20] { 0 };
 		FormatUnixUtc(flight_date_time, flight_timestamp);
 		float apogee = 0.0f;
-		archive_.ReadEvent(i, FlightArchive::ExampleStatId::MaxAltitudeM, apogee, valid_record);
+		archive_.ReadEvent(i, FlightArchive::Statistic::MaxAltitudeM, apogee, valid_record);
 		uint32_t apogee_timestamp = 0;
-		archive_.ReadEvent(i, FlightArchive::ExampleStatId::ApogeeTimestampMs, apogee_timestamp, valid_record);
+		archive_.ReadEvent(i, FlightArchive::Statistic::ApogeeTimestampMs, apogee_timestamp, valid_record);
 		export_line.WriteMany(archive_position, flight_date_time, Fmt(apogee, 11), Fmt(apogee_timestamp, 19), crlf_);
 //    }
 	}
@@ -408,6 +412,8 @@ void UserInteraction::DisplayTestMenu() {
 	HAL_UART_Transmit(&huart2_, (uint8_t*) uart_line_, uart_line_len, uart_timeout);
 	HAL_UART_Transmit(&huart2_, (uint8_t*) test_deploy1_text_, strlen(test_deploy1_text_), uart_timeout);
 	HAL_UART_Transmit(&huart2_, (uint8_t*) test_deploy2_text_, strlen(test_deploy2_text_), uart_timeout);
+	HAL_UART_Transmit(&huart2_, (uint8_t*) test_deploy3_text_, strlen(test_deploy3_text_), uart_timeout);
+	HAL_UART_Transmit(&huart2_, (uint8_t*) test_deploy4_text_, strlen(test_deploy4_text_), uart_timeout);
 	uart_line_len = MakeLine(uart_line_, test_guidance_text_, crlf_);
 	HAL_UART_Transmit(&huart2_, (uint8_t*) uart_line_, uart_line_len, uart_timeout);
 }
@@ -553,8 +559,10 @@ void UserInteraction::ExportData(uint16_t archive_position) {
 		    if (!archive_.ReadFlightDataRange(archive_position, start, sample_buffer, 64u, got)) {break;}
 		    if (got == 0u) {break;}
 		    for (uint32_t i = 0u; i < got; ++i) {
-//				export_line.WriteMany(sample_buffer[i].timestamp_ms, ",", Fmt(sample_buffer[i].fused_altitude_agl, 0, 1), ",", // new telemetry data. Add other new elements when uncommenting
 				export_line.WriteMany(sample_buffer[i].timestamp_ms, ",", Fmt(sample_buffer[i].raw_baro_altitude_agl, 0, 1), ",",
+						Fmt(sample_buffer[i].fused_altitude_agl, 0, 1), ",",
+						Fmt(sample_buffer[i].raw_baro_velocity, 0, 1), ",",
+						Fmt(sample_buffer[i].fused_vertical_speed_mps, 0, 1), ",",
 						Fmt(sample_buffer[i].accel.x / G0_F, 0, 1), ",", Fmt(sample_buffer[i].accel.y / G0_F, 0, 1),
 						",", Fmt(sample_buffer[i].accel.z / G0_F, 0, 1), ",",
 						Fmt(sample_buffer[i].gyro.x * RAD2DEG, 0, 1), ",", Fmt(sample_buffer[i].gyro.y * RAD2DEG, 0, 1),
@@ -576,48 +584,48 @@ void UserInteraction::ExportFlightStats(uint16_t archive_position) { //Export fl
 	StaticStringWriter<UART_LINE_MAX_LENGTH> export_line(&huart2_);
 	uint32_t time_ms = 0;
 	bool present_out;
-	archive_.ReadEvent(archive_position, FlightArchive::ExampleStatId::FlightTimestampS, time_ms, present_out);
+	archive_.ReadEvent(archive_position, FlightArchive::Statistic::FlightTimestampS, time_ms, present_out);
 	char flight_date_time[20] { };
 	FormatUnixUtc(flight_date_time, time_ms);
 	export_line.WriteMany("Flight time: ", flight_date_time, crlf_);
 
-	archive_.ReadEvent(archive_position, FlightArchive::ExampleStatId::LaunchTimestampMs, time_ms, present_out);
+	archive_.ReadEvent(archive_position, FlightArchive::Statistic::LaunchTimestampMs, time_ms, present_out);
 	export_line.WriteMany(launch_detect_sample_index_text, time_ms, crlf_);
 
-	archive_.ReadEvent(archive_position, FlightArchive::ExampleStatId::BurnoutTimestampMs, time_ms, present_out);
+	archive_.ReadEvent(archive_position, FlightArchive::Statistic::BurnoutTimestampMs, time_ms, present_out);
 	export_line.WriteMany(burnout_sample_index_text, time_ms, crlf_);
 
-	archive_.ReadEvent(archive_position, FlightArchive::ExampleStatId::ApogeeTimestampMs, time_ms, present_out);
+	archive_.ReadEvent(archive_position, FlightArchive::Statistic::ApogeeTimestampMs, time_ms, present_out);
 	export_line.WriteMany(max_altitude_sample_index_text, time_ms, crlf_);
 
-	archive_.ReadEvent(archive_position, FlightArchive::ExampleStatId::NoseoverTimestampMs, time_ms, present_out);
+	archive_.ReadEvent(archive_position, FlightArchive::Statistic::NoseoverTimestampMs, time_ms, present_out);
 	export_line.WriteMany(nose_over_sample_index_text, time_ms, crlf_);
 
-	archive_.ReadEvent(archive_position, FlightArchive::ExampleStatId::DroguePrimaryDeployTimestampMs, time_ms,
+	archive_.ReadEvent(archive_position, FlightArchive::Statistic::DroguePrimaryDeployTimestampMs, time_ms,
 			present_out);
 	export_line.WriteMany(drogue_primary_deploy_sample_index_text, time_ms, crlf_);
 
-	archive_.ReadEvent(archive_position, FlightArchive::ExampleStatId::DrogueBackupDeployTimestampMs, time_ms,
+	archive_.ReadEvent(archive_position, FlightArchive::Statistic::DrogueBackupDeployTimestampMs, time_ms,
 			present_out);
 	export_line.WriteMany(drogue_backup_deploy_sample_index_text, time_ms, crlf_);
 
-	archive_.ReadEvent(archive_position, FlightArchive::ExampleStatId::DrogueVelocityThresholdTimestampMs, time_ms,
+	archive_.ReadEvent(archive_position, FlightArchive::Statistic::DrogueVelocityThresholdTimestampMs, time_ms,
 			present_out);
 	export_line.WriteMany("Drogue velocity threshold time: ", time_ms, crlf_);
 
-	archive_.ReadEvent(archive_position, FlightArchive::ExampleStatId::MainPrimaryDeployTimestampMs, time_ms,
+	archive_.ReadEvent(archive_position, FlightArchive::Statistic::MainPrimaryDeployTimestampMs, time_ms,
 			present_out);
 	export_line.WriteMany(main_primary_deploy_sample_index_text, time_ms, crlf_);
 
-	archive_.ReadEvent(archive_position, FlightArchive::ExampleStatId::MainBackupDeployTimestampMs, time_ms,
+	archive_.ReadEvent(archive_position, FlightArchive::Statistic::MainBackupDeployTimestampMs, time_ms,
 			present_out);
 	export_line.WriteMany(main_backup_deploy_sample_index_text, time_ms, crlf_);
 
-	archive_.ReadEvent(archive_position, FlightArchive::ExampleStatId::MainVelocityThresholdTimestampMs, time_ms,
+	archive_.ReadEvent(archive_position, FlightArchive::Statistic::MainVelocityThresholdTimestampMs, time_ms,
 			present_out);
 	export_line.WriteMany("Main velocity threshold time: ", time_ms, crlf_);
 
-	archive_.ReadEvent(archive_position, FlightArchive::ExampleStatId::LandingTimestampMs, time_ms, present_out);
+	archive_.ReadEvent(archive_position, FlightArchive::Statistic::LandingTimestampMs, time_ms, present_out);
 	export_line.WriteMany(landing_sample_index_text, time_ms, crlf_);
 
 //  uart_line_len = MakeLine(export_line, channel1_fired_text, (flight_stats_msg_.deployment_state & (1 << BIT_SHIFT_CHANNEL_1_FIRED)) == 0 ? "No" : "Yes", crlf_);

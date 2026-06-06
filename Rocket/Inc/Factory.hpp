@@ -23,7 +23,7 @@ enum FlightProfileState {
 	kIdle = 0, kMetadataRequested = 1
 };
 
-enum class BuzzerPhase : uint8_t { Idle, Arming, Armed, Disarming };
+enum class BuzzerPhase : uint8_t { Idle, PowerOn, Arming, Armed, Disarming };
 
 struct Radio_s;
 // forward declaration from C
@@ -68,7 +68,7 @@ private:
 
 	DeviceState device_state_ = DeviceState::Disarmed;
 	DeviceState prev_device_state_ = DeviceState::Disarmed;
-	BuzzerPhase buzzer_phase_ = BuzzerPhase::Idle;
+	BuzzerPhase buzzer_phase_ = BuzzerPhase::PowerOn;
 	int peripheral_interrupt_count_ = 0;
 	int battery_level_ = 0;
 	int flight_stats_delay_count_ = 0;

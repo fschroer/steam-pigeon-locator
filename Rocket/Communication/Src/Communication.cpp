@@ -119,9 +119,8 @@ void Communication::SendTelemetryData() {
 	msg.deployment_ch4_stats = flight_.GetDeploymentStats(4) | ((status & 0x08) << (bit_shift_continuity - 3));
 	msg.physical_deployment_stats = flight_.GetPhysicalDeploymentStats();
 	msg.agl = nav_solution.altitude_agl_m;
-	msg.accel = nav_solution.body_accel_mps2;
-	msg.gyro = nav_solution.body_rates_rps;
-	msg.velocity = nav_solution.vertical_speed_mps;
+	msg.vel_ned_mps = nav_solution.vel_ned_mps;
+	msg.q_bn = nav_solution.q_bn;
 	msg.flight_state = flight_.GetFlightState();
 
 	msg.packet_header.crc = ComputeMessageCrc(msg);
@@ -155,9 +154,9 @@ void Communication::SendFlightProfileMetadata(DeviceState &device_state) {
 		msg.packet_header.crc = 0;
 		bool present = false;
 		for (uint8_t i = 0; i < record_count; i++) {
-			archive_.ReadEvent(i, FlightArchive::ExampleStatId::FlightTimestampS, msg.record[i].timestamp, present);
-			archive_.ReadEvent(i, FlightArchive::ExampleStatId::MaxAltitudeM, msg.record[i].apogee, present);
-			archive_.ReadEvent(i, FlightArchive::ExampleStatId::LandingTimestampMs, msg.record[i].flight_time, present);
+			archive_.ReadEvent(i, FlightArchive::Statistic::FlightTimestampS, msg.record[i].timestamp, present);
+			archive_.ReadEvent(i, FlightArchive::Statistic::MaxAltitudeM, msg.record[i].apogee, present);
+			archive_.ReadEvent(i, FlightArchive::Statistic::LandingTimestampMs, msg.record[i].flight_time, present);
 		}
 		msg.packet_header.crc = ComputeMessageCrc(msg);
 		RgbLed(RgbColor::Blue); // Blink LoRa transmit LED for visual validation
@@ -199,8 +198,16 @@ void Communication::OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
 		}
 
 		case MsgType::ArmRequest:
-			if (device_state == DeviceState::Disarmed)
+			if (device_state == DeviceState::Disarmed) {
 				device_state = DeviceState::Armed;
+				// Begin cardinal-axis mounting detection.  Accumulates the next
+				// kMountingCalSamples IMU readings in raw sensor frame, identifies
+				// the dominant gravity axis, and re-initialises the EKF with the
+				// correct body←sensor rotation once the window closes (~3.2 s).
+				// Also resets the gyro-bias-freeze flag so bias accumulation
+				// starts clean after the EKF re-initialisation.
+				nav_.triggerMountingCalibration();
+			}
 			break;
 
 		case MsgType::DisarmRequest:
@@ -405,10 +412,20 @@ void Communication::SendDataPacket(uint16_t packet_index, uint32_t now_ms) {
 		for (size_t b = 0; b < xor_len; ++b)
 			acc.payload[b] ^= pkt.payload[b];
 		acc.count++;
+
+		// Mark parity as ready once the last data packet of the group (or the
+		// last packet of the whole transfer) has been sent.  The parity packet
+		// itself is sent by Process() on the NEXT call, when radio_busy_ has
+		// cleared — attempting it here would always fail because the radio is
+		// still transmitting this data packet.
+		const bool last_in_group = ((packet_index % kParityGroupSize) == kParityGroupSize - 1);
+		const bool last_packet   = (packet_index == packet_count_ - 1);
+		if (last_in_group || last_packet)
+			acc.pending = true;
 	}
 }
 
-void Communication::SendParityPacket(uint16_t group_index, uint32_t now_ms) {
+bool Communication::SendParityPacket(uint16_t group_index, uint32_t now_ms) {
 	const ParityAccumulator &acc = parity_acc_[group_index];
 
 	FlightDataPacket parity { };
@@ -429,7 +446,7 @@ void Communication::SendParityPacket(uint16_t group_index, uint32_t now_ms) {
 	parity.packet_header.crc = ComputeMessageCrcPartial(reinterpret_cast<const uint8_t*>(&parity), msg_size);
 
 	// Parity is best-effort; no ACK tracking.
-	TrySendPacket(parity, msg_size);
+	return TrySendPacket(parity, msg_size);
 }
 
 // ============================================================================
@@ -461,9 +478,9 @@ void Communication::OnAckReceived(const FlightDataAck &ack, DeviceState &device_
 
 	if (AllAcked()) {
 		complete_ = true;
-		// Stay in DataRequested so PreLaunchData is not resumed until the app
-		// explicitly exits the flight profile screen (sends DisarmRequest) or
-		// the idle timeout fires.
+		// Stamp the completion time so the post-complete timeout (kDataCompleteTimeoutMs)
+		// starts from now, not from the last individual-ACK update above.
+		flight_profile_active_ms_ = HAL_GetTick();
 	}
 }
 
@@ -482,32 +499,42 @@ void Communication::Process() {
 			(window_start_ + kWindowSize < packet_count_) ?
 					static_cast<uint16_t>(window_start_ + kWindowSize) : packet_count_;
 
+	// ── Data-packet burst ────────────────────────────────────────────────────
+	// Send at most one packet per Process() call (limited by radio_busy_).
+	// Parity is NOT sent here — it is deferred to the pass below so it always
+	// fires on a subsequent call when the radio is free.
 	for (uint16_t i = window_start_; i < window_end; ++i) {
 		if (!acked_[i] && !sent_[i]) {
 			SendDataPacket(i, now_ms);
-
-			// Emit parity when the last packet in a group is sent, or when
-			// the last packet in the whole transfer is sent.
-			const uint16_t group = i / kParityGroupSize;
-			const uint16_t pos_in_group = i % kParityGroupSize;
-			const bool last_in_group = (pos_in_group == kParityGroupSize - 1);
-			const bool last_packet = (i == packet_count_ - 1);
-
-			if ((last_in_group || last_packet) && parity_acc_[group].count > 0) {
-				SendParityPacket(group, now_ms);
-				std::memset(&parity_acc_[group], 0, sizeof(parity_acc_[group]));
-			}
-
 			if (radio_busy_)
 				break;
 		}
 	}
 
-	// Expire sent flags so timed-out packets are retransmitted next cycle.
+	// ── Deferred parity pass ─────────────────────────────────────────────────
+	// After the data burst, send any pending parity packets one per call.
+	// We only reach this path when radio_busy_ is false (burst is done).
+	if (!radio_busy_) {
+		const uint16_t num_groups = static_cast<uint16_t>(kMaxPackets / kParityGroupSize);
+		for (uint16_t g = 0; g < num_groups; ++g) {
+			if (parity_acc_[g].pending) {
+				if (SendParityPacket(g, now_ms)) {
+					// Success: clear the accumulator for this group.
+					std::memset(&parity_acc_[g], 0, sizeof(parity_acc_[g]));
+				}
+				// Whether it succeeded or not, only attempt one parity per call.
+				break;
+			}
+		}
+	}
+
+	// ── Retransmit-timeout expiry ────────────────────────────────────────────
+	// If the deferred ACK never arrives (e.g. the receiver missed the burst),
+	// clear sent_ so the packets are eligible for retransmission.
 	for (uint16_t i = window_start_; i < window_end; ++i) {
 		if (sent_[i] && !acked_[i] && (now_ms - last_tx_time_[i] > kRetxTimeoutMs)) {
 			sent_[i] = false;
-			// Clear parity accumulator so it is rebuilt from retransmitted data.
+			// Clear parity accumulator so it is rebuilt from the retransmitted data.
 			const uint16_t group = i / kParityGroupSize;
 			std::memset(&parity_acc_[group], 0, sizeof(parity_acc_[group]));
 		}
@@ -554,7 +581,26 @@ ParseResult Communication::ParseLoraFrame(const uint8_t *data, std::size_t len, 
 }
 
 void Communication::CheckFlightProfileTimeout(DeviceState &device_state) {
-	if (HAL_GetTick() - flight_profile_active_ms_ > kFlightProfileTimeoutMs)
+	uint32_t timeout_ms;
+
+	if (device_state == DeviceState::MetadataRequested) {
+		// Waiting for the app to send a FlightDataRequest after receiving
+		// the metadata list.  Short timeout — if nothing comes, the app dropped.
+		timeout_ms = kMetadataIdleTimeoutMs;
+
+	} else if (complete_) {
+		// Transfer finished; user is viewing the chart.  Normal exit arrives
+		// as a DisarmRequest when the user leaves the screen.  This long timeout
+		// is only a safety net for app crash or Bluetooth loss after chart load.
+		timeout_ms = kDataCompleteTimeoutMs;
+
+	} else {
+		// Transfer in progress.  ACKs should arrive every few seconds; if none
+		// come for kDataActiveTimeoutMs the app has likely disconnected.
+		timeout_ms = kDataActiveTimeoutMs;
+	}
+
+	if (HAL_GetTick() - flight_profile_active_ms_ > timeout_ms)
 		device_state = DeviceState::Disarmed;
 }
 

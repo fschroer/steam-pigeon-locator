@@ -27,9 +27,21 @@ public:
     void zeroPadReferenceAgl(float pad_msl_m, float agl_m = 0.0f);
     void applyPadGyroRecalibration(const Vec3f& gyro_rps, float alpha);
 
+    // Tilt correction from accelerometer — call when stationary on the pad.
+    // Projects the measured gravity direction onto the current attitude, computes
+    // the body-frame angular error between expected and measured gravity, and
+    // injects a fraction (gain) of that error into the attitude states via
+    // injectErrorState().  Yaw is unobservable from gravity and is untouched.
+    // Skips correction if |accel| deviates more than 30% from 1g (non-static).
+    void correctTiltFromAccel(const Vec3f& accel_mps2, float gain = 0.01f);
+
     NavSolution getSolution()    const { return m_sol; }
     bool isInitialized()         const { return m_initialized; }
     float getPadAltitudeMsl()    const { return m_pad_altitude_msl_m; }
+
+    // Set dynamic-pressure correction factor applied to baro altitude during flight.
+    // See NavConfig::pitot_correction_k for tuning guidance.
+    void setPitotCorrectionFactor(float k) { m_pitot_k = k; }
 
 private:
     void initializePDiagonal();
@@ -68,6 +80,9 @@ private:
     // Increase during powered flight to reduce baro influence when port-hole
     // lag causes the barometer to read behind the true altitude.
     float  m_R_baro                  = 0.25f;
+
+    // Dynamic-pressure correction factor for baro altitude (0 = disabled).
+    float  m_pitot_k                 = 0.0f;
 
     // WGS84 geometry cache
     double  m_cached_RM              = 6.356752e6;

@@ -1,2 +1,2 @@
 #pragma once
-static const char GIT_VERSION[] = "7c325c7-dirty";
+static const char GIT_VERSION[] = "d4c0063-dirty";

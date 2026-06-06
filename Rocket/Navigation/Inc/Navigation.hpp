@@ -29,6 +29,14 @@ public:
     bool Update();
     void CalibrateOnPadAndZeroAglUntilLaunch(FlightStates flight_state);
 
+    // Trigger cardinal-axis mounting detection.  Call once on each arm event.
+    // Accumulates kMountingCalSamples raw accelerometer readings to find which
+    // body axis is most closely aligned with gravity, then builds a permutation/
+    // sign matrix that remaps all subsequent IMU output to the standard body
+    // frame (+X = nose/up, +Y = right, +Z = down).  Resets gyro-bias-freeze and
+    // re-initialises the EKF once the window completes.
+    void triggerMountingCalibration();
+
     // Set EKF phase parameters (Q/R) and baro LPF alpha.
     // Call from FlightManager::UpdateFlightState() at each state transition.
     void setPhase(FlightStates state);
@@ -80,6 +88,62 @@ private:
     // IsStationary is private — used only by CalibrateOnPadAndZeroAglUntilLaunch.
     // Launch/burnout/apogee/landing detection is owned by FlightManager.
     bool IsStationary(const ImuSample& imu, const BaroSample& baro) const;
+
+    // ── Cardinal mounting detection ──────────────────────────────────────────
+    // Compact representation of a 90°-multiple body←sensor rotation.
+    // body_axis[i] = sign[i] * sensor_axis[src[i]]
+    // All six valid cases are proper rotations (det = +1).
+    struct MountingFrame {
+        uint8_t src[3];   // which sensor axis feeds each body axis (0=X,1=Y,2=Z)
+        int8_t  sign[3];  // +1 or -1
+    };
+
+    // Remap a single 3-component vector from sensor frame to body frame.
+    Vec3f remapVec(const Vec3f& v) const;
+
+    // Apply the current mounting frame to all accel and gyro fields of a sample.
+    void applyMountingFrame(ImuSample& imu) const;
+
+    // Inspect avg_raw_accel (averaged in sensor frame), determine the dominant
+    // gravity axis, set m_mounting, then re-initialise the EKF.
+    void commitMountingFrame(const Vec3f& avg_raw_accel);
+
+    MountingFrame  m_mounting             = {{0,1,2},{1,1,1}}; // identity (standard)
+    bool           m_mounting_cal_active  = false;
+    uint8_t        m_mounting_cal_count   = 0;
+    Vec3f          m_mounting_accel_accum = {};
+
+    // Once set, gyro-bias accumulation is suppressed until the next arm.
+    // Set when accel norm first exceeds the stationary tolerance during WaitingLaunch,
+    // indicating motor ignition or significant handling of the rocket.
+    bool           m_bias_frozen          = false;
+
+    static constexpr uint8_t kMountingCalSamples = 64; // 3.2 s at 20 Hz
+
+    // Maximum allowed deviation from 1 g for a sample to count toward the
+    // mounting-calibration average.  Samples outside [1 ± this] g (motor
+    // ignition, free-fall, handling) discard and restart the window, preventing
+    // a launch inside the window from committing a corrupted frame and
+    // re-initialising the EKF mid-flight.  0.5 g rejects thrust (>1.5 g) and
+    // free-fall (<0.5 g) while tolerating normal pad vibration and settling.
+    static constexpr float   kMountingCalMaxDeviationG = 0.5f;
+
+    // ── Descent tilt correction ──────────────────────────────────────────────
+    // Counts consecutive IMU samples where gyro magnitude is below the stable
+    // threshold.  Once the count reaches kDescentStableSamples, tilt correction
+    // from the accelerometer (gravity vector) is re-enabled, recovering roll and
+    // pitch accuracy degraded by gyro temperature drift during powered ascent.
+    // The counter is reset whenever rotation exceeds the threshold (pendulum
+    // peak) so correction only runs during genuinely quiet hanging phases.
+    uint8_t m_descent_stable_count = 0;
+
+    // Gyro-rate threshold below which the rocket is considered stable under
+    // canopy.  20 deg/s (~0.35 rad/s) admits slow pendulum swings while
+    // rejecting active tumbling or spin.
+    static constexpr float   kDescentStableGyroRps    = 0.349f; // 20 deg/s
+    // Number of consecutive stable samples required before tilt correction
+    // is applied.  40 × 50 ms = 2 s of uninterrupted stability.
+    static constexpr uint8_t kDescentStableSamples    = 40;
 
     ISM6HG256X m_imu;
     MS5611     m_baro;

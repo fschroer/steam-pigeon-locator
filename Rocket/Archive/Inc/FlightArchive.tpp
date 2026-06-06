@@ -267,6 +267,74 @@ namespace FlightArchive
         return WriteHeader(recordId, h);
     }
 
+    // BeginPrepareRecord / PollPrepareRecord: non-blocking replacement for PrepareRecord.
+    // BeginPrepareRecord issues the erase command for the first sector and returns.
+    // PollPrepareRecord must be called each main-loop tick; it returns true once the entire
+    // record region has been erased and the record header has been written.
+    template<typename TSample, typename TStatTraits, size_t ChunkPayloadBytes>
+    bool Archive<TSample, TStatTraits, ChunkPayloadBytes>::BeginPrepareRecord(uint16_t recordId)
+    {
+        if (!m_rt.initialized || !IsRecordIdValid(recordId))
+            return false;
+
+        m_rt.prepareRecordId = recordId;
+        m_rt.prepareOffset   = 0u;
+        m_rt.preparing       = true;
+
+        if (!m_flash.StartEraseSector4K(GetRecordBaseAddress(recordId)))
+        {
+            m_rt.preparing = false;
+            return false;
+        }
+        return true;
+    }
+
+    template<typename TSample, typename TStatTraits, size_t ChunkPayloadBytes>
+    bool Archive<TSample, TStatTraits, ChunkPayloadBytes>::PollPrepareRecord()
+    {
+        if (!m_rt.preparing)
+            return true;
+
+        if (m_flash.IsBusy())
+            return false;
+
+        const uint32_t sectorSize = m_flash.GetSectorSizeBytes();
+        const Geometry g          = GetGeometry();
+        const uint32_t base       = GetRecordBaseAddress(m_rt.prepareRecordId);
+
+        m_rt.prepareOffset += sectorSize;
+        if (m_rt.prepareOffset < g.recordSizeBytes)
+        {
+            m_flash.StartEraseSector4K(base + m_rt.prepareOffset);
+            return false;
+        }
+
+        // All sectors erased — write the record header exactly as PrepareRecord does.
+        RecordHeader h{};
+        h.magic                 = ARCHIVE_MAGIC;
+        h.version               = ARCHIVE_VERSION;
+        h.headerSize            = sizeof(RecordHeader);
+        h.recordId              = m_rt.prepareRecordId;
+        h.sequenceNumber        = FindNextSequenceNumber();
+        h.totalRecordSizeBytes  = g.recordSizeBytes;
+        h.validMarkerOffset     = g.validMarkerOffset;
+        h.validMarkerSizeBytes  = g.validMarkerSize;
+        h.statsRegionOffset     = g.statsOffset;
+        h.statsRegionSizeBytes  = g.statsRegionSize;
+        h.statsSlotCount        = m_cfg.statSlotCount;
+        h.statsSlotSizeBytes    = sizeof(StatSlot);
+        h.chunkRegionOffset     = g.chunkRegionOffset;
+        h.chunkRegionSizeBytes  = g.chunkRegionSize;
+        h.chunkStrideBytes      = g.chunkStrideBytes;
+        h.maxChunkCount         = g.maxChunkCount;
+        h.chunkPayloadBytes     = g.chunkPayloadBytes;
+        h.samplesPerChunk       = g.samplesPerChunk;
+        h.trailerOffset         = g.trailerOffset;
+
+        m_rt.preparing = false;
+        return WriteHeader(m_rt.prepareRecordId, h);
+    }
+
     template<typename TSample, typename TStatTraits, size_t ChunkPayloadBytes>
     bool Archive<TSample, TStatTraits, ChunkPayloadBytes>::InitializeFlightRecord(uint16_t recordId)
     {

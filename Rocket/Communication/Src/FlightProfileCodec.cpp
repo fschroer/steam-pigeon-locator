@@ -35,8 +35,8 @@ size_t PackSamples(const FlightArchive::FlightSample* samples,
     // Write absolute header from the first sample
     CompressedHeader hdr{};
     hdr.base_timestamp_ms = samples[0].timestamp_ms;
-//    hdr.base_altitude_m   = samples[0].fused_altitude_agl; // new telemetry data. Add other new elements when uncommenting
-    hdr.base_altitude_m   = samples[0].raw_baro_altitude_agl;
+    hdr.base_altitude_m   = samples[0].fused_altitude_agl;
+//    hdr.base_altitude_m   = samples[0].raw_baro_altitude_agl;
     hdr.base_accel_mps2   = samples[0].accel;
     hdr.base_gyro_dps     = samples[0].gyro;
     hdr.base_lat_rad      = samples[0].lat_rad;
@@ -58,8 +58,8 @@ size_t PackSamples(const FlightArchive::FlightSample* samples,
 
         // Time and kinematic fields: delta from previous sample
         d.d_timestamp_ms     = int16_t(s.timestamp_ms - prev.timestamp_ms);
-//        d.d_alt_0p1m         = int16_t(std::round((s.fused_altitude_agl  - prev.fused_altitude_agl)  * 10.0f)); // new telemetry data. Add other new elements when uncommenting
-        d.d_alt_0p1m         = int16_t(std::round((s.raw_baro_altitude_agl  - prev.raw_baro_altitude_agl)  * 10.0f));
+        d.d_alt_0p1m         = int16_t(std::round((s.fused_altitude_agl  - prev.fused_altitude_agl)  * 10.0f));
+//        d.d_alt_0p1m         = int16_t(std::round((s.raw_baro_altitude_agl  - prev.raw_baro_altitude_agl)  * 10.0f));
         d.d_accel_x_0p1mps2  = int16_t(std::round((s.accel.x    - prev.accel.x)     * 10.0f));
         d.d_accel_y_0p1mps2  = int16_t(std::round((s.accel.y    - prev.accel.y)     * 10.0f));
         d.d_accel_z_0p1mps2  = int16_t(std::round((s.accel.z    - prev.accel.z)     * 10.0f));
@@ -102,8 +102,8 @@ size_t UnpackSamples(const uint8_t* payload,
     // Reconstruct the first sample from the absolute header values
     FlightArchive::FlightSample prev{};
     prev.timestamp_ms = hdr.base_timestamp_ms;
-//    prev.fused_altitude_agl   = hdr.base_altitude_m; // new telemetry data. Add other new elements when uncommenting
-    prev.raw_baro_altitude_agl   = hdr.base_altitude_m;
+    prev.fused_altitude_agl   = hdr.base_altitude_m;
+//    prev.raw_baro_altitude_agl   = hdr.base_altitude_m;
     prev.accel        = hdr.base_accel_mps2;
     prev.gyro         = hdr.base_gyro_dps;
     prev.lat_rad      = hdr.base_lat_rad;
@@ -121,8 +121,8 @@ size_t UnpackSamples(const uint8_t* payload,
 
         // Kinematic fields: apply delta to previous sample
         s.timestamp_ms = prev.timestamp_ms + d.d_timestamp_ms;
-//        s.fused_altitude_agl   = prev.fused_altitude_agl   + d.d_alt_0p1m        / 10.0f; // new telemetry data. Add other new elements when uncommenting
-        s.raw_baro_altitude_agl   = prev.raw_baro_altitude_agl   + d.d_alt_0p1m        / 10.0f;
+        s.fused_altitude_agl   = prev.fused_altitude_agl   + d.d_alt_0p1m        / 10.0f;
+//        s.raw_baro_altitude_agl   = prev.raw_baro_altitude_agl   + d.d_alt_0p1m        / 10.0f;
         s.accel.x      = prev.accel.x      + d.d_accel_x_0p1mps2 / 10.0f;
         s.accel.y      = prev.accel.y      + d.d_accel_y_0p1mps2 / 10.0f;
         s.accel.z      = prev.accel.z      + d.d_accel_z_0p1mps2 / 10.0f;

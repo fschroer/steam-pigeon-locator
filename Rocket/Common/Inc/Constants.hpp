@@ -3,6 +3,12 @@
 #include "Constants.h"
 
 static constexpr uint16_t samples_per_second = SAMPLES_PER_SECOND;
+
+// Maximum time allowed for any single sensor bus operation (SPI or I2C).
+// Generous relative to actual hardware transfer times (SPI burst: ~µs,
+// I2C byte at 400 kHz: ~25 µs) but well within any reasonable IWDG window.
+// Used as the default HAL SPI timeout and the per-byte/stop I2C timeout.
+static constexpr uint32_t kSensorBusTimeoutMs = 5u;
 constexpr uint16_t millis_per_second = 1000;
 constexpr uint8_t altimeter_scale = 10;
 constexpr uint8_t deploy_signal_duration = 10; // tenths of a second

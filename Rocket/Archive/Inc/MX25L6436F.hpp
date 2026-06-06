@@ -86,6 +86,29 @@ public:
         return WaitWhileBusy(ERASE_TIMEOUT_MS);
     }
 
+    bool StartEraseSector4K(uint32_t address) override
+    {
+        if (!WriteEnable())
+            return false;
+
+        uint8_t cmd[4];
+        cmd[0] = CMD_SECTOR_ERASE_4K;
+        cmd[1] = (address >> 16) & 0xFF;
+        cmd[2] = (address >> 8)  & 0xFF;
+        cmd[3] = (address >> 0)  & 0xFF;
+
+        Select();
+        bool ok = (HAL_SPI_Transmit(hspi_, cmd, sizeof(cmd), HAL_MAX_DELAY) == HAL_OK);
+        Deselect();
+
+        return ok;
+    }
+
+    bool IsBusy() override
+    {
+        return (ReadStatusReg1() & SR1_WIP) != 0;
+    }
+
     bool WaitWhileBusy(uint32_t timeoutMs) override
     {
         uint32_t start = HAL_GetTick();

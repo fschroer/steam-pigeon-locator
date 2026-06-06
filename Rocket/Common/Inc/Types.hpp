@@ -205,6 +205,13 @@ struct NavConfig {
     float baro_agl_lpf_alpha = 0.02f;
     float gyro_pad_bias_alpha = 0.01f;
 
+    // Baro dynamic-pressure correction factor (0 = disabled).
+    // Adds k * v² / (2g) to the raw baro altitude during flight to compensate
+    // for ram pressure biasing the sensor low. Tune empirically from post-flight
+    // data; start at 0 and increase by 0.1 steps until ascent altitude matches
+    // GPS altitude. Typical range 0.2–0.6 depending on sensor bay geometry.
+    float pitot_correction_k = 0.0f;
+
     bool use_gps = true;
     bool use_baro = true;
 };

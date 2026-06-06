@@ -77,9 +77,16 @@ private:
     uint32_t     m_apogee_last_increase_ms_    = 0;
 
     // Apogee detection thresholds
-    static constexpr float    kVzThresholdMps       = 2.0f;   // m/s descending
+    static constexpr float    kVzThresholdMps       = 1.0f;   // m/s descending
     static constexpr uint16_t kNoIncreaseWindowMs   = 500;    // ms without new peak
 
-    // Burnout detection threshold
-    static constexpr float kBurnoutAccelG = 1.5f;  // accel drops below this at burnout
+    // Burnout detection threshold and debounce
+    static constexpr float   kBurnoutAccelG        = 1.5f;  // accel drops below this at burnout
+    static constexpr uint8_t kBurnoutConfirmSamples = 3;    // 150 ms sustained below threshold
+    uint8_t m_burnout_count_ = 0;
+
+    // Landing detection threshold and debounce
+    static constexpr float   kLandedSpeedMps        = 0.25f; // |vertical speed| at rest
+    static constexpr uint8_t kLandedConfirmSamples  = 20;    // 1.0 s sustained quiescence
+    uint8_t m_landed_count_  = 0;
 };

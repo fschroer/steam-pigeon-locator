@@ -263,13 +263,40 @@ void InsEkf15::predict(const ImuSample& imu, float dt_s) {
 
     for (int i = 0; i < n; ++i)
         P[i * n + i] += Q[i * n + i] * dt_s;
+
+    // Position-velocity cross-covariance propagation (off-diagonal F*P*F^T terms).
+    //
+    // A full covariance propagation F*P*F^T with F[pos,vel]=dt produces:
+    //   P_new[pos,vel] = P[pos,vel] + P[vel,vel]*dt
+    //   P_new[pos,pos] = P[pos,pos] + 2*P[pos,vel]*dt + P[vel,vel]*dt^2
+    //
+    // Previously only the diagonal P[pos,pos] terms were updated (using the
+    // P[vel,vel]*dt^2 term), leaving P[pos,vel] permanently near zero.  With
+    // P[pos,vel]≈0 the Kalman gain for velocity from any position measurement
+    // (baro altitude, GPS position) is K[vel] = P[vel,pos]/S ≈ 0, meaning:
+    //   - Baro updates never correct vertical velocity → apogee detection and
+    //     deployment altitude accuracy rely entirely on IMU integration and
+    //     GPS velocity, with no baro-driven vel_D correction.
+    //   - GPS position updates never correct velocity → position and velocity
+    //     states decouple, requiring GPS velocity updates to carry the full
+    //     velocity correction burden.
+    //
+    // NED convention: alt_dot = -vel_D, so F[alt, vel_D] = -dt.
+    // Horizontal: lat_dot = vel_N/(R+alt), lon_dot = vel_E/((R+alt)*cosLat),
+    //             so F[lat, vel_N] = F[lon, vel_E] = +dt (approximate).
+    P[0*n+3] += P[3*n+3] * dt_s;   P[3*n+0] = P[0*n+3];   // lat  – vel_N
+    P[1*n+4] += P[4*n+4] * dt_s;   P[4*n+1] = P[1*n+4];   // lon  – vel_E
+    P[2*n+5] -= P[5*n+5] * dt_s;   P[5*n+2] = P[2*n+5];   // alt  – vel_D (sign: alt_dot = -vel_D)
+
+    // Diagonal position variance growth = velocity-position coupling + explicit
+    // process noise.  The 2*P[pos,vel]*dt term is now included via the updated
+    // cross-covariance above; only the dt^2 and m_q_alt terms remain here.
+    // Without m_q_alt, baro updates at 20Hz shrink P[2,2] toward ~0.001 m²,
+    // giving K_baro ≈ 0.004 and a 12+ second correction time constant for tilt
+    // events.  m_q_alt keeps P[2,2] at a level where K_baro remains effective
+    // (~0.09 on pad with m_q_alt=0.05, giving ~0.5s recovery).
     P[0*n+0] += P[3*n+3] * dt_s * dt_s;
     P[1*n+1] += P[4*n+4] * dt_s * dt_s;
-    // Altitude variance growth = velocity-position coupling + explicit process noise.
-    // Without m_q_alt, baro updates at 20Hz shrink P[2,2] toward ~0.001 m², giving
-    // K_baro ≈ 0.004 and a 12+ second correction time constant for tilt events.
-    // m_q_alt (set per phase by setPhase()) keeps P[2,2] at a level where K_baro
-    // remains effective (~0.09 on pad with m_q_alt=0.05, giving ~0.5s recovery).
     P[2*n+2] += P[5*n+5] * dt_s * dt_s + m_q_alt * dt_s;
     symmetrizeP();
 }
@@ -284,7 +311,20 @@ void InsEkf15::updateBaro(const BaroSample& baro) {
     if (!m_initialized || !baro.valid) return;
     constexpr int n = 15;
 
-    const float z = baro.altitude_m_msl;
+    float z = baro.altitude_m_msl;
+
+    // Dynamic-pressure (pitot) correction: during fast ascent the sensor port
+    // sees ram pressure and reads lower than true static altitude.  Add back
+    // the altitude equivalent of dynamic pressure: Δh = k·v²/(2g).
+    // Only applied while airborne (horizontal position propagation is enabled).
+    // m_pitot_k defaults to 0 (off); tune from post-flight GPS vs baro data.
+    if (m_propagate_horiz_pos_ && m_pitot_k > 0.0f) {
+        const float v2 = m_sol.vel_ned_mps.x * m_sol.vel_ned_mps.x
+                       + m_sol.vel_ned_mps.y * m_sol.vel_ned_mps.y
+                       + m_sol.vel_ned_mps.z * m_sol.vel_ned_mps.z;
+        z += m_pitot_k * v2 / (2.0f * m_cached_g);
+    }
+
     const float h = static_cast<float>(m_sol.pos.alt_m);
     const float y = z - h;
 
@@ -631,6 +671,72 @@ void InsEkf15::zeroPadReferenceAgl(float pad_msl_m, float agl_m) {
 // ---------------------------------------------------------------------------
 // applyPadGyroRecalibration / symmetrizeP
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// correctTiltFromAccel
+//
+// Keeps roll and pitch aligned with gravity while the device is stationary on
+// the pad.  Without this, gyro integration drifts the attitude quaternion over
+// the minutes the locator sits armed, and any accumulated tilt error at launch
+// immediately becomes gravity leakage once inertial propagation activates.
+//
+// Mechanism:
+//   1. Rotate the expected gravity vector [0,0,g] from nav to body using the
+//      current attitude to get g_body_expected.
+//   2. Normalise the raw accelerometer reading to the same magnitude to get
+//      g_body_measured.
+//   3. The cross product (expected × measured) gives the axis-angle rotation
+//      error in the body frame; its magnitude is sin(θ_error) ≈ θ_error for
+//      small angles.
+//   4. Apply gain * error through injectErrorState() — the same small-angle
+//      quaternion injection path used by all EKF measurement updates — so the
+//      attitude covariance P[6..8] remains consistent.
+//
+// Yaw: quatFromAccel() always sets yaw=0, so it must never be used directly
+// here.  Using the cross-product approach instead means the correction vector
+// has no yaw component when the error is purely a tilt: a gravity-derived
+// correction can only observe the two axes perpendicular to gravity, leaving
+// yaw (rotation about gravity) uncorrected.
+//
+// Gain: 0.01 at 20 Hz gives a correction time constant of ~5 seconds, fast
+// enough to remove a 5° drift in under a minute but slow enough to reject
+// brief vibration spikes that pass the 30%-of-g quasi-static gate.
+// ---------------------------------------------------------------------------
+void InsEkf15::correctTiltFromAccel(const Vec3f& accel_mps2, float gain) {
+    if (!m_initialized) return;
+
+    // Quasi-static gate: skip if total accel differs from 1g by more than 30%.
+    const float a_norm = std::sqrt(accel_mps2.x * accel_mps2.x
+                                 + accel_mps2.y * accel_mps2.y
+                                 + accel_mps2.z * accel_mps2.z);
+    if (std::fabs(a_norm - G0_F) > 0.3f * G0_F || a_norm < 1e-6f) return;
+
+    // Expected gravity direction in body frame given current attitude estimate.
+    // g in nav frame is [0, 0, +g] (NED: positive down).
+    const Vec3f g_nav      = { 0.0f, 0.0f, m_cached_g };
+    const Vec3f g_expected = Math::rotateNavToBody(m_sol.q_bn, g_nav);
+
+    // Measured gravity direction scaled to the same magnitude as g_expected
+    // so the cross product gives a pure angular error, not a scale error.
+    const float scale      = m_cached_g / a_norm;
+    const Vec3f g_measured = { accel_mps2.x * scale,
+                                accel_mps2.y * scale,
+                                accel_mps2.z * scale };
+
+    // Cross product: expected × measured = axis * sin(angle_error).
+    // For small errors sin(angle) ≈ angle, giving the body-frame tilt error
+    // in radians directly.  The correction points from expected toward measured.
+    const Vec3f err = Math::cross(g_expected, g_measured);
+
+    // Inject as a small-angle attitude correction — identical path to all other
+    // EKF attitude updates.  dx[0..5] and dx[9..14] are zero, so only the
+    // attitude states [6..8] and their covariance rows/columns are affected.
+    float dx[15] = {};
+    dx[6] = gain * err.x;
+    dx[7] = gain * err.y;
+    dx[8] = gain * err.z;
+    injectErrorState(dx);
+}
+
 void InsEkf15::applyPadGyroRecalibration(const Vec3f& gyro_rps, float alpha) {
     m_sol.gyro_bias_rps.x = (1.0f - alpha)*m_sol.gyro_bias_rps.x + alpha*gyro_rps.x;
     m_sol.gyro_bias_rps.y = (1.0f - alpha)*m_sol.gyro_bias_rps.y + alpha*gyro_rps.y;

@@ -65,16 +65,31 @@ struct Note {
     uint8_t volume; // 1-3 valid
 };
 
+constexpr Note PowerOn[] = {
+		{ Tone::F7, 2, 1 },
+		{ Tone::Fs7, 2, 1 },
+		{ Tone::G7, 2, 1 },
+		{ Tone::Gs7, 2, 1 },
+		{ Tone::A7, 2, 1 },
+		{ Tone::As7, 2, 1 },
+		{ Tone::B7, 2, 1 },
+		{ Tone::C8, 2, 1 },
+		{ Tone::Cs8, 2, 1 },
+		{ Tone::D8, 2, 1 },
+		{ Tone::Ds8, 2, 1 },
+		{ Tone::E8, 2, 1 },
+		{ Tone::F8, 2, 1 },
+};
+
 constexpr Note Arming[] = {
 		{ Tone::C8, 3, 1 },
 		{ Tone::D8, 3, 1 },
-		{ Tone::Rest, 24, 0 },
+		{ Tone::Rest, 34, 0 },
 };
 
 constexpr Note Disarming[] = {
 		{ Tone::D8, 3, 1 },
 		{ Tone::C8, 3, 1 },
-		{ Tone::Rest, 24, 0 },
 };
 
 constexpr Note Armed[] = {
@@ -85,10 +100,10 @@ constexpr Note Armed[] = {
 };
 
 constexpr Note Landed[] = {
-		{ Tone::As7, 3, 3 },
-		{ Tone::B7, 3, 3 },
-		{ Tone::C8, 3, 3 },
-		{ Tone::Rest, 31, 0 },
+		{ Tone::A7, 2, 3 },
+		{ Tone::B7, 2, 3 },
+		{ Tone::C8, 2, 3 },
+		{ Tone::Rest, 34, 0 },
 };
 
 constexpr Note AnotherOneBitesTheDust[] = {
@@ -149,7 +164,7 @@ constexpr Note AnotherOneBitesTheDust[] = {
 		{ Tone::G7, 3, 3 },
 		{ Tone::G7, 3, 3 },
 		{ Tone::G7, 3, 3 },
-		{ Tone::D8, 9, 3 },
+		{ Tone::A8, 9, 3 },
 		{ Tone::Rest, 3, 0 },
 		{ Tone::E7, 3, 3 },
 
@@ -171,7 +186,7 @@ constexpr Note AnotherOneBitesTheDust[] = {
 		{ Tone::D8, 3, 3 },
 		{ Tone::D8, 3, 3 },
 		{ Tone::D8, 3, 3 },
-		{ Tone::G8, 9, 3 },
+		{ Tone::G7, 9, 3 },
 		{ Tone::G7, 3, 3 },
 		{ Tone::G7, 3, 3 },
 

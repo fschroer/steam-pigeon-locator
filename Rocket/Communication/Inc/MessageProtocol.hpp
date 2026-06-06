@@ -14,14 +14,13 @@ constexpr size_t kMaxPayloadBytes = 255;
 constexpr uint8_t system_id = 0x44;
 constexpr uint16_t kCrc16Poly = 0xA001;   // CRC‑16/IBM reflected polynomial
 constexpr uint16_t kCrc16Key = 0xFFFF;   // standard initial value
-// Stop-and-wait: the locator sends ONE flight-data packet, then stays in RX
-// (idle, listening) until the app's ACK is relayed back through the receiver.
-// A larger window blasts packets back-to-back; because the link is half-duplex
-// AND relayed (locator <-LoRa-> receiver <-BT-> app), the locator is deaf while
-// transmitting the next window packet, so the relayed ACK collides with the
-// outgoing data and is lost — the transfer stalls after packet 0.  Window of 1
-// guarantees the locator is listening exactly when the ACK comes back.
-static constexpr uint16_t kWindowSize = 1;
+// Burst window size.  The locator sends kWindowSize data packets (plus one
+// parity per group of kParityGroupSize) back-to-back, then goes quiet and
+// listens.  The receiver defers the cumulative ACK until the burst has been
+// silent for kAckDeferMs, so the ACK is only sent once the locator's radio
+// is idle and listening.  kRetxTimeoutMs must exceed the full burst time +
+// deferral + ACK airtime (see Communication.hpp for the budget).
+static constexpr uint16_t kWindowSize = 4;
 static constexpr uint16_t kParityGroupSize = 4;
 
 enum class MsgState : uint8_t {
@@ -109,9 +108,8 @@ struct TelemetryData {
 	uint8_t deployment_ch4_stats;
 	uint8_t physical_deployment_stats;
 	float agl;
-	Vec3f accel;
-	Vec3f gyro;
-	float velocity;
+	Vec3f vel_ned_mps;    // fused NED velocity (north, east, down) m/s
+	Quaternionf q_bn;     // body-to-NED attitude quaternion (w, x, y, z)
 	FlightStates flight_state;
 };
 

@@ -1,5 +1,6 @@
 #include "SAMM10Q.hpp"
 #include "Units.hpp"
+#include "Constants.hpp"
 
 #include <type_traits>
 #include <cstdint>
@@ -296,6 +297,9 @@ bool SAMM10Q::sendUbxAndWaitAck(const uint8_t* msg, uint16_t len, uint8_t cls, u
 }
 
 bool SAMM10Q::sendUbx(const uint8_t* msg, uint16_t len) {
+  constexpr uint32_t kByteTimeoutMs = kSensorBusTimeoutMs;
+  constexpr uint32_t kStopTimeoutMs = kSensorBusTimeoutMs;
+
   i2cReset();
 
   LL_I2C_HandleTransfer(m_hi2c->Instance,
@@ -306,14 +310,20 @@ bool SAMM10Q::sendUbx(const uint8_t* msg, uint16_t len) {
                         LL_I2C_GENERATE_START_WRITE);
 
   for (uint16_t i = 0; i < len; i++) {
+      const uint32_t t0 = HAL_GetTick();
       while (!LL_I2C_IsActiveFlag_TXIS(m_hi2c->Instance)) {
-          if (LL_I2C_IsActiveFlag_NACK(m_hi2c->Instance))
-              return false;
+          if (LL_I2C_IsActiveFlag_NACK(m_hi2c->Instance)) return false;
+          if ((HAL_GetTick() - t0) >= kByteTimeoutMs) { i2cReset(); return false; }
       }
       LL_I2C_TransmitData8(m_hi2c->Instance, msg[i]);
   }
 
-  while (!LL_I2C_IsActiveFlag_STOP(m_hi2c->Instance)) {}
+  {
+      const uint32_t t0 = HAL_GetTick();
+      while (!LL_I2C_IsActiveFlag_STOP(m_hi2c->Instance)) {
+          if ((HAL_GetTick() - t0) >= kStopTimeoutMs) { i2cReset(); return false; }
+      }
+  }
   LL_I2C_ClearFlag_STOP(m_hi2c->Instance);
 
   return true;
@@ -353,6 +363,15 @@ bool SAMM10Q::waitForAck(uint8_t cls, uint8_t id, uint32_t timeout_ms) {
 bool SAMM10Q::readFifo(uint8_t *buf, uint16_t &len) {
   const uint16_t chunk = 128;   // tune as desired
 
+  // Per-byte and per-transaction timeout (ms).
+  // The SAM-M10Q before lock is doing heavy autonomous-aiding work and
+  // frequently clock-stretches the I2C bus.  Without these guards the
+  // busy-wait loops spin indefinitely, stalling the main loop and eventually
+  // triggering the IWDG.  5 ms is far longer than any legitimate I2C byte
+  // transfer at 400 kHz but short enough to return before the IWDG fires.
+  constexpr uint32_t kByteTimeoutMs = kSensorBusTimeoutMs;
+  constexpr uint32_t kStopTimeoutMs = kSensorBusTimeoutMs;
+
   i2cReset();
 
   // Phase 1: select FIFO pop window (0xFF)
@@ -363,14 +382,22 @@ bool SAMM10Q::readFifo(uint8_t *buf, uint16_t &len) {
                         LL_I2C_MODE_AUTOEND,
                         LL_I2C_GENERATE_START_WRITE);
 
-  while (!LL_I2C_IsActiveFlag_TXIS(m_hi2c->Instance)) {
-      if (LL_I2C_IsActiveFlag_NACK(m_hi2c->Instance))
-          return false;
+  {
+      const uint32_t t0 = HAL_GetTick();
+      while (!LL_I2C_IsActiveFlag_TXIS(m_hi2c->Instance)) {
+          if (LL_I2C_IsActiveFlag_NACK(m_hi2c->Instance)) return false;
+          if ((HAL_GetTick() - t0) >= kByteTimeoutMs) { i2cReset(); return false; }
+      }
   }
 
   LL_I2C_TransmitData8(m_hi2c->Instance, 0xFF);
 
-  while (!LL_I2C_IsActiveFlag_STOP(m_hi2c->Instance)) {}
+  {
+      const uint32_t t0 = HAL_GetTick();
+      while (!LL_I2C_IsActiveFlag_STOP(m_hi2c->Instance)) {
+          if ((HAL_GetTick() - t0) >= kStopTimeoutMs) { i2cReset(); return false; }
+      }
+  }
   LL_I2C_ClearFlag_STOP(m_hi2c->Instance);
 
   // Phase 2: read FIFO bytes
@@ -381,20 +408,22 @@ bool SAMM10Q::readFifo(uint8_t *buf, uint16_t &len) {
                         LL_I2C_MODE_AUTOEND,
                         LL_I2C_GENERATE_START_READ);
 
-  uint32_t start = HAL_GetTick();
   for (uint16_t i = 0; i < chunk; i++) {
+      const uint32_t t0 = HAL_GetTick();
       while (!LL_I2C_IsActiveFlag_RXNE(m_hi2c->Instance)) {
-          if (LL_I2C_IsActiveFlag_NACK(m_hi2c->Instance))
-              return false;
+          if (LL_I2C_IsActiveFlag_NACK(m_hi2c->Instance)) return false;
+          if ((HAL_GetTick() - t0) >= kByteTimeoutMs) { i2cReset(); return false; }
       }
       buf[i] = LL_I2C_ReceiveData8(m_hi2c->Instance);
   }
-  volatile uint32_t elapsedPhaseOne = HAL_GetTick() - start;
-  start = HAL_GetTick();
 
-  while (!LL_I2C_IsActiveFlag_STOP(m_hi2c->Instance)) {}
+  {
+      const uint32_t t0 = HAL_GetTick();
+      while (!LL_I2C_IsActiveFlag_STOP(m_hi2c->Instance)) {
+          if ((HAL_GetTick() - t0) >= kStopTimeoutMs) { i2cReset(); return false; }
+      }
+  }
   LL_I2C_ClearFlag_STOP(m_hi2c->Instance);
-  volatile uint32_t elapsedPhaseTwo = HAL_GetTick() - start;
 
   len = chunk;
   return true;

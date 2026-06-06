@@ -3,6 +3,7 @@ extern "C" {
 #include "stm32wlxx_hal.h"
 #include <cstdint>
 }
+#include "Constants.hpp"
 
 namespace RocketNav {
 
@@ -11,7 +12,7 @@ public:
     SpiDevice(SPI_HandleTypeDef* hspi, GPIO_TypeDef* cs_port, uint16_t cs_pin)
         : m_hspi(hspi), m_cs_port(cs_port), m_cs_pin(cs_pin) {}
 
-    bool transfer(const uint8_t* tx, uint8_t* rx, uint16_t len, uint32_t timeout_ms = 10) {
+    bool transfer(const uint8_t* tx, uint8_t* rx, uint16_t len, uint32_t timeout_ms = kSensorBusTimeoutMs) {
         select();
         HAL_StatusTypeDef st = HAL_SPI_TransmitReceive(m_hspi,
                                                        const_cast<uint8_t*>(tx),
@@ -22,14 +23,14 @@ public:
         return st == HAL_OK;
     }
 
-    bool write(const uint8_t* tx, uint16_t len, uint32_t timeout_ms = 10) {
+    bool write(const uint8_t* tx, uint16_t len, uint32_t timeout_ms = kSensorBusTimeoutMs) {
         select();
         HAL_StatusTypeDef st = HAL_SPI_Transmit(m_hspi, const_cast<uint8_t*>(tx), len, timeout_ms);
         deselect();
         return st == HAL_OK;
     }
 
-    bool readAfterWriteByte(uint8_t cmd, uint8_t* rx, uint16_t len, uint32_t timeout_ms = 10) {
+    bool readAfterWriteByte(uint8_t cmd, uint8_t* rx, uint16_t len, uint32_t timeout_ms = kSensorBusTimeoutMs) {
         select();
         HAL_StatusTypeDef st1 = HAL_SPI_Transmit(m_hspi, &cmd, 1, timeout_ms);
         HAL_StatusTypeDef st2 = HAL_SPI_Receive(m_hspi, rx, len, timeout_ms);

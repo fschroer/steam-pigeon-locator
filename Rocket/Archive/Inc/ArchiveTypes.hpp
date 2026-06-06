@@ -7,7 +7,7 @@
 
 namespace FlightArchive
 {
-	enum class ExampleStatId : uint16_t
+	enum class Statistic : uint16_t
 	{
 			FlightNumber = 0,
 			FlightTimestampS,
@@ -38,32 +38,32 @@ namespace FlightArchive
 
 #pragma pack(push, 1)
 
-	struct FlightSample
-	{
-			uint32_t timestamp_ms;
-			Vec3f accel;
-			Vec3f gyro;
-			float raw_baro_altitude_agl;
-			double lat_rad;
-			double lon_rad;
-	};
-
-//	struct FlightSample // new telemetry data
+//	struct FlightSample
 //	{
-//		uint32_t timestamp_ms;
-//		float raw_baro_altitude_agl;
-//		float fused_altitude_agl;
-//		float raw_baro_velocity;
-//		float fused_vertical_speed_mps;
-//		Vec3f accel;
-//		Vec3f gyro;
-//		double lat_rad;
-//		double lon_rad;
+//			uint32_t timestamp_ms;
+//			Vec3f accel;
+//			Vec3f gyro;
+//			float raw_baro_altitude_agl;
+//			double lat_rad;
+//			double lon_rad;
 //	};
+
+	struct FlightSample // new telemetry data
+	{
+		uint32_t timestamp_ms;
+		float raw_baro_altitude_agl;
+		float fused_altitude_agl;
+		float raw_baro_velocity;
+		float fused_vertical_speed_mps;
+		Vec3f accel;
+		Vec3f gyro;
+		double lat_rad;
+		double lon_rad;
+	};
 
 #pragma pack(pop)
 
     static_assert(IsSerializable<FlightSample>(), "ExampleFlightSample must be serializable.");
 
-    using ExampleEventStats = EventStatTraits<ExampleStatId, 8u>;
+    using ExampleEventStats = EventStatTraits<Statistic, 8u>;
 }

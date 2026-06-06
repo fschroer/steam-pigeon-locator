@@ -51,8 +51,19 @@ bool FlightManager::DetectLaunch(const NavSolution& sol) {
     // unzeroed MSL altitude (hundreds of metres), falsely triggering launch.
     const float accel_g = RocketNav::Math::norm(sol.body_accel_mps2) / G0_F;
 
+    // Two independent paths to launch detection:
+    //   1. High-accel alone (≥5 g): fast response regardless of AGL validity.
+    //      Covers a bad barometer or a pad reference that has not yet converged.
+    //   2. AGL + moderate-accel combined: requires the rocket to have risen past
+    //      the configured threshold AND to be under at least partial thrust
+    //      (> 1 g total = any net acceleration above gravity).  The accel gate
+    //      prevents a spurious AGL reading caused by an unzeroed pad reference
+    //      from triggering launch while the locator sits on the ground (where
+    //      body accel ≈ 1 g, well below kLaunchConfirmAccelG).
+    constexpr float kLaunchConfirmAccelG = 1.5f;  // > 1 g = thrust is present
     const bool threshold = (accel_g >= 5.0f)
-                        || (sol.altitude_agl_m >= settings.launch_detect_altitude);
+                        || (accel_g >= kLaunchConfirmAccelG
+                            && sol.altitude_agl_m >= settings.launch_detect_altitude);
 
     const uint32_t now = HAL_GetTick();
     if (threshold) {
@@ -75,7 +86,20 @@ bool FlightManager::DetectLaunch(const NavSolution& sol) {
 // ---------------------------------------------------------------------------
 bool FlightManager::DetectBurnout(const NavSolution& sol) {
     const float accel_g = RocketNav::Math::norm(sol.body_accel_mps2) / G0_F;
-    return accel_g < kBurnoutAccelG;
+
+    // Debounce: require kBurnoutConfirmSamples consecutive sub-threshold samples
+    // before declaring burnout.  A single-sample test could fire on a transient
+    // thrust dip (regressive / dual-thrust grains, vibration) and prematurely
+    // switch the EKF into the coast phase.  The counter resets on any sample
+    // back above threshold, so only a sustained acceleration collapse — the real
+    // burnout signature — advances the state.
+    if (accel_g < kBurnoutAccelG) {
+        if (m_burnout_count_ < kBurnoutConfirmSamples)
+            ++m_burnout_count_;
+    } else {
+        m_burnout_count_ = 0;
+    }
+    return m_burnout_count_ >= kBurnoutConfirmSamples;
 }
 
 // ---------------------------------------------------------------------------
@@ -106,7 +130,20 @@ bool FlightManager::DetectApogee(const NavSolution& sol) {
 // Uses getFused() so the EKF-smoothed speed is used rather than raw noisy baro.
 // ---------------------------------------------------------------------------
 bool FlightManager::DetectLanded(const NavSolution& sol) {
-    return std::fabs(sol.vertical_speed_mps) < 0.25f;
+    // Debounce: require kLandedConfirmSamples consecutive near-zero vertical
+    // speed samples before declaring landing.  A false landing is costly — it
+    // ends the deployment window (the >= Noseover && < Landed block stops
+    // running) and halts flight archiving — so a 1 s sustained quiescence is
+    // required rather than a single sample, guarding against an isolated EKF
+    // velocity glitch during descent.  Steady descent under canopy holds vz at
+    // several m/s, so this only accumulates once the rocket is truly at rest.
+    if (std::fabs(sol.vertical_speed_mps) < kLandedSpeedMps) {
+        if (m_landed_count_ < kLandedConfirmSamples)
+            ++m_landed_count_;
+    } else {
+        m_landed_count_ = 0;
+    }
+    return m_landed_count_ >= kLandedConfirmSamples;
 }
 
 // ---------------------------------------------------------------------------
@@ -124,7 +161,7 @@ void FlightManager::UpdateFlightState() {
             ResetFlight();
             flight_state_ = FlightStates::Launched;
             nav_.setPhase(FlightStates::Launched);
-            archive_.WriteEvent(FlightArchive::ExampleStatId::LaunchTimestampMs, flight_time_ms);
+            archive_.WriteEvent(FlightArchive::Statistic::LaunchTimestampMs, flight_time_ms);
             deployment_ch1_stats_ = static_cast<uint8_t>(locator_settings.deployment_ch1_mode);
             deployment_ch2_stats_ = static_cast<uint8_t>(locator_settings.deployment_ch2_mode);
             deployment_ch3_stats_ = static_cast<uint8_t>(locator_settings.deployment_ch3_mode);
@@ -137,7 +174,7 @@ void FlightManager::UpdateFlightState() {
         if (DetectBurnout(nav_solution)) {
             flight_state_ = FlightStates::Burnout;
             nav_.setPhase(FlightStates::Burnout);
-            archive_.WriteEvent(FlightArchive::ExampleStatId::BurnoutTimestampMs, flight_time_ms);
+            archive_.WriteEvent(FlightArchive::Statistic::BurnoutTimestampMs, flight_time_ms);
         }
     }
 
@@ -147,9 +184,9 @@ void FlightManager::UpdateFlightState() {
             noseover_time_ = 0;
             flight_state_  = FlightStates::Noseover;
             nav_.setPhase(FlightStates::Noseover);
-            archive_.WriteEvent(FlightArchive::ExampleStatId::NoseoverTimestampMs,  flight_time_ms);
-            archive_.WriteEvent(FlightArchive::ExampleStatId::ApogeeTimestampMs,    flight_time_ms);
-            archive_.WriteEvent(FlightArchive::ExampleStatId::MaxAltitudeM,         nav_.getMaxAltitude());
+            archive_.WriteEvent(FlightArchive::Statistic::NoseoverTimestampMs,  flight_time_ms);
+            archive_.WriteEvent(FlightArchive::Statistic::ApogeeTimestampMs,    flight_time_ms);
+            archive_.WriteEvent(FlightArchive::Statistic::MaxAltitudeM,         nav_.getMaxAltitude());
             near_apogee_ = true;
         }
     }
@@ -193,7 +230,7 @@ void FlightManager::UpdateFlightState() {
             }
             flight_state_ = FlightStates::DroguePrimaryEvent;
             nav_.setPhase(FlightStates::DroguePrimaryEvent);
-            archive_.WriteEvent(FlightArchive::ExampleStatId::DroguePrimaryDeployTimestampMs, flight_time_ms);
+            archive_.WriteEvent(FlightArchive::Statistic::DroguePrimaryDeployTimestampMs, flight_time_ms);
         }
 
         // Drogue backup
@@ -230,7 +267,7 @@ void FlightManager::UpdateFlightState() {
             }
             flight_state_ = FlightStates::DrogueBackupEvent;
             nav_.setPhase(FlightStates::DrogueBackupEvent);
-            archive_.WriteEvent(FlightArchive::ExampleStatId::DrogueBackupDeployTimestampMs, flight_time_ms);
+            archive_.WriteEvent(FlightArchive::Statistic::DrogueBackupDeployTimestampMs, flight_time_ms);
         }
 
         // Main primary
@@ -268,7 +305,7 @@ void FlightManager::UpdateFlightState() {
             }
             flight_state_ = FlightStates::MainPrimaryEvent;
             nav_.setPhase(FlightStates::MainPrimaryEvent);
-            archive_.WriteEvent(FlightArchive::ExampleStatId::MainPrimaryDeployTimestampMs, flight_time_ms);
+            archive_.WriteEvent(FlightArchive::Statistic::MainPrimaryDeployTimestampMs, flight_time_ms);
         }
 
         // Main backup
@@ -307,7 +344,7 @@ void FlightManager::UpdateFlightState() {
             }
             flight_state_ = FlightStates::MainBackupEvent;
             nav_.setPhase(FlightStates::MainBackupEvent);
-            archive_.WriteEvent(FlightArchive::ExampleStatId::MainBackupDeployTimestampMs, flight_time_ms);
+            archive_.WriteEvent(FlightArchive::Statistic::MainBackupDeployTimestampMs, flight_time_ms);
         }
 
         // Physical drogue deployment detection
@@ -315,25 +352,25 @@ void FlightManager::UpdateFlightState() {
                 && !near_apogee_
                 && nav_solution.vertical_speed_mps > drogue_velocity_threshold) {
             physical_deployment_stats_ = (physical_deployment_stats_ | (1 << bit_shift_drogue_deployed));
-            archive_.WriteEvent(FlightArchive::ExampleStatId::DrogueVelocityThresholdTimestampMs, flight_time_ms);
+            archive_.WriteEvent(FlightArchive::Statistic::DrogueVelocityThresholdTimestampMs, flight_time_ms);
         }
 
         // Physical main deployment detection
         if (flight_state_ >= FlightStates::MainPrimaryEvent
                 && nav_solution.vertical_speed_mps > pre_main_velocity_ + parachute_velocity_change_threshold) {
             physical_deployment_stats_ = (physical_deployment_stats_ | (1 << bit_shift_main_deployed));
-            archive_.WriteEvent(FlightArchive::ExampleStatId::MainVelocityThresholdTimestampMs, flight_time_ms);
+            archive_.WriteEvent(FlightArchive::Statistic::MainVelocityThresholdTimestampMs, flight_time_ms);
         }
 
         // Landing detection
-        if (DetectLanded(nav_solution)) {
+        if (!near_apogee_ && DetectLanded(nav_solution)) {
             flight_state_ = FlightStates::Landed;
             nav_.setPhase(FlightStates::Landed);
-            archive_.WriteEvent(FlightArchive::ExampleStatId::LandingTimestampMs, flight_time_ms);
-            archive_.WriteEvent(FlightArchive::ExampleStatId::DeploymentCh1Stats, locator_settings.deployment_ch1_mode);
-            archive_.WriteEvent(FlightArchive::ExampleStatId::DeploymentCh2Stats, locator_settings.deployment_ch2_mode);
-            archive_.WriteEvent(FlightArchive::ExampleStatId::DeploymentCh3Stats, locator_settings.deployment_ch3_mode);
-            archive_.WriteEvent(FlightArchive::ExampleStatId::DeploymentCh4Stats, locator_settings.deployment_ch4_mode);
+            archive_.WriteEvent(FlightArchive::Statistic::LandingTimestampMs, flight_time_ms);
+            archive_.WriteEvent(FlightArchive::Statistic::DeploymentCh1Stats, locator_settings.deployment_ch1_mode);
+            archive_.WriteEvent(FlightArchive::Statistic::DeploymentCh2Stats, locator_settings.deployment_ch2_mode);
+            archive_.WriteEvent(FlightArchive::Statistic::DeploymentCh3Stats, locator_settings.deployment_ch3_mode);
+            archive_.WriteEvent(FlightArchive::Statistic::DeploymentCh4Stats, locator_settings.deployment_ch4_mode);
         }
 
         noseover_time_++;
@@ -439,4 +476,6 @@ void FlightManager::ResetFlight() {
     m_launch_candidate_ms_  = 0;
     m_apogee_peak_agl_m_    = 0.0f;
     m_apogee_last_increase_ms_ = 0;
+    m_burnout_count_        = 0;
+    m_landed_count_         = 0;
 }

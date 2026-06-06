@@ -29,7 +29,7 @@ RocketArchive::Config Archive::MakeConfig(IFlashDriver &flash) {
 	cfg.archiveSizeBytes = layout.archiveSizeBytes;
 	cfg.recordCount = record_count;
 	cfg.minutesPerRecord = 8u;
-	cfg.statSlotCount = static_cast<uint16_t>(FlightArchive::ExampleStatId::Count);
+	cfg.statSlotCount = static_cast<uint16_t>(FlightArchive::Statistic::Count);
 	return cfg;
 }
 
@@ -69,6 +69,45 @@ bool Archive::Init() {
 	return true;
 }
 
+bool Archive::StartOpenNewFlight() {
+	open_flight_state_ = OpenFlightState::Idle;
+	record_id_ = archive_.GetNextAvailableArchiveRecord();
+	if (record_id_ == FlightArchive::INVALID_RECORD_ID) {
+		open_flight_state_ = OpenFlightState::Failed;
+		return false;
+	}
+	if (!archive_.BeginPrepareRecord(record_id_)) {
+		open_flight_state_ = OpenFlightState::Failed;
+		return false;
+	}
+	open_flight_state_ = OpenFlightState::Erasing;
+	return true;
+}
+
+bool Archive::PollOpenNewFlight() {
+	if (open_flight_state_ == OpenFlightState::Done)
+		return true;
+	if (open_flight_state_ == OpenFlightState::Failed)
+		return true;
+	if (open_flight_state_ != OpenFlightState::Erasing)
+		return false;
+
+	if (!archive_.PollPrepareRecord())
+		return false;
+
+	if (!archive_.InitializeFlightRecord(record_id_)) {
+		open_flight_state_ = OpenFlightState::Failed;
+		return true;
+	}
+	flight_num_ = runtime_.last_flight_sequence + 1u;
+	if (!archive_.WriteStat(record_id_, FlightArchive::Statistic::FlightNumber, flight_num_)) {
+		open_flight_state_ = OpenFlightState::Failed;
+		return true;
+	}
+	open_flight_state_ = OpenFlightState::Done;
+	return true;
+}
+
 bool Archive::OpenNewFlight() {
 	record_id_ = archive_.GetNextAvailableArchiveRecord();
 	if (record_id_ == FlightArchive::INVALID_RECORD_ID) {
@@ -81,7 +120,7 @@ bool Archive::OpenNewFlight() {
 		return false;
 	}
 	flight_num_ = runtime_.last_flight_sequence + 1u;
-	if (!archive_.WriteStat(record_id_, FlightArchive::ExampleStatId::FlightNumber, flight_num_)) {
+	if (!archive_.WriteStat(record_id_, FlightArchive::Statistic::FlightNumber, flight_num_)) {
 		return false;
 	}
 	return true;
@@ -105,9 +144,9 @@ bool Archive::WriteData(uint32_t flight_time_ms, const NavSolution &nav_solution
 	FlightArchive::FlightSample s { };
 	s.timestamp_ms = flight_time_ms;
 	s.raw_baro_altitude_agl = raw_baro_altitude_agl;
-//	s.fused_altitude_agl = nav_solution.altitude_agl_m; // new telemetry data
-//	s.raw_baro_velocity = raw_baro_velocity;
-//	s.fused_vertical_speed_mps = nav_solution.vertical_speed_mps;
+	s.fused_altitude_agl = nav_solution.altitude_agl_m;
+	s.raw_baro_velocity = raw_baro_velocity;
+	s.fused_vertical_speed_mps = nav_solution.vertical_speed_mps;
 	s.accel = nav_solution.nav_accel_mps2;
 	s.gyro = nav_solution.body_rates_rps;
 	s.lat_rad = nav_solution.pos.lat_rad;

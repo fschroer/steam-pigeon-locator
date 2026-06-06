@@ -37,6 +37,107 @@ bool Navigation::PowerDownAll() {
     return ok;
 }
 
+// ---------------------------------------------------------------------------
+// triggerMountingCalibration
+// Called once on each arm event.  Resets the accumulation window so that the
+// next kMountingCalSamples IMU readings (in raw sensor frame) are averaged to
+// identify the dominant gravity axis, which is then committed as the mounting
+// frame.  The bias-freeze flag is also cleared so gyro bias accumulation can
+// start fresh after the EKF re-initialisation.
+// ---------------------------------------------------------------------------
+void Navigation::triggerMountingCalibration() {
+    m_mounting_cal_active  = true;
+    m_mounting_cal_count   = 0;
+    m_mounting_accel_accum = {};
+    m_bias_frozen          = false;
+    m_descent_stable_count = 0;
+}
+
+// ---------------------------------------------------------------------------
+// remapVec — apply mounting frame to one Vec3f.
+// ---------------------------------------------------------------------------
+Vec3f Navigation::remapVec(const Vec3f& v) const {
+    const float arr[3] = {v.x, v.y, v.z};
+    return Vec3f{
+        m_mounting.sign[0] * arr[m_mounting.src[0]],
+        m_mounting.sign[1] * arr[m_mounting.src[1]],
+        m_mounting.sign[2] * arr[m_mounting.src[2]]
+    };
+}
+
+// ---------------------------------------------------------------------------
+// applyMountingFrame — remap all accel and gyro fields of an ImuSample.
+// ---------------------------------------------------------------------------
+void Navigation::applyMountingFrame(ImuSample& imu) const {
+    imu.accel_low_g_mps2    = remapVec(imu.accel_low_g_mps2);
+    imu.accel_high_g_mps2   = remapVec(imu.accel_high_g_mps2);
+    imu.accel_selected_mps2 = remapVec(imu.accel_selected_mps2);
+    imu.gyro_rps            = remapVec(imu.gyro_rps);
+}
+
+// ---------------------------------------------------------------------------
+// commitMountingFrame
+// Selects one of the six cardinal orientations that best matches the averaged
+// raw-sensor gravity vector, sets m_mounting, and re-initialises the EKF so
+// that subsequent fusion begins from a correctly-oriented state.
+//
+// Mounting matrix convention — body ← sensor mapping:
+//
+//   Dominant axis | Sign | body +X ← | body +Y ← | body +Z ←
+//   sensor X      |  –   | −sensor X | +sensor Y | −sensor Z   (180° about Y)
+//   sensor X      |  +   | +sensor X | +sensor Y | +sensor Z   (identity)
+//   sensor Y      |  –   | −sensor Y | +sensor Z | −sensor X   (−90° about Z)
+//   sensor Y      |  +   | +sensor Y | +sensor Z | +sensor X   (+90° about Z)
+//   sensor Z      |  –   | −sensor Z | +sensor X | −sensor Y   (−90° about Y)
+//   sensor Z      |  +   | +sensor Z | −sensor X | −sensor Y   (+90° about Y)
+//
+// All six are proper rotations (determinant = +1).
+// ---------------------------------------------------------------------------
+void Navigation::commitMountingFrame(const Vec3f& avg_raw_accel) {
+    const float ax = std::fabs(avg_raw_accel.x);
+    const float ay = std::fabs(avg_raw_accel.y);
+    const float az = std::fabs(avg_raw_accel.z);
+
+    if (ax >= ay && ax >= az) {
+        // X axis dominates.
+        // Accelerometer reads +9.81 on the axis pointing up (reaction to gravity).
+        if (avg_raw_accel.x > 0.0f) {
+            m_mounting = {{0,1,2},{ 1, 1, 1}};  // sensor +X up  → identity
+        } else {
+            m_mounting = {{0,1,2},{-1, 1,-1}};  // sensor −X up  → 180° about Y
+        }
+    } else if (ay >= ax && ay >= az) {
+        // Y axis dominates
+        if (avg_raw_accel.y > 0.0f) {
+            m_mounting = {{1,2,0},{ 1, 1, 1}};  // sensor +Y up  → −90° about Z
+        } else {
+            m_mounting = {{1,2,0},{-1, 1,-1}};  // sensor −Y up  → +90° about Z
+        }
+    } else {
+        // Z axis dominates
+        if (avg_raw_accel.z > 0.0f) {
+            m_mounting = {{2,0,1},{ 1,-1,-1}};  // sensor +Z up  → −90° about Y
+        } else {
+            m_mounting = {{2,0,1},{-1, 1,-1}};  // sensor −Z up  → +90° about Y
+        }
+    }
+
+    // Re-initialise the EKF with the current sensor reading remapped through
+    // the new mounting frame, so the initial attitude is correct from frame 1.
+    ImuSample imu = m_imu.raw();
+    applyMountingFrame(imu);
+    BaroSample baro = m_baro.raw();
+    GpsSample  gps  = m_gps.raw();
+    m_ekf.initialize(imu,
+                     baro.valid          ? &baro : nullptr,
+                     gps.position_valid  ? &gps  : nullptr);
+    // Use the freshly-initialized EKF altitude rather than the stale cached
+    // m_solution: m_ekf.initialize() just reset the EKF state, so only
+    // getSolution() reflects the new pad altitude.  Same pattern as Init().
+    m_ekf.zeroPadReferenceAgl(m_ekf.getSolution().altitude_msl_m, 0.0f);
+    m_solution = m_ekf.getSolution();
+}
+
 bool Navigation::Init(const uint16_t output_rate_hz) {
     if      (output_rate_hz < 20)  m_cfg.output_rate_hz = 20.0f;
     else if (output_rate_hz > 100) m_cfg.output_rate_hz = 100.0f;
@@ -82,19 +183,20 @@ bool Navigation::Init(const uint16_t output_rate_hz) {
     RgbLed(RgbColor::Off);
     HAL_Delay(500);
 
-    // Warm up baro — collect enough samples for a stable pad reference
+    // A single read is sufficient here — the baro will have settled long before
+    // the user arms and launches.  CalibrateOnPadAndZeroAglUntilLaunch() updates
+    // the pad MSL reference continuously on every stationary sample, so by arm
+    // time the reference is far more accurate than any warmup loop could provide.
     ImuSample imu{};
     BaroSample baro{};
     GpsSample gps{};
-    for (int i = 0; i < 50; ++i) {
-        m_imu.readSample(imu);
-        m_baro.readSample(baro);
-        HAL_Delay(static_cast<uint32_t>(1000.0f / m_cfg.output_rate_hz));
-    }
+    m_imu.readSample(imu);
+    m_baro.readSample(baro);
     m_gps.readSample(gps);
 
-    m_ekf.initialize(imu, &baro, gps.position_valid ? &gps : nullptr);
-    m_ekf.zeroPadReferenceAgl(m_solution.altitude_msl_m, 0.0f);
+    m_ekf.initialize(imu, baro.valid ? &baro : nullptr, gps.position_valid ? &gps : nullptr);
+    m_ekf.zeroPadReferenceAgl(m_ekf.getSolution().altitude_msl_m, 0.0f);
+    m_ekf.setPitotCorrectionFactor(m_cfg.pitot_correction_k);
     m_solution         = m_ekf.getSolution();
     m_initialized      = true;
     m_last_update_ms   = HAL_GetTick();
@@ -177,6 +279,50 @@ bool Navigation::Update() {
     }
 #endif
 
+    // ── Cardinal mounting calibration ─────────────────────────────────────────
+    // Accumulate raw (pre-remapping) sensor readings during the calibration
+    // window.  The EKF continues to run with whatever mounting frame is
+    // currently active (identity until the first arm).  Once the window closes,
+    // commitMountingFrame() sets the correct mapping and re-initialises the EKF.
+    if (m_mounting_cal_active && imu_new) {
+        // Launch / handling guard.  The mounting frame is derived from the
+        // gravity vector, which is only meaningful while stationary.  If any
+        // sample during the window deviates from 1 g by more than
+        // kMountingCalMaxDeviationG — motor ignition (several g), free-fall
+        // (~0 g), or the rocket being handled — the partial average would be
+        // corrupted, so the window is discarded and restarted from zero.
+        //
+        // Consequence for a launch inside the window: acceleration stays high
+        // for the entire boost, so the counter never reaches kMountingCalSamples,
+        // commitMountingFrame() is never called, and the EKF is never
+        // re-initialised mid-flight.  Calibration simply does not complete until
+        // a clean stationary run of kMountingCalSamples consecutive samples is
+        // observed.  (Norm is frame-invariant, so this check is valid on the
+        // raw, pre-remap sample.)
+        const float cal_accel_g = Math::norm(imu.accel_selected_mps2) / G0_F;
+        if (std::fabs(cal_accel_g - 1.0f) > kMountingCalMaxDeviationG) {
+            m_mounting_cal_count   = 0;
+            m_mounting_accel_accum = {};
+        } else {
+            m_mounting_accel_accum.x += imu.accel_selected_mps2.x;
+            m_mounting_accel_accum.y += imu.accel_selected_mps2.y;
+            m_mounting_accel_accum.z += imu.accel_selected_mps2.z;
+            if (++m_mounting_cal_count >= kMountingCalSamples) {
+                const Vec3f avg = {
+                    m_mounting_accel_accum.x / static_cast<float>(kMountingCalSamples),
+                    m_mounting_accel_accum.y / static_cast<float>(kMountingCalSamples),
+                    m_mounting_accel_accum.z / static_cast<float>(kMountingCalSamples)
+                };
+                commitMountingFrame(avg);
+                m_mounting_cal_active = false;
+            }
+        }
+    }
+
+    // Apply mounting frame: remap all IMU axes to standard body frame.
+    // Must happen after the raw-accumulation above and before EKF use below.
+    if (imu_new) applyMountingFrame(imu);
+
     if (imu_new) {
         m_ekf.predict(imu, dt_s);
 
@@ -233,22 +379,99 @@ bool Navigation::Update() {
 // ---------------------------------------------------------------------------
 void Navigation::CalibrateOnPadAndZeroAglUntilLaunch(FlightStates flight_state) {
     ImuSample  imu  = m_imu.raw();
+    applyMountingFrame(imu);                   // work in body frame
     BaroSample baro = m_baro.raw();
 
-    if (flight_state < FlightStates::Launched && IsStationary(imu, baro)) {
-        m_imu.recalibrateGyroAtRest(imu.gyro_rps, m_cfg.gyro_pad_bias_alpha);
-        m_ekf.applyPadGyroRecalibration(imu.gyro_rps, m_cfg.gyro_pad_bias_alpha);
-        m_baro.zeroAglReference(m_cfg.baro_agl_lpf_alpha);
+    if (flight_state < FlightStates::Launched) {
+        // ── Bias freeze: latch once accel exceeds the stationary tolerance ──
+        // Any reading above 1g + pad_stationary_accel_tol_g indicates either
+        // motor ignition or significant handling of the rocket.  Once latched,
+        // gyro bias accumulation is suppressed for the rest of this arm cycle
+        // so motor-startup vibration cannot contaminate the bias estimate.
+        const float accel_norm_g = Math::norm(imu.accel_selected_mps2) / G0_F;
+        if (accel_norm_g > 1.0f + m_cfg.pad_stationary_accel_tol_g)
+            m_bias_frozen = true;
 
-        // Use EKF's current baro-corrected altitude as pad MSL reference.
-        // This is consistent with updateBaro() output and avoids the LPF-lag
-        // discontinuity that occurred when using m_baro.getGroundAltitudeMsl().
-        m_ekf.zeroPadReferenceAgl(m_solution.altitude_msl_m, 0.0f);
+        if (IsStationary(imu, baro)) {
+            // AGL zeroing, baro ground-reference update, and ZUPT are purely
+            // barometric/altitude operations — independent of the mounting
+            // frame.  Run them unconditionally so the pad reference stays
+            // correct throughout the mounting cal window (3.2 s at 20 Hz).
+            // Suspending them here caused a false-launch: commitMountingFrame()
+            // reinitialises the EKF (resetting pad_altitude_msl_m from baro),
+            // but if the stale m_solution.altitude_msl_m was wrong, the pad
+            // reference is corrupted.  With these running, the next call here
+            // (within 1 s) corrects the reference before DetectLaunch can fire.
+            m_baro.zeroAglReference(m_cfg.baro_agl_lpf_alpha);
 
-        // ZUPT: drives velocity to zero while device is stationary.
-        // Applies correction via injectErrorState() so state and covariance
-        // remain consistent, preventing P[2,2] from being artificially reduced.
-        m_ekf.applyZupt();
+            // Use EKF's current baro-corrected altitude as pad MSL reference.
+            // This is consistent with updateBaro() output and avoids the LPF-lag
+            // discontinuity that occurred when using m_baro.getGroundAltitudeMsl().
+            m_ekf.zeroPadReferenceAgl(m_solution.altitude_msl_m, 0.0f);
+
+            // ZUPT: drives velocity to zero while device is stationary.
+            // Applies correction via injectErrorState() so state and covariance
+            // remain consistent, preventing P[2,2] from being artificially reduced.
+            m_ekf.applyZupt();
+
+            // Gyro recalibration and tilt correction read accelerometer and
+            // gyro data through the mounting frame, so they require a correctly
+            // committed frame.  Skip during the mounting cal window to avoid
+            // contaminating the gyro-bias or attitude state with wrong-axis data.
+            if (!m_mounting_cal_active) {
+                // Gyro recalibration only while bias is not frozen.
+                if (!m_bias_frozen) {
+                    m_imu.recalibrateGyroAtRest(imu.gyro_rps, m_cfg.gyro_pad_bias_alpha);
+                    m_ekf.applyPadGyroRecalibration(imu.gyro_rps, m_cfg.gyro_pad_bias_alpha);
+                }
+
+                // Tilt correction: continuously realign roll and pitch toward the
+                // gravity vector while stationary.  Called here (same IsStationary
+                // gate as gyro recalibration) so that any attitude drift accumulated
+                // since power-on is removed before launch.  Yaw is unobservable from
+                // gravity and is left unchanged.  correctTiltFromAccel() has its own
+                // internal quasi-static gate so it is safe to call even when frozen.
+                m_ekf.correctTiltFromAccel(imu.accel_selected_mps2);
+            }
+        }
+
+    } else if (flight_state >= FlightStates::DroguePrimaryEvent &&
+               flight_state <  FlightStates::Landed) {
+        // ── Descent tilt correction ──────────────────────────────────────────
+        // During parachute descent the gyro bias may have drifted from its
+        // pad-calibrated value due to motor and aerodynamic heating.  Once the
+        // rocket is stable under the canopy, gravity provides a reliable
+        // reference for roll and pitch, exactly as it does on the pad.
+        //
+        // Stability gate: require kDescentStableSamples consecutive samples
+        // with gyro magnitude below kDescentStableGyroRps.  This admits the
+        // quiet hanging phases between pendulum swings while rejecting active
+        // tumbling and spin-up transients just after deployment.
+        //
+        // correctTiltFromAccel() has its own internal quasi-static accel gate
+        // (|a| within 30 % of 1g) so it self-suppresses during pendulum peaks
+        // that slip through the gyro check.  Yaw remains unobservable from
+        // gravity and is untouched, as on the pad.  GPS velocity fusion
+        // (already active in all post-launch states) provides complementary
+        // bias observability through the EKF cross-covariance terms.
+        //
+        // ZUPT and baro/AGL zeroing are intentionally omitted: the rocket is
+        // descending at significant speed and the pad altitude reference must
+        // not be disturbed.
+        const float gyro_norm_rps = Math::norm(imu.gyro_rps);
+
+        if (gyro_norm_rps < kDescentStableGyroRps) {
+            if (m_descent_stable_count < kDescentStableSamples)
+                ++m_descent_stable_count;
+        } else {
+            // Rotation exceeded threshold — reset the window.
+            // The next stable phase must build from scratch so that a single
+            // quiet sample between two turbulent ones cannot trigger correction.
+            m_descent_stable_count = 0;
+        }
+
+        if (m_descent_stable_count >= kDescentStableSamples)
+            m_ekf.correctTiltFromAccel(imu.accel_selected_mps2);
     }
 }
 
@@ -324,7 +547,7 @@ void Navigation::injectTestSample(ImuSample&  imu,  BaroSample& baro,
     imu.low_g_valid         = true;
     imu_new                 = true;
 
-//    baro.altitude_m_agl  = s.fused_altitude_agl; // new telemetry data. Add other new elements when uncommenting
+//    baro.altitude_m_agl  = s.fused_altitude_agl;
 //    baro.altitude_m_msl  = s.fused_altitude_agl + m_ekf.getPadAltitudeMsl();
     baro.altitude_m_agl  = s.raw_baro_altitude_agl;
     baro.altitude_m_msl  = s.raw_baro_altitude_agl + m_ekf.getPadAltitudeMsl();

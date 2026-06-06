@@ -31,12 +31,26 @@ Factory::Factory(UART_HandleTypeDef &huart2, SPI_HandleTypeDef &hspi2, I2C_Handl
 }
 
 void Factory::Init(const Radio_s *radio) {
+	// Play the PowerOn sequence synchronously before initialization tasks begin so the
+	// user hears immediate audio feedback on power-up.  Each duration unit is one
+	// main-loop tick (1000 / SAMPLES_PER_SECOND ms).  buzzer_phase_ is set to Idle
+	// so ProcessRocketEvents does not replay the sequence after Init() returns.
+	BuzzerStop();
+	for (size_t i = 0; i < sizeof(PowerOn) / sizeof(PowerOn[0]); i++) {
+		if (PowerOn[i].tone != Tone::Rest)
+			BuzzerPlay(PowerOn[i].tone, PowerOn[i].volume);
+		else
+			BuzzerStop();
+		HAL_Delay(static_cast<uint32_t>(PowerOn[i].duration) * (1000u / SAMPLES_PER_SECOND));
+	}
+	BuzzerStop();
+	buzzer_phase_ = BuzzerPhase::Idle;
+
 	archive_.Init();
 	radio_adapter_ = new StRadioAdapter(radio);
 	comm_.Init(*radio_adapter_);
 	navigation_.Init(SAMPLES_PER_SECOND);
 	flight_.Init();
-	BuzzerStop();  // Guarantee timer and EN pins are in a known-off state before first arm
 	RgbLed(RgbColor::Off);
 	nav_test_requested_ = true;
 
@@ -53,6 +67,9 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 		if (device_state_ == DeviceState::Armed) {
 			BuzzerReset();
 			buzzer_phase_ = BuzzerPhase::Arming;
+#ifndef NAV_TEST
+			archive_.StartOpenNewFlight();
+#endif
 		} else if (prev_device_state_ == DeviceState::Armed) {
 			BuzzerReset();
 			buzzer_phase_ = BuzzerPhase::Disarming;
@@ -64,6 +81,10 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 	case DeviceState::Disarmed:
 		DisableDeployment();
 		navigation_.Update();
+		if (buzzer_phase_ == BuzzerPhase::PowerOn) {
+			if (BuzzerSequenceOnce(PowerOn))
+				buzzer_phase_ = BuzzerPhase::Idle;
+		}
 		if (buzzer_phase_ == BuzzerPhase::Disarming) {
 			if (BuzzerSequenceOnce(Disarming))
 				buzzer_phase_ = BuzzerPhase::Idle;
@@ -102,28 +123,28 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 		EnableDeployment();
 		navigation_.Update();
 
-		// Arming one-shot plays once immediately on arm, regardless of flight state.
-		// Armed beacon and archive open happen only after Arming completes, so that
-		// the blocking flash sector-erase inside OpenNewFlight() does not stall the
-		// CPU while the Arming notes are playing.
+		// Arming one-shot plays immediately on arm. Flash erase for the new flight
+		// record is started at the same time (StartOpenNewFlight in the state-change
+		// block above) and polled each tick here, so it proceeds sector-by-sector
+		// in the background without stalling the CPU.
 		// Buzzer is silenced during flight; Landed beacon is handled below.
 		if (buzzer_phase_ == BuzzerPhase::Arming) {
 			if (BuzzerSequenceOnce(Arming))
 				buzzer_phase_ = BuzzerPhase::Armed;
-		} else if (flight_state == FlightStates::WaitingLaunch && buzzer_phase_ == BuzzerPhase::Armed) {
+		} else if (buzzer_phase_ == BuzzerPhase::Armed) {
 #ifndef NAV_TEST
-			if (!archive_.IsActiveOpen())
-				archive_.OpenNewFlight();
+			archive_.PollOpenNewFlight();
 #endif
-			BuzzerSequence(Armed);
-		} else if (flight_state > FlightStates::WaitingLaunch && flight_state != FlightStates::Landed) {
-			BuzzerStop();
+			if (flight_state == FlightStates::WaitingLaunch)
+				BuzzerSequence(Armed);
+			else if (flight_state > FlightStates::WaitingLaunch && flight_state != FlightStates::Landed)
+				BuzzerStop();
 		}
 		flight_.UpdateFlightState();
 		if (flight_state >= FlightStates::Launched && !datestamp_saved_) {
 			GpsSample gps_sample = navigation_.getRawGps();
 			if (gps_sample.time_valid) {
-				archive_.WriteEvent(FlightArchive::ExampleStatId::FlightTimestampS, gps_sample.timestamp_s);
+				archive_.WriteEvent(FlightArchive::Statistic::FlightTimestampS, gps_sample.timestamp_s);
 				datestamp_saved_ = true;
 			}
 		}

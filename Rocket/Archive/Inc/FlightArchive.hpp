@@ -67,6 +67,8 @@ namespace FlightArchive
         bool IsActiveOpen() { return m_rt.activeOpen; };
 
         bool PrepareRecord(uint16_t recordId);
+        bool BeginPrepareRecord(uint16_t recordId);
+        bool PollPrepareRecord();
         bool InitializeFlightRecord(uint16_t recordId);
         bool CloseFlightRecord(uint16_t recordId);
 
@@ -106,6 +108,10 @@ namespace FlightArchive
 
             uint8_t sampleBuffer[ChunkPayloadBytes];
             uint8_t scratchBuffer[ChunkPayloadBytes];
+
+            bool     preparing;
+            uint16_t prepareRecordId;
+            uint32_t prepareOffset;
         };
 
         IFlashDriver& m_flash;
