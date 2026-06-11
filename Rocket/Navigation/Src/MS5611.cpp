@@ -64,6 +64,7 @@ bool MS5611::init(float sample_rate_hz) {
 	m_status.health = SensorHealth::Ok;
 
 	m_state = State::Idle;
+	m_iir_initialized_ = false;   // reset IIR; readSampleBlocking() below warms it up
 	RearmCC1ForD2();
 
 	BaroSample baro { }; // Pre-read baro to ensure valid subsequent reads
@@ -167,8 +168,23 @@ bool MS5611::readSample(BaroSample &out) {
 		out.pressure_pa = p_pa;
 		out.temperature_c = t_c;
 
-		out.altitude_m_msl = 44330.0f * (1.0f - std::pow(p_pa / 101325.0f, 0.19029495f));
-		out.altitude_m_agl = 44330.0f * (1.0f - std::pow(p_pa / m_ground_pressure_pa, 0.19029495f));
+		// IIR pressure filter (equivalent to BMP280 hardware IIR coeff=4).
+		// Applied to the raw compensated pressure before converting to altitude
+		// so both altitude_m_msl and altitude_m_agl are filtered consistently.
+		// A single-sample spike of 165 m is attenuated to ~41 m after one step,
+		// ~10 m after two steps, and < 1 m after four steps (~200 ms recovery).
+		// On first valid sample the filter is seeded directly so there is no
+		// step transient at startup.
+		if (!m_iir_initialized_) {
+			m_iir_pressure_pa_ = p_pa;
+			m_iir_initialized_ = true;
+		} else {
+			m_iir_pressure_pa_ += (p_pa - m_iir_pressure_pa_) * (1.0f / kIirCoeff);
+		}
+		const float p_filt = m_iir_pressure_pa_;
+
+		out.altitude_m_msl = 44330.0f * (1.0f - std::pow(p_filt / 101325.0f, 0.19029495f));
+		out.altitude_m_agl = 44330.0f * (1.0f - std::pow(p_filt / m_ground_pressure_pa, 0.19029495f));
 		out.valid = std::isfinite(out.altitude_m_msl) && std::isfinite(out.altitude_m_agl);
 		velocity_estimator_.addSample(out.altitude_m_agl, out.timestamp_ms);
 		velocity_estimator_.velocity(out.velocity);

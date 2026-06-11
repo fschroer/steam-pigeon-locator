@@ -54,7 +54,7 @@ uint8_t DeploymentChannelContinuity() {
 	// Engage pull-up resistor for valid measurement. Using P-channel MOSFET, logic level low = on
 	HAL_GPIO_WritePin(DSON_GPIO_Port, DSON_Pin, GPIO_PIN_RESET);
 	uint32_t start = TIM2->CNT;
-	while ((TIM2->CNT - start) < 100)
+	while ((TIM2->CNT - start) < 1000)
 		;   // 100 µs delay
 // Read ematch sense channels (low resistance --> pull-up resistor drops most of the voltage).
 	status = !HAL_GPIO_ReadPin(DS1_GPIO_Port, DS1_Pin);

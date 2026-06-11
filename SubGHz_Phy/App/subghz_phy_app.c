@@ -229,6 +229,7 @@ static void OnRxTimeout(void)
 static void OnRxError(void)
 {
   /* USER CODE BEGIN OnRxError */
+  Radio.Rx(RX_TIMEOUT_VALUE);
   /* USER CODE END OnRxError */
 }
 

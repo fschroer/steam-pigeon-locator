@@ -26,7 +26,7 @@ public:
 	template<typename TValue>
 	bool WriteEvent(FlightArchive::Statistic stat_id, const TValue &value);
 	bool WriteData(uint32_t flight_time_ms, const NavSolution &nav_solution, const float raw_baro_altitude_agl,
-			const float raw_baro_velocity);
+			const float raw_baro_velocity, FlightStates flight_state, const TimingDiag &timing);
 	bool CloseCurrentFlight();
 	template<typename TValue>
 	bool ReadEvent(uint16_t record_id, FlightArchive::Statistic statId, TValue &valueOut, bool &presentOut) const;

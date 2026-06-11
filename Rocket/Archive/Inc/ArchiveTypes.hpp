@@ -55,10 +55,16 @@ namespace FlightArchive
 		float fused_altitude_agl;
 		float raw_baro_velocity;
 		float fused_vertical_speed_mps;
-		Vec3f accel;
+		Vec3f accel;        // body-frame accelerometer (gravity-inclusive, same signal used for launch/burnout detection)
 		Vec3f gyro;
 		double lat_rad;
 		double lon_rad;
+		uint8_t  flight_state;     // FlightStates enum value at time of sample        (offset 60, +1)
+		uint16_t oc_start_us;      // TIM2->CNT lower 16 bits at first OCCallback entry (offset 61, +2)
+		uint16_t oc_end_us;        // TIM2->CNT lower 16 bits at second OCCallback exit (offset 63, +2)
+		uint16_t process_start_us; // TIM2->CNT lower 16 bits at ProcessRocketEvents entry (offset 65, +2)
+		uint16_t process_dur_us;   // ProcessRocketEvents duration µs from previous cycle  (offset 67, +2)
+		uint8_t  _pad[3];          // pad to maintain struct size as multiple of 4          (offset 69, +3 = 72)
 	};
 
 #pragma pack(pop)

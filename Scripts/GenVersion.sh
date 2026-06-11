@@ -4,7 +4,7 @@
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 ROOT="$(dirname "$SCRIPT_DIR")"
 
-VERSION=$(git describe --tags --long --dirty --always)
+VERSION="$(date +%Y.%m.%d)-$(git describe --tags --long --dirty --always)"
 
 OUTFILE="$ROOT/Core/Inc/version.h"
 

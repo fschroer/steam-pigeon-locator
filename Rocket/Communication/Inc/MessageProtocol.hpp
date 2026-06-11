@@ -43,7 +43,9 @@ enum class MsgType : uint8_t {
 	FlightDataParity = 11, // Parity packet to allow the app to reconstruct profile data if one packet is lost.
 	FlightDataAck = 12, // Profile data acknowledgement sent from the app via the receiver.
 	DeploymentTestRequest = 13, // Request from the app, via the receiver, for the locator to execute a deployment test.
-	DeploymentTest = 14 // Deployment test countdown sent from the locator to the app via the receiver.
+	DeploymentTest = 14, // Deployment test countdown sent from the locator to the app via the receiver.
+	VersionRequest = 17, // Request from the app, via the receiver, for both firmware versions.
+	VersionInfo = 18     // Response: locator version forwarded through receiver, which appends its own version.
 };
 
 #pragma pack(push, 1)
@@ -66,6 +68,11 @@ struct StartupMessage {
 	PacketHeader packet_header;
 	uint32_t serial_number;
 	uint8_t version[64];
+};
+
+struct VersionInfoMessage {
+	PacketHeader packet_header;
+	uint8_t locator_version[64];
 };
 
 struct PreLaunchData {

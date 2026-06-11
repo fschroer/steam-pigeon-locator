@@ -34,6 +34,7 @@ public:
 			TIM_HandleTypeDef &htim17);
 	void Init(const Radio_s *radio);
 	void ProcessRocketEvents(uint8_t rocket_service_count);
+	void SetTimingDiag(const TimingDiag &t) { m_timing_diag_ = t; }
 	void OnRadioTxDone();
 	void OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t LoraSnr_FskCfo);
 	void ProcessUART2Char(uint8_t uart_char);
@@ -82,6 +83,7 @@ private:
 	uint8_t flight_profile_packet_index_ = 0;
 	uint8_t flight_profile_wait_count_ = 0;
 
-	uint32_t start_time_ = 0;
-	bool nav_test_requested_ = false;
+	uint32_t   start_time_ = 0;
+	bool       nav_test_requested_ = false;
+	TimingDiag m_timing_diag_ { };
 };

@@ -123,6 +123,7 @@ private:
 
 	bool send_metadata_ = false;
 	uint32_t send_metadata_request_time_ = 0;
+	bool version_info_pending_ = false;
 	static constexpr uint32_t kPreTransferGuardMs = 50u;
 	uint32_t transfer_ready_ms_ = 0;
 

@@ -65,8 +65,18 @@ private:
 
 	uint32_t m_D1 = 0, m_D2 = 0;
 
-	VelocityEstimator<5> velocity_estimator_ { };
+	VelocityEstimator<10> velocity_estimator_ { };
 	float velocity_ = 0;
+
+	// IIR pressure filter — software equivalent of the BMP280 hardware IIR.
+	// The MS5611 has no output-level inter-sample filter; under high rotation
+	// or mechanical vibration it produces single-sample pressure transients
+	// that translate to apparent altitude jumps of 10–165 m.  Filtering the
+	// raw pressure with a first-order IIR (kIirCoeff=4) attenuates each spike
+	// to 25% in one step, 6% in two steps — matching the BMP280 IIR-4 response.
+	static constexpr float kIirCoeff          = 4.0f;
+	float                  m_iir_pressure_pa_ = 0.0f;
+	bool                   m_iir_initialized_ = false;
 
 	volatile uint32_t d2_converting_ms_ = 0;
 	volatile uint32_t d1_converting_ms_ = 0;

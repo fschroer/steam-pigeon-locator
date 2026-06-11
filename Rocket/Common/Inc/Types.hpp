@@ -215,3 +215,28 @@ struct NavConfig {
     bool use_gps = true;
     bool use_baro = true;
 };
+
+// ---------------------------------------------------------------------------
+// Timing diagnostics captured each 50 ms cycle.
+//
+// TIM2 runs at 1 MHz (1 µs / tick) as a free-running 32-bit counter.  We
+// store only the lower 16 bits of each capture, which wraps every 65.535 ms —
+// more than one full 50 ms period, so all timing relationships are unambiguous
+// within a cycle.
+//
+//   oc_start_us     — TIM2->CNT at entry to the first OCCallback call
+//                     (the call that starts the D2 conversion, ~28 ms into the cycle)
+//   oc_end_us       — TIM2->CNT at exit of the second OCCallback call
+//                     (the call that reads D2 and starts D1, ~39 ms into the cycle)
+//   process_start_us— TIM2->CNT at entry to ProcessRocketEvents (main-loop call)
+//   process_dur_us  — duration of the PREVIOUS ProcessRocketEvents call in µs
+//                     (the current call's end time is not available when WriteData
+//                     executes inside UpdateFlightState, so the previous cycle's
+//                     duration is stored and reported one cycle later)
+// ---------------------------------------------------------------------------
+struct TimingDiag {
+    uint16_t oc_start_us      = 0;
+    uint16_t oc_end_us        = 0;
+    uint16_t process_start_us = 0;
+    uint16_t process_dur_us   = 0;
+};

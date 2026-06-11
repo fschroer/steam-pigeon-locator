@@ -68,6 +68,11 @@ private:
     // During flight: IMU dead-reckoning between GPS updates.
     bool m_propagate_horiz_pos_      = false;
 
+    // True only during Launched and Burnout: GPS h_acc is floored at 50 m to
+    // prevent high-vibration / high-g GPS noise from dominating the Kalman gain.
+    // All other phases use h_acc directly from the GPS report.
+    bool m_floor_gps_acc_            = false;
+
     // Altitude process noise spectral density (m²/s).
     // This is the primary driver of P[2,2] (altitude variance) at steady state.
     // Without it, baro updates shrink P[2,2] toward zero, driving K_baro to ~0.004

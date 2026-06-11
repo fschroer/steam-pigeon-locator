@@ -265,6 +265,13 @@ void Communication::OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
 			break;
 		}
 
+		case MsgType::VersionRequest:
+			// Defer the response to the main loop via Process() — calling
+			// radio_->Send() directly from the RX callback (ISR context) is
+			// unsafe because the radio is still completing the RX→idle transition.
+			version_info_pending_ = true;
+			break;
+
 		default:
 			break;
 		}
@@ -489,6 +496,21 @@ void Communication::OnAckReceived(const FlightDataAck &ack, DeviceState &device_
 // ============================================================================
 
 void Communication::Process() {
+	// Send deferred VersionInfo response.  Must run before the transfer guard
+	// so it fires even when no flight-data transfer is active.
+	if (version_info_pending_) {
+		version_info_pending_ = false;
+		VersionInfoMessage msg { };
+		msg.packet_header.system_id = system_id;
+		msg.packet_header.msg_type  = MsgType::VersionInfo;
+		msg.packet_header.msg_count = 0;
+		msg.packet_header.crc       = 0;
+		std::memcpy(msg.locator_version, GIT_VERSION,
+				std::min(sizeof(msg.locator_version), sizeof(GIT_VERSION)));
+		msg.packet_header.crc = ComputeMessageCrc(msg);
+		radio_->Send(reinterpret_cast<uint8_t*>(&msg), sizeof(msg));
+	}
+
 	if (!transfer_active_ || complete_)
 		return;
 	uint32_t now_ms = HAL_GetTick();
@@ -571,6 +593,7 @@ ParseResult Communication::ParseLoraFrame(const uint8_t *data, std::size_t len, 
 	case MsgType::ArmRequest:
 	case MsgType::DisarmRequest:
 	case MsgType::FlightMetadataRequest:
+	case MsgType::VersionRequest:
 		if (len != sizeof(PacketHeader))
 			return ParseResult::LengthMismatch;
 		out.type = hdr.msg_type;

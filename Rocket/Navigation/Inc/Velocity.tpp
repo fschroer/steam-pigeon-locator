@@ -1,4 +1,6 @@
 #pragma once
+#include <cmath>
+#include <cstddef>
 
 template<size_t N>
 class AltitudeRing {
@@ -39,7 +41,25 @@ private:
 template<size_t N>
 class VelocityEstimator {
 public:
+    // Maximum altitude change per 50 ms sample permitted before clamping.
+    // At 200 m/s (well above any real rocket baro ascent rate) a 50 ms step
+    // is 10 m.  Pyro shock transients produce 20-40 m single-step jumps that
+    // exceed this limit and are clamped, preventing ±100+ m/s spikes from
+    // appearing in the logged raw_baro_vel diagnostic.  Normal flight steps
+    // (~5 m at 20 Hz during boost) are well within the limit.
+    static constexpr float kMaxStepMps = 200.0f;
+
     void addSample(float altitude_m, uint32_t timestamp_ms) {
+        if (ring_.size() > 0) {
+            auto prev = ring_.newest();
+            float dt = (timestamp_ms - prev.t) * 0.001f;
+            if (dt > 0.0f) {
+                float max_step = kMaxStepMps * dt;
+                float delta = altitude_m - prev.alt;
+                if (std::fabs(delta) > max_step)
+                    altitude_m = prev.alt + (delta > 0.0f ? max_step : -max_step);
+            }
+        }
         ring_.push(altitude_m, timestamp_ms);
     }
 

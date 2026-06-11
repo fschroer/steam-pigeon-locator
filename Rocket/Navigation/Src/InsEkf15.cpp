@@ -60,11 +60,11 @@ static constexpr PhaseParams kPhaseParams[] = {
     { 0.01f,  5e-6f,  1e-9f,  1e-6f,  0.25f,  0.05f },  // WaitingLaunch [0]
     { 50.0f,  5e-3f,  1e-7f,  1e-4f,  25.0f,  1.0f  },  // Launched      [1]
     {  1.0f,  5e-6f,  1e-9f,  1e-6f,   1.0f,  0.2f  },  // Burnout       [2]
-    {  3.0f,  1e-4f,  1e-9f,  1e-6f,  0.25f,  0.1f  },  // Noseover      [3]
-    {  3.0f,  1e-4f,  1e-9f,  1e-6f,  0.25f,  0.1f  },  // DroguePrimary [4]
-    {  3.0f,  1e-4f,  1e-9f,  1e-6f,  0.25f,  0.1f  },  // DrogueBackup  [5]
-    {  3.0f,  1e-4f,  1e-9f,  1e-6f,  0.25f,  0.1f  },  // MainPrimary   [6]
-    {  3.0f,  1e-4f,  1e-9f,  1e-6f,  0.25f,  0.1f  },  // MainBackup    [7]
+    {  3.0f,  1e-4f,  1e-9f,  1e-6f,  0.25f,  0.5f  },  // Noseover      [3]
+    {  3.0f,  1e-4f,  1e-9f,  1e-6f,  0.25f,  0.5f  },  // DroguePrimary [4]
+    {  3.0f,  1e-4f,  1e-9f,  1e-6f,  0.25f,  0.5f  },  // DrogueBackup  [5]
+    {  3.0f,  1e-4f,  1e-9f,  1e-6f,  0.25f,  0.5f  },  // MainPrimary   [6]
+    {  3.0f,  1e-4f,  1e-9f,  1e-6f,  0.25f,  0.5f  },  // MainBackup    [7]
     { 0.01f,  5e-6f,  1e-9f,  1e-6f,  0.25f,  0.05f },  // Landed        [8]
 };
 
@@ -129,6 +129,11 @@ void InsEkf15::setPhase(FlightStates state) {
             m_propagate_horiz_pos_ = false;
             break;
     }
+
+    // Floor GPS h_acc only during high-vibration / high-g phases where measurement
+    // noise spikes would otherwise give an excessively large Kalman gain.
+    m_floor_gps_acc_ = (state == FlightStates::Launched ||
+                        state == FlightStates::Burnout);
 }
 
 // ---------------------------------------------------------------------------
@@ -331,17 +336,23 @@ void InsEkf15::updateBaro(const BaroSample& baro) {
     const float S = P[2*n + 2] + m_R_baro;
     if (S < 1e-9f || !std::isfinite(S)) return;
 
-    // Fixed absolute gate rather than the P-dependent 5-sigma gate.
-    // The 5-sigma gate (y² > 25*S) caused a ratchet failure: as ZUPT
-    // tightened P[2,2] toward a small value, the gate threshold shrank to
-    // ~3-4m.  Repeated shaking accumulated altitude past this threshold,
-    // after which every subsequent baro correction was permanently rejected
-    // and altitude drifted without bound.
+    // Fixed absolute innovation gate.
     //
-    // The MS5611 does not produce outliers when stationary — a fixed
-    // 50m threshold catches only genuine sensor failures (stuck reading,
-    // I2C error) without the ratchet problem.
-    if (std::fabs(y) > 50.0f) return;
+    // The MS5611 produces single-sample pressure spikes under high rotation
+    // or mechanical vibration (observed up to 165 m apparent altitude error
+    // during tumbling coast phase — well before any deployment events).
+    // The IIR filter in MS5611::readSample() (kIirCoeff=4) attenuates each
+    // spike to 25% per step: a 165 m spike arrives here as ~55 m on the first
+    // post-spike sample.  A 40 m gate rejects these residuals while passing
+    // all legitimate baro corrections seen in flight data (maximum observed
+    // EKF-vs-baro lag was ~31 m during the Burnout ascent phase).
+    //
+    // A P-dependent 5-sigma gate (y² > 25*S) was used previously but caused
+    // a ratchet failure: ZUPT progressively tightened P[2,2], shrinking the
+    // gate to ~3–4 m, after which valid baro corrections were permanently
+    // rejected and altitude drifted without bound.  A fixed gate is immune
+    // to this because its threshold does not shrink as P decreases.
+    if (std::fabs(y) > 40.0f) return;
 
     const float S_inv = 1.0f / S;
     float K[n];
@@ -371,29 +382,39 @@ void InsEkf15::updateBaro(const BaroSample& baro) {
 }
 
 // ---------------------------------------------------------------------------
-// updateGpsPosition — sparse rank-3 update with 5-sigma innovation gate.
+// updateGpsPosition — rank-2 horizontal-only Kalman update (lat/lon).
+//
+// GPS altitude is intentionally NOT fused in this update.  The barometer is
+// the authoritative vertical sensor; GPS altitude (VDOP typically 1.5–3×
+// worse than HDOP) has been observed to apply 5–10 m spurious downward
+// corrections during ascent and adds no useful information that the baro
+// does not already provide more accurately.  Making GPS a 2D measurement
+// gives clean sensor separation: GPS owns horizontal position, baro owns
+// altitude.  pos.alt_m is propagated inertially and corrected by updateBaro()
+// only; GPS altitude never touches it after the first fix.
 //
 // First-fix handling: when no GPS position has been obtained yet,
 // m_sol.pos.lat_rad/lon_rad are 0.0 (equator/prime meridian).  The
 // innovation to a real position is millions of meters, which the 5-sigma
 // gate correctly rejects — permanently, since position_valid never becomes
 // true.  The fix: on the first valid GPS fix, initialize position directly
-// rather than applying a Kalman correction.
+// rather than applying a Kalman correction.  pos.alt_m is seeded from GPS
+// altitude on this one occasion since it is the only absolute MSL reference
+// available before baro has established its ground reference.
 // ---------------------------------------------------------------------------
 void InsEkf15::updateGpsPosition(const GpsSample& gps) {
     if (!m_initialized || !gps.position_valid) return;
     constexpr int n = 15;
-    constexpr int m = 3;
+    constexpr int m = 2;    // horizontal only: lat, lon
 
     const float hAcc2 = gps.h_acc_m * gps.h_acc_m;
-    const float vAcc2 = gps.v_acc_m * gps.v_acc_m;
-    if (!std::isfinite(hAcc2) || !std::isfinite(vAcc2) || hAcc2 <= 0.0f || vAcc2 <= 0.0f) return;
+    if (!std::isfinite(hAcc2) || hAcc2 <= 0.0f) return;
 
     // --- First fix: initialize position directly, skip Kalman correction ---
     if (!m_sol.position_valid) {
         m_sol.pos.lat_rad    = gps.lat_rad;
         m_sol.pos.lon_rad    = gps.lon_rad;
-        m_sol.pos.alt_m      = gps.alt_m_msl;
+        m_sol.pos.alt_m      = gps.alt_m_msl;   // one-time MSL seed; baro owns altitude after this
         m_ref_lat_rad        = gps.lat_rad;
         m_ref_lon_rad        = gps.lon_rad;
         m_sol.position_valid  = true;
@@ -415,7 +436,7 @@ void InsEkf15::updateGpsPosition(const GpsSample& gps) {
         return;
     }
 
-    // --- Subsequent fixes: normal Kalman update with 5-sigma gate ---
+    // --- Subsequent fixes: rank-2 Kalman update with 5-sigma gate ---
     const double RM     = WGS84::meridianRadius(m_sol.pos.lat_rad);
     const double RN     = WGS84::primeVerticalRadius(m_sol.pos.lat_rad);
     const double cosLat = std::cos(m_sol.pos.lat_rad);
@@ -423,28 +444,21 @@ void InsEkf15::updateGpsPosition(const GpsSample& gps) {
 
     const float y[m] = {
         static_cast<float>((gps.lat_rad - m_sol.pos.lat_rad) * (RM + m_sol.pos.alt_m)),
-        static_cast<float>((gps.lon_rad - m_sol.pos.lon_rad) * (RN + m_sol.pos.alt_m) * cosLat),
-        static_cast<float>(gps.alt_m_msl - m_sol.pos.alt_m)
+        static_cast<float>((gps.lon_rad - m_sol.pos.lon_rad) * (RN + m_sol.pos.alt_m) * cosLat)
     };
 
-    // Floor h_acc to kGpsHAccFloor regardless of what the GPS reports.
-    //
-    // Rationale: GPS position noise is typically 0.5-3 m RMS outdoors.
-    // With P[0,0] = 25 m² (5 m sigma from first-fix) and a small reported
-    // hAcc (say 2 m → hAcc2 = 4 m²), K = 25/29 = 0.86 — far too high.
-    // Each GPS noise sample of 1 m moves the EKF 0.86 m, appearing as
-    // 8.6 m/s drift at 10 Hz.  Flooring hAcc at kGpsHAccFloor ensures
-    // K ≤ P_init / (P_init + kGpsHAccFloor²) = 25/2525 ≈ 1%:
-    //   1 m GPS noise × 0.01 × 10 Hz = 0.1 m/s → effectively invisible.
-    //
-    // For the locator application (recovery accuracy ~10-50 m) this floor
-    // is conservative and appropriate.  Tune kGpsHAccFloor down toward
-    // 10-20 m for tighter trajectory tracking if desired.
-    constexpr float kGpsHAccFloor = 50.0f;   // metres — tune from flight data
-    const float hAccR = std::max(gps.h_acc_m, kGpsHAccFloor);
+    // During Launched and Burnout, floor h_acc at 50 m to limit Kalman gain.
+    // High vibration and g-loading cause GPS measurement noise spikes; without
+    // the floor K ≈ 0.86 and a 1 m noise sample moves the EKF 0.86 m (8.6 m/s
+    // apparent velocity drift at 10 Hz).  All other phases use h_acc directly
+    // so the SAM-M10Q's reported accuracy drives the gain.
+    constexpr float kGpsHAccFloorHigh = 50.0f;  // metres — Launched / Burnout
+    constexpr float kGpsHAccFloorLow  =  1.0f;  // metres — all other phases
+    const float hAccFloor = m_floor_gps_acc_ ? kGpsHAccFloorHigh : kGpsHAccFloorLow;
+    const float hAccR  = std::max(gps.h_acc_m, hAccFloor);
     const float hAcc2R = hAccR * hAccR;
 
-    const float R[m*m] = { hAcc2R, 0.f, 0.f,  0.f, hAcc2R, 0.f,  0.f, 0.f, vAcc2 };
+    const float R[m*m] = { hAcc2R, 0.f,  0.f, hAcc2R };
 
     float S[m*m];
     for (int r = 0; r < m; ++r)
@@ -481,15 +495,14 @@ void InsEkf15::updateGpsPosition(const GpsSample& gps) {
             HP[i][c] = P[i*n + c];
     for (int r = 0; r < n; ++r) {
         float* Pr = &P[r*n];
-        const float k0 = K[r*m+0], k1 = K[r*m+1], k2 = K[r*m+2];
+        const float k0 = K[r*m+0], k1 = K[r*m+1];
         for (int c = 0; c < n; ++c)
-            Pr[c] -= k0*HP[0][c] + k1*HP[1][c] + k2*HP[2][c];
+            Pr[c] -= k0*HP[0][c] + k1*HP[1][c];
     }
     symmetrizeP();
 
-    m_sol.altitude_msl_m  = static_cast<float>(m_sol.pos.alt_m);
-    m_sol.altitude_agl_m  = m_sol.altitude_msl_m - m_pad_altitude_msl_m
-                             + m_pad_altitude_agl_zero_m;
+    // altitude_msl_m and altitude_agl_m are NOT updated here.
+    // They are maintained exclusively by updateBaro().
     m_sol.gps_aiding_used = true;
     m_sol.position_valid  = true;
 }

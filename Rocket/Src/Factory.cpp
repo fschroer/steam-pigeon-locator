@@ -77,6 +77,10 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 		prev_device_state_ = device_state_;
 	}
 
+	// Run deferred communication tasks (e.g. pending VersionInfo response)
+	// regardless of device state, before the per-state switch below.
+	comm_.Process();
+
 	switch (device_state_) {
 	case DeviceState::Disarmed:
 		DisableDeployment();
@@ -140,6 +144,7 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			else if (flight_state > FlightStates::WaitingLaunch && flight_state != FlightStates::Landed)
 				BuzzerStop();
 		}
+		flight_.SetTimingDiag(m_timing_diag_);
 		flight_.UpdateFlightState();
 		if (flight_state >= FlightStates::Launched && !datestamp_saved_) {
 			GpsSample gps_sample = navigation_.getRawGps();
@@ -186,7 +191,6 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 		comm_.CheckFlightProfileTimeout(device_state_);
 		break;
 	case DeviceState::DataRequested:
-		comm_.Process();
 		comm_.CheckFlightProfileTimeout(device_state_);
 		break;
 	}

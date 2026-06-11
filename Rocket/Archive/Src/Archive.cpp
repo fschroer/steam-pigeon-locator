@@ -140,17 +140,22 @@ bool Archive::SaveLocatorSettings(RocketPersistentSettings &locator_settings) {
 }
 
 bool Archive::WriteData(uint32_t flight_time_ms, const NavSolution &nav_solution, const float raw_baro_altitude_agl,
-		const float raw_baro_velocity) {
+		const float raw_baro_velocity, FlightStates flight_state, const TimingDiag &timing) {
 	FlightArchive::FlightSample s { };
 	s.timestamp_ms = flight_time_ms;
 	s.raw_baro_altitude_agl = raw_baro_altitude_agl;
 	s.fused_altitude_agl = nav_solution.altitude_agl_m;
 	s.raw_baro_velocity = raw_baro_velocity;
 	s.fused_vertical_speed_mps = nav_solution.vertical_speed_mps;
-	s.accel = nav_solution.nav_accel_mps2;
+	s.accel = nav_solution.body_accel_mps2;  // body-frame accel (gravity-inclusive) — same signal used for launch/burnout detection
 	s.gyro = nav_solution.body_rates_rps;
 	s.lat_rad = nav_solution.pos.lat_rad;
 	s.lon_rad = nav_solution.pos.lon_rad;
+	s.flight_state = static_cast<uint8_t>(flight_state);
+	s.oc_start_us      = timing.oc_start_us;
+	s.oc_end_us        = timing.oc_end_us;
+	s.process_start_us = timing.process_start_us;
+	s.process_dur_us   = timing.process_dur_us;
 	return archive_.WriteFlightDataSample(record_id_, s);
 }
 

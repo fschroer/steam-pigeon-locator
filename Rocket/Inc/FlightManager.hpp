@@ -15,6 +15,11 @@ public:
     void Init();
     void UpdateFlightState();
 
+    // Supply timing diagnostics captured by Factory_C_Interface before each
+    // ProcessRocketEvents call.  The values are written into the next archived
+    // FlightSample via archive_.WriteData().
+    void SetTimingDiag(const TimingDiag &t) { m_timing_diag_ = t; }
+
     FlightStates GetFlightState() const { return flight_state_; }
     void SetFlight_State(FlightStates flight_state) { flight_state_ = flight_state; }
 
@@ -39,12 +44,13 @@ private:
     bool DetectLaunch(const NavSolution& sol);
     bool DetectBurnout(const NavSolution& sol);
     bool DetectApogee(const NavSolution& sol);
-    bool DetectLanded(const NavSolution& sol);
+    bool DetectLanded(const NavSolution& sol, const BaroSample& baro_raw);
 
     void CheckQueuedDeployment();
     void DeployIfClear(uint8_t channel);
     void ResetFlight();
 
+    TimingDiag   m_timing_diag_         { };
     FlightStates flight_state_          = FlightStates::WaitingLaunch;
     uint32_t     flight_time_ms         = 0;
     uint8_t      deployment_ch1_stats_  = 0;
@@ -86,7 +92,15 @@ private:
     uint8_t m_burnout_count_ = 0;
 
     // Landing detection threshold and debounce
-    static constexpr float   kLandedSpeedMps        = 0.25f; // |vertical speed| at rest
-    static constexpr uint8_t kLandedConfirmSamples  = 20;    // 1.0 s sustained quiescence
+    static constexpr float    kLandedSpeedMps          = 0.25f;  // |fused vert speed| at rest
+    static constexpr uint8_t  kLandedConfirmSamples    = 20;     // 1.0 s sustained quiescence
+    // Raw baro backup: used when EKF has accumulated an offset from deployment shock.
+    // AGL threshold removed — landing may be on terrain higher than the pad, so an
+    // absolute AGL ceiling would prevent detection on uphill landing sites.
+    static constexpr float    kLandedRawBaroSpeedMps   = 2.0f;   // m/s on raw baro (10-sample window)
+    // Maximum recordable flight duration; matches archive minutesPerRecord=8.
+    // When reached, the flight is force-closed so the landing timestamp can never
+    // exceed the span of the recorded data.
+    static constexpr uint32_t kMaxFlightMs             = 8u * 60u * 1000u;
     uint8_t m_landed_count_  = 0;
 };

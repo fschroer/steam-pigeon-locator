@@ -1,5 +1,6 @@
 extern "C" {
 #include "usart.h"
+#include "Faultlogc.h"
 }
 
 #include <UserInteraction.hpp>
@@ -556,19 +557,28 @@ void UserInteraction::ExportData(uint16_t archive_position) {
 		uint32_t start = 0u;
 
 		while (true) {
+		    FaultLog_KickWatchdog(0);
 		    if (!archive_.ReadFlightDataRange(archive_position, start, sample_buffer, 64u, got)) {break;}
 		    if (got == 0u) {break;}
 		    for (uint32_t i = 0u; i < got; ++i) {
-				export_line.WriteMany(sample_buffer[i].timestamp_ms, ",", Fmt(sample_buffer[i].raw_baro_altitude_agl, 0, 1), ",",
+				export_line.WriteMany(sample_buffer[i].timestamp_ms, ",",
+						Fmt(sample_buffer[i].raw_baro_altitude_agl, 0, 1), ",",
 						Fmt(sample_buffer[i].fused_altitude_agl, 0, 1), ",",
 						Fmt(sample_buffer[i].raw_baro_velocity, 0, 1), ",",
 						Fmt(sample_buffer[i].fused_vertical_speed_mps, 0, 1), ",",
-						Fmt(sample_buffer[i].accel.x / G0_F, 0, 1), ",", Fmt(sample_buffer[i].accel.y / G0_F, 0, 1),
-						",", Fmt(sample_buffer[i].accel.z / G0_F, 0, 1), ",",
-						Fmt(sample_buffer[i].gyro.x * RAD2DEG, 0, 1), ",", Fmt(sample_buffer[i].gyro.y * RAD2DEG, 0, 1),
-						",", Fmt(sample_buffer[i].gyro.z * RAD2DEG, 0, 1), ",",
+						Fmt(sample_buffer[i].accel.x / G0_F, 0, 2), ",",
+						Fmt(sample_buffer[i].accel.y / G0_F, 0, 2), ",",
+						Fmt(sample_buffer[i].accel.z / G0_F, 0, 2), ",",
+						Fmt(sample_buffer[i].gyro.x * RAD2DEG, 0, 1), ",",
+						Fmt(sample_buffer[i].gyro.y * RAD2DEG, 0, 1), ",",
+						Fmt(sample_buffer[i].gyro.z * RAD2DEG, 0, 1), ",",
 						Fmt(sample_buffer[i].lat_rad * RAD2DEG, 0, 7), ",",
-						Fmt(sample_buffer[i].lon_rad * RAD2DEG, 0, 7), crlf_);
+						Fmt(sample_buffer[i].lon_rad * RAD2DEG, 0, 7), ",",
+						static_cast<uint32_t>(sample_buffer[i].flight_state), ",",
+						static_cast<uint32_t>(sample_buffer[i].oc_start_us), ",",
+						static_cast<uint32_t>(sample_buffer[i].oc_end_us), ",",
+						static_cast<uint32_t>(sample_buffer[i].process_start_us), ",",
+						static_cast<uint32_t>(sample_buffer[i].process_dur_us), crlf_);
 		    }
 		    start += got;
 		}

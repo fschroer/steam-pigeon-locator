@@ -512,7 +512,10 @@ bool SAMM10Q::parseNavPvtFromBuffer(GpsSample& out) {
                 out.v_acc_m = vAcc_mm * 1e-3f;
                 out.s_acc_mps = sAcc_mmps * 1e-3f;
 
+                const bool gnss_fix_ok = (p[21] & 0x01) != 0;
+
                 out.position_valid =
+                    gnss_fix_ok &&
                     (out.fix_type >= 3) &&
                     std::isfinite(out.lat_rad) &&
                     std::isfinite(out.lon_rad) &&

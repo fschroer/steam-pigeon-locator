@@ -56,11 +56,11 @@ bool FlightManager::DetectLaunch(const NavSolution& sol) {
     //      Covers a bad barometer or a pad reference that has not yet converged.
     //   2. AGL + moderate-accel combined: requires the rocket to have risen past
     //      the configured threshold AND to be under at least partial thrust
-    //      (> 1 g total = any net acceleration above gravity).  The accel gate
+    //      (>= 1.5 g total = any net acceleration above gravity).  The accel gate
     //      prevents a spurious AGL reading caused by an unzeroed pad reference
     //      from triggering launch while the locator sits on the ground (where
     //      body accel ≈ 1 g, well below kLaunchConfirmAccelG).
-    constexpr float kLaunchConfirmAccelG = 1.5f;  // > 1 g = thrust is present
+    constexpr float kLaunchConfirmAccelG = 1.5f;  // >= 1.5 g = thrust is present
     const bool threshold = (accel_g >= 5.0f)
                         || (accel_g >= kLaunchConfirmAccelG
                             && sol.altitude_agl_m >= settings.launch_detect_altitude);
@@ -126,18 +126,29 @@ bool FlightManager::DetectApogee(const NavSolution& sol) {
 
 // ---------------------------------------------------------------------------
 // DetectLanded
-// Fused vertical speed near zero sustained at low altitude indicates landing.
-// Uses getFused() so the EKF-smoothed speed is used rather than raw noisy baro.
+// Primary: fused vertical speed near zero sustained for 1 s.
+// Backup:  raw baro AGL below kLandedBaroAglThresholdM AND raw baro velocity
+//          below kLandedRawBaroSpeedMps for the same window.
+//
+// The backup path handles the case where a deployment shock has accumulated a
+// ~20 m offset in the fused altitude, keeping fused vspeed non-zero (1-2 m/s)
+// even after the rocket is stationary.  Raw baro is unaffected by EKF state
+// accumulation and correctly shows near-zero velocity once on the ground.
+// Both paths share the same counter so the confirmation window is consistent.
 // ---------------------------------------------------------------------------
-bool FlightManager::DetectLanded(const NavSolution& sol) {
-    // Debounce: require kLandedConfirmSamples consecutive near-zero vertical
-    // speed samples before declaring landing.  A false landing is costly — it
-    // ends the deployment window (the >= Noseover && < Landed block stops
-    // running) and halts flight archiving — so a 1 s sustained quiescence is
-    // required rather than a single sample, guarding against an isolated EKF
-    // velocity glitch during descent.  Steady descent under canopy holds vz at
-    // several m/s, so this only accumulates once the rocket is truly at rest.
-    if (std::fabs(sol.vertical_speed_mps) < kLandedSpeedMps) {
+bool FlightManager::DetectLanded(const NavSolution& sol, const BaroSample& baro_raw) {
+    const bool fused_settled = std::fabs(sol.vertical_speed_mps) < kLandedSpeedMps;
+
+    // Raw baro backup: valid baro, rocket is near ground, and baro velocity low.
+    // kLandedRawBaroSpeedMps is tuned for the 10-sample (500 ms) velocity window;
+    // the longer window averages out baro pressure noise that would otherwise
+    // inflate the velocity reading at rest.
+    // AGL threshold omitted: landing may be on terrain above the pad elevation,
+    // so an absolute ceiling would block detection on uphill landing sites.
+    const bool baro_settled = baro_raw.valid
+                           && std::fabs(baro_raw.velocity) < kLandedRawBaroSpeedMps;
+
+    if (fused_settled || baro_settled) {
         if (m_landed_count_ < kLandedConfirmSamples)
             ++m_landed_count_;
     } else {
@@ -363,7 +374,8 @@ void FlightManager::UpdateFlightState() {
         }
 
         // Landing detection
-        if (!near_apogee_ && DetectLanded(nav_solution)) {
+        BaroSample baro_raw = nav_.getRawBaro();
+        if (!near_apogee_ && DetectLanded(nav_solution, baro_raw)) {
             flight_state_ = FlightStates::Landed;
             nav_.setPhase(FlightStates::Landed);
             archive_.WriteEvent(FlightArchive::Statistic::LandingTimestampMs, flight_time_ms);
@@ -429,8 +441,15 @@ void FlightManager::UpdateFlightState() {
 
     if (flight_state_ >= FlightStates::Launched && flight_state_ < FlightStates::Landed) {
         BaroSample baro_raw = nav_.getRawBaro();
-        archive_.WriteData(flight_time_ms, nav_solution, baro_raw.altitude_m_agl, baro_raw.velocity);
+        archive_.WriteData(flight_time_ms, nav_solution, baro_raw.altitude_m_agl, baro_raw.velocity, flight_state_, m_timing_diag_);
         flight_time_ms += 1000 / SAMPLES_PER_SECOND;
+        // Force-close the flight once the archive record is full so the landing
+        // timestamp is never larger than the recorded data span.
+        if (flight_time_ms >= kMaxFlightMs) {
+            flight_state_ = FlightStates::Landed;
+            nav_.setPhase(FlightStates::Landed);
+            archive_.WriteEvent(FlightArchive::Statistic::LandingTimestampMs, flight_time_ms);
+        }
     }
 }
 
@@ -473,6 +492,7 @@ void FlightManager::ResetFlight() {
     deploy_ch3_reset_       = false;
     deploy_ch4_reset_       = false;
     pre_main_velocity_      = 0.0f;
+    flight_time_ms          = 0;
     m_launch_candidate_ms_  = 0;
     m_apogee_peak_agl_m_    = 0.0f;
     m_apogee_last_increase_ms_ = 0;
