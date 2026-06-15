@@ -43,7 +43,11 @@ public:
 
     // Sensor status accessors
     const NavSolution& getFused()  const { return m_solution; }
-    int32_t getMaxAltitude()       const { return m_max_altitude_agl_m; }
+    // Returns float: MaxAltitudeM is stored and read back as a float event
+    // (FlightMetadataRecord::apogee, terminal apogee).  Returning int32_t here
+    // wrote int bytes into a float-typed slot, so every reader reinterpreted the
+    // bits and saw ~0.
+    float getMaxAltitude()         const { return m_max_altitude_agl_m; }
 
     SensorStatus imuStatus()  const { return m_imu.getStatus(); }
     SensorStatus baroStatus() const { return m_baro.getStatus(); }

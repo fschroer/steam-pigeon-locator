@@ -70,6 +70,8 @@ void Communication::SendPreLaunchData() {
 
 	msg.latitude = nav_solution.pos.lat_rad * RAD2DEG;
 	msg.longitude = nav_solution.pos.lon_rad * RAD2DEG;
+	msg.raw_latitude = gps_sample.lat_rad * RAD2DEG;
+	msg.raw_longitude = gps_sample.lon_rad * RAD2DEG;
 	msg.satellites = gps_sample.num_sv;
 	msg.hacc = gps_sample.h_acc_m;
 	msg.imu_status = nav_.imuStatus().health;
@@ -191,9 +193,11 @@ void Communication::OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
 		switch (parsed.type) {
 
 		case MsgType::LocatorCfgChgRequest: {
-			RocketPersistentSettings rocket_settings { };
-			std::memcpy(&rocket_settings, payload + sizeof(PacketHeader), sizeof(rocket_settings));
-			archive_.SaveLocatorSettings(rocket_settings);
+			// Defer the settings flash write to Process() (main loop).  Doing it
+			// here in the radio ISR could preempt a navigation SPI2 transaction
+			// and corrupt both (flash and IMU/baro share SPI2).
+			std::memcpy(&pending_cfg_settings_, payload + sizeof(PacketHeader), sizeof(pending_cfg_settings_));
+			pending_cfg_save_ = true;
 			break;
 		}
 
@@ -235,13 +239,12 @@ void Communication::OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
 			if (device_state == DeviceState::Disarmed || device_state == DeviceState::MetadataRequested
 					|| device_state == DeviceState::DataRequested) {
 				device_state = DeviceState::DataRequested;
-				const FlightDataRequest &req = parsed.flight_data_request;
-				BeginTransfer(req.record);
-				// If the archive record is missing or empty, BeginTransfer leaves
-				// transfer_active_ false.  Fall back to MetadataRequested so the
-				// app can pick a different record without needing to disarm.
-				if (!transfer_active_)
-					device_state = DeviceState::MetadataRequested;
+				// Defer BeginTransfer() — it reads the archive (flash) — to
+				// Process() (main loop), so the reads cannot preempt a navigation
+				// SPI2 transaction.  The missing/empty-record fallback is handled
+				// there too once BeginTransfer has run.
+				pending_transfer_record_ = parsed.flight_data_request.record;
+				pending_begin_transfer_ = true;
 			}
 			break;
 		}
@@ -495,7 +498,24 @@ void Communication::OnAckReceived(const FlightDataAck &ack, DeviceState &device_
 //  Reliable transfer — main driver (call from main loop / task)
 // ============================================================================
 
-void Communication::Process() {
+void Communication::Process(DeviceState &device_state) {
+	// Deferred config save (queued by LocatorCfgChgRequest in the radio ISR).
+	// Run in main-loop context so the flash write is serialized with navigation.
+	if (pending_cfg_save_) {
+		pending_cfg_save_ = false;
+		archive_.SaveLocatorSettings(pending_cfg_settings_);
+	}
+
+	// Deferred transfer setup (queued by FlightDataRequest in the radio ISR).
+	// BeginTransfer reads the archive (flash); doing it here keeps those reads
+	// in main-loop context.  Apply the missing/empty-record fallback now.
+	if (pending_begin_transfer_) {
+		pending_begin_transfer_ = false;
+		BeginTransfer(pending_transfer_record_);
+		if (!transfer_active_ && device_state == DeviceState::DataRequested)
+			device_state = DeviceState::MetadataRequested;
+	}
+
 	// Send deferred VersionInfo response.  Must run before the transfer guard
 	// so it fires even when no flight-data transfer is active.
 	if (version_info_pending_) {

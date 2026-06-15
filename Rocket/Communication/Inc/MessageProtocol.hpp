@@ -79,6 +79,8 @@ struct PreLaunchData {
 	PacketHeader packet_header;
 	double latitude;
 	double longitude;
+	double raw_latitude;
+	double raw_longitude;
 	uint8_t satellites;
 	float hacc;
 	SensorHealth imu_status;

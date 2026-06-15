@@ -46,6 +46,12 @@ void Factory::Init(const Radio_s *radio) {
 	BuzzerStop();
 	buzzer_phase_ = BuzzerPhase::Idle;
 
+	// Bring the external flash to a known state BEFORE the first access.  A
+	// programmer/debugger reset (or watchdog/soft reset) resets the MCU but not
+	// the flash, which can otherwise be left unreadable until a power cycle —
+	// making archived flight data appear to vanish after flashing.
+	flash_.ResetChip();
+
 	archive_.Init();
 	radio_adapter_ = new StRadioAdapter(radio);
 	comm_.Init(*radio_adapter_);
@@ -60,6 +66,10 @@ void Factory::Init(const Radio_s *radio) {
 }
 
 void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
+	// Handle any queued console (UART2) input first, in main-loop context, so
+	// terminal flash I/O never preempts a navigation SPI2 transaction.
+	ServiceConsole();
+
 	FlightStates flight_state = flight_.GetFlightState();
 	navigation_.SetD1Converted();
 
@@ -79,7 +89,7 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 
 	// Run deferred communication tasks (e.g. pending VersionInfo response)
 	// regardless of device state, before the per-state switch below.
-	comm_.Process();
+	comm_.Process(device_state_);
 
 	switch (device_state_) {
 	case DeviceState::Disarmed:
@@ -127,21 +137,33 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 		EnableDeployment();
 		navigation_.Update();
 
-		// Arming one-shot plays immediately on arm. Flash erase for the new flight
-		// record is started at the same time (StartOpenNewFlight in the state-change
-		// block above) and polled each tick here, so it proceeds sector-by-sector
-		// in the background without stalling the CPU.
+		// Flash erase for the new flight record was started on entry to Armed
+		// (StartOpenNewFlight in the state-change block above).  Poll it EVERY
+		// tick — concurrently with the Arming buzzer — so the record finishes
+		// opening (activeOpen = true) well before the rocket leaves the pad.
+		// Gating this poll behind the Arming buzzer completing left a window in
+		// which launch could occur before the record was open; WriteFlightDataSample
+		// then silently dropped every sample and CloseCurrentFlight wrote no trailer,
+		// leaving a record whose data could not be recovered.
+#ifndef NAV_TEST
+		archive_.PollOpenNewFlight();
+#endif
+		// Arming one-shot plays immediately on arm.
 		// Buzzer is silenced during flight; Landed beacon is handled below.
 		if (buzzer_phase_ == BuzzerPhase::Arming) {
 			if (BuzzerSequenceOnce(Arming))
 				buzzer_phase_ = BuzzerPhase::Armed;
 		} else if (buzzer_phase_ == BuzzerPhase::Armed) {
+			if (flight_state == FlightStates::WaitingLaunch) {
 #ifndef NAV_TEST
-			archive_.PollOpenNewFlight();
+				// Withhold the ready-beep until the flight record is fully open
+				// (activeOpen = true).  Users launch on the ready-beep, so this
+				// guarantees sample recording is active before the rocket leaves
+				// the pad — closing the residual open-vs-launch race.
+				if (archive_.IsActiveOpen())
 #endif
-			if (flight_state == FlightStates::WaitingLaunch)
-				BuzzerSequence(Armed);
-			else if (flight_state > FlightStates::WaitingLaunch && flight_state != FlightStates::Landed)
+					BuzzerSequence(Armed);
+			} else if (flight_state > FlightStates::WaitingLaunch && flight_state != FlightStates::Landed)
 				BuzzerStop();
 		}
 		flight_.SetTimingDiag(m_timing_diag_);
@@ -204,7 +226,28 @@ void Factory::OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_
 	comm_.OnRadioRxDone(payload, size, rssi, LoraSnr_FskCfo, device_state_);
 }
 
+// Called from the UART2 RX ISR.  Keep this minimal and free of SPI/flash I/O:
+// just push the byte into the ring buffer for the main loop to handle.
 void Factory::ProcessUART2Char(uint8_t uart_char) {
+    const uint16_t next = (uart2_rx_head_ + 1u) & (kUart2RxBufSize - 1u);
+    if (next != uart2_rx_tail_) {        // drop byte on overflow rather than block
+        uart2_rx_buf_[uart2_rx_head_] = uart_char;
+        uart2_rx_head_ = next;
+    }
+}
+
+// Called from the main loop (ProcessRocketEvents).  Drains any bytes queued by
+// the ISR and handles them here, where flash access is serialized with
+// navigation's SPI2 transactions.
+void Factory::ServiceConsole() {
+    while (uart2_rx_tail_ != uart2_rx_head_) {
+        const uint8_t c = uart2_rx_buf_[uart2_rx_tail_];
+        uart2_rx_tail_ = (uart2_rx_tail_ + 1u) & (kUart2RxBufSize - 1u);
+        HandleConsoleChar(c);
+    }
+}
+
+void Factory::HandleConsoleChar(uint8_t uart_char) {
     if (uart_char == '?') {
         // ----------------------------------------------------------------
         // Dump fault log over UART2.
@@ -303,6 +346,14 @@ void Factory::ProcessUART2Char(uint8_t uart_char) {
 
 void Factory::MS5611OCCallback() {
 	navigation_.MS5611OCCallback();
+}
+
+void Factory::ServiceBus() {
+	// Advance the baro conversion state machine (gated on real elapsed time),
+	// then execute any queued SPI2 transactions.  Both run in main-loop context,
+	// so they never overlap the IMU/flash transfers issued from ProcessRocketEvents.
+	navigation_.SetD1Converted();
+	RocketNav::Spi2Bus().drain();
 }
 
 void Factory::UartSend(const char *msg) {

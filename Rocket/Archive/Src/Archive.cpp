@@ -3,6 +3,7 @@
 #include "Types.hpp"
 #include "RandomNumGen.hpp"
 #include "Format.hpp"
+#include "Faultlogc.h"  // C interface: FaultLog_KickWatchdog
 
 constexpr SystemFlashLayout layout = MakeSystemFlashLayout(8u * 1024u * 1024u, // total flash
 32u * 1024u,        // persistent settings region
@@ -70,7 +71,35 @@ bool Archive::Init() {
 }
 
 bool Archive::StartOpenNewFlight() {
+	// Reuse a pristine record left open in THIS power session by a prior arm
+	// that was disarmed while still waiting for launch (erased, header written,
+	// no samples).  record_id_ and the active-open state are still valid from
+	// that arm, so there is nothing to erase or allocate — just mark it complete.
+	if (archive_.IsOpenFlightPristine()) {
+		open_flight_state_ = OpenFlightState::Done;
+		return true;
+	}
+
+	// Otherwise clear any stale open-flight state left by a previous arm that was
+	// abandoned (armed then disarmed without a flight).  Otherwise activeOpen
+	// stays set, InitializeFlightRecord() below fails, and the subsequent flight
+	// records events but drops every sample (activeRecordId mismatch).
+	archive_.AbortOpenFlight();
 	open_flight_state_ = OpenFlightState::Idle;
+
+	// Reuse that survives a reboot: re-adopt a record opened by a prior arm but
+	// never flown (valid header, not closed, never launched → no recoverable
+	// data).  It is already erased, so re-initialize it in place — no new slot,
+	// no multi-second erase.  InitializeFlightRecord re-validates the header and
+	// re-establishes the active-open state on this record.
+	uint16_t reusable = archive_.FindUnflownOpenRecord(FlightArchive::Statistic::LaunchTimestampMs);
+	if (reusable != FlightArchive::INVALID_RECORD_ID && archive_.InitializeFlightRecord(reusable)) {
+		record_id_ = reusable;
+		flight_num_ = runtime_.last_flight_sequence + 1u;
+		open_flight_state_ = OpenFlightState::Done;
+		return true;
+	}
+
 	record_id_ = archive_.GetNextAvailableArchiveRecord();
 	if (record_id_ == FlightArchive::INVALID_RECORD_ID) {
 		open_flight_state_ = OpenFlightState::Failed;
@@ -109,6 +138,7 @@ bool Archive::PollOpenNewFlight() {
 }
 
 bool Archive::OpenNewFlight() {
+	archive_.AbortOpenFlight();  // clear any stale open state from an abandoned arm
 	record_id_ = archive_.GetNextAvailableArchiveRecord();
 	if (record_id_ == FlightArchive::INVALID_RECORD_ID) {
 		return false;
@@ -173,6 +203,33 @@ bool Archive::CloseCurrentFlight() {
 	runtime_.last_closed_record_id = record_id_;
 	runtime_.archive_position = static_cast<uint8_t>((record_id_ + 1u) % record_count);
 	(void) runtimeStore_.SaveIfChanged(runtime_, runtime_saved_);
+	return true;
+}
+
+uint16_t Archive::ReclaimGhostRecords() {
+	uint16_t reclaimed = 0u;
+	for (uint16_t i = 0u; i < record_count; ++i) {
+		FaultLog_KickWatchdog(0);
+		if (archive_.ReclaimRecordIfDataless(i))
+			++reclaimed;
+	}
+	return reclaimed;
+}
+
+bool Archive::EraseAllMemory() {
+	// Drop any in-RAM open state, then erase the whole archive region sector by
+	// sector so no stale record headers survive a record-structure change.
+	archive_.AbortOpenFlight();
+	record_id_ = FlightArchive::INVALID_RECORD_ID;
+
+	const uint32_t base = layout.archiveBaseAddress;
+	const uint32_t size = layout.archiveSizeBytes;
+	const uint32_t sector = flash_.GetSectorSizeBytes();
+	for (uint32_t off = 0u; off < size; off += sector) {
+		FaultLog_KickWatchdog(0);
+		if (!flash_.EraseSector4K(base + off))
+			return false;
+	}
 	return true;
 }
 

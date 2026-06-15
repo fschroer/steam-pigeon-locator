@@ -1,5 +1,6 @@
 #include <Factory.hpp>
 #include <Factory_C_Interface.h>
+#include "SpiBus.hpp"
 #include "ITM_Trace.hpp"          // new shared helper
 #include <string.h>             // for memcpy
 
@@ -43,7 +44,13 @@ static void ITM_Init(void) {
 // Single Factory instance
 static Factory factory(huart2, hspi2, hi2c2, hadc, htim17);
 
+// Single owner of SPI2 (baro + IMU + flash).  Declared in SpiBus.hpp.
+namespace RocketNav {
+	SpiBus& Spi2Bus() { static SpiBus bus; return bus; }
+}
+
 extern "C" void RocketFactory_Init(const struct Radio_s* radio) {
+	RocketNav::Spi2Bus().init(&hspi2);   // before sensors/timers come up
 	ITM_Init();
     // Send a known byte to port 0 immediately after init
     // Loop to make it easy to catch
@@ -82,6 +89,10 @@ extern "C" void RocketFactory_ProcessRocketEvents(uint8_t rocket_service_count) 
     factory.ProcessRocketEvents(rocket_service_count);
 
     s_process_dur_us = static_cast<uint16_t>(static_cast<uint16_t>(TIM2->CNT) - proc_start);
+}
+
+extern "C" void RocketFactory_ServiceBus() {
+	factory.ServiceBus();
 }
 
 extern "C" void RocketFactory_OnRadioTxDone() {

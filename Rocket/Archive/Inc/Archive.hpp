@@ -50,6 +50,14 @@ public:
 		return archive_.IsActiveOpen();
 	}
 	;
+	// Reclaim dataless ghost records (empty husks / launched-no-detail records),
+	// leaving cleanly closed flights and unclosed-flights-with-data intact.
+	// Returns the number of records freed.  Fast (one sector erase per ghost).
+	uint16_t ReclaimGhostRecords();
+	// Erase the entire archive region.  Use when the record structure/geometry
+	// changes and old records are no longer interpretable.  Slow (erases the
+	// whole archive); kicks the watchdog as it goes.
+	bool EraseAllMemory();
 private:
 	static RocketArchive::Config MakeConfig(IFlashDriver &flash);
 	static FlightArchive::PersistentSettingsJournal::Config MakePersistentStore();

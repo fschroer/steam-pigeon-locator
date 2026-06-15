@@ -61,6 +61,7 @@ private:
   UART_HandleTypeDef& huart2_;
 
   UserInteractionState user_interaction_state_ = WaitingForCommand;
+  bool erase_all_pending_ = false;  // data menu: awaiting Y confirmation for full erase
   char* uart_line_ = new char[UART_LINE_MAX_LENGTH + 1];
   char* user_input_ = new char[USER_INPUT_MAX_LENGTH + 1];
   const char* clear_screen_ = "\x1b[2J\r\0";
@@ -101,7 +102,13 @@ private:
   const char* data_menu_intro_ = "Rocket Locator Data Menu\r\n\r\n\0";
   const char* data_menu_header_ = "#  Date       Time     Apogee (m) Time to Apogee (s)\r\n\0";
   const char* data_exit_text_ = "Exiting Data Menu\r\n\r\n\0";
-  const char* data_guidance_text_ = "\r\nStart terminal logging and enter a valid number to retrieve CSV output of corresponding flight\r\n";
+  const char* data_guidance_text_ = "\r\nStart terminal logging and enter a valid number to retrieve CSV output of corresponding flight\r\n"
+		  "  c) Clear empty/unused records   e) Erase ALL flight memory\r\n";
+  const char* data_reclaim_done_text_ = "\r\nCleared empty records.\r\n\0";
+  const char* data_erase_confirm_text_ = "\r\nErase ALL flight memory? This cannot be undone. Press Y to confirm, any other key to cancel.\r\n\0";
+  const char* data_erase_progress_text_ = "\r\nErasing all flight memory, please wait...\r\n\0";
+  const char* data_erase_done_text_ = "\r\nAll flight memory erased.\r\n\0";
+  const char* data_cancel_text_ = "\r\nCancelled.\r\n\0";
   const char* export_header_text_ = "time_ms,raw_baro_agl_m,fused_agl_m,raw_baro_vel_mps,fused_vspeed_mps,accel_x_g,accel_y_g,accel_z_g,gyro_x_dps,gyro_y_dps,gyro_z_dps,lat_deg,lon_deg,flight_state,oc_start_us,oc_end_us,process_start_us,process_dur_us\0";
 
   const char* test_menu_intro_ = "Rocket Locator Test Menu\r\n\r\n\0";

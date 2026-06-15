@@ -133,6 +133,12 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 	while (1) {
+		// Run every spin (not just on the 50 ms tick): advances the baro
+		// conversion state machine and executes all queued SPI2 transactions in
+		// main-loop context.  This is what keeps SPI off the timer ISR and out
+		// of contention with flash logging on the shared bus.
+		RocketFactory_ServiceBus();
+
 		if (processRocketEventsInterruptCount > 0) {
 			processRocketEventsInterruptCount--;
 			rocket_service_count++;

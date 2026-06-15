@@ -43,7 +43,7 @@ private:
     // via the NavSolution passed in from UpdateFlightState().
     bool DetectLaunch(const NavSolution& sol);
     bool DetectBurnout(const NavSolution& sol);
-    bool DetectApogee(const NavSolution& sol);
+    bool DetectApogee(const NavSolution& sol, const BaroSample& baro_raw);
     bool DetectLanded(const NavSolution& sol, const BaroSample& baro_raw);
 
     void CheckQueuedDeployment();

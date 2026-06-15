@@ -20,6 +20,7 @@ public:
 
     // Set EKF process noise (Q) and baro measurement noise (R) for the given
     // flight phase.  Call from Navigation::setPhase() at each state transition.
+    // Also activates GPS-only mode at Noseover and later states.
     void setPhase(FlightStates state);
 
     // Set pad MSL reference.  pad_msl_m should be m_solution.altitude_msl_m
@@ -39,6 +40,20 @@ public:
     bool isInitialized()         const { return m_initialized; }
     float getPadAltitudeMsl()    const { return m_pad_altitude_msl_m; }
 
+    // Numerical-health counters (cumulative since power-on).  Watch these in a
+    // debugger / Live Expressions: steady zeros mean the filter is well
+    // conditioned.  Rising baro_nonfinite_drops points at a flaky MS5611 read;
+    // rising nonfinite_dx_drops means a measurement produced a non-finite
+    // correction (the safety net fired) — a signal that the covariance update
+    // needs the sturdier Joseph form.  baro_gate_rejects rising in flight means
+    // legitimate baro innovations are being thrown away (altitude mistracking).
+    struct EkfDiag {
+        uint32_t nonfinite_dx_drops   = 0;
+        uint32_t baro_nonfinite_drops = 0;
+        uint32_t baro_gate_rejects    = 0;
+    };
+    EkfDiag getDiag() const { return m_diag; }
+
     // Set dynamic-pressure correction factor applied to baro altitude during flight.
     // See NavConfig::pitot_correction_k for tuning guidance.
     void setPitotCorrectionFactor(float k) { m_pitot_k = k; }
@@ -50,6 +65,8 @@ private:
 
     NavSolution m_sol{};
     bool m_initialized = false;
+
+    EkfDiag m_diag{};
 
     float P[15*15]{};
     float Q[15*15]{};
@@ -82,9 +99,14 @@ private:
     float  m_q_alt                   = 0.05f;
 
     // Active baro noise variance — switched by setPhase() per FlightState.
-    // Increase during powered flight to reduce baro influence when port-hole
-    // lag causes the barometer to read behind the true altitude.
     float  m_R_baro                  = 0.25f;
+
+    // GPS-only navigation mode — active from Noseover through landing.
+    // When true: IMU acceleration integration is skipped in predict() so
+    // velocity coasts freely between GPS updates without inertial drift.
+    // Baro updates are also suppressed.  GPS position + velocity fusion
+    // remain active, ensuring a clean fix is captured before LoRA range loss.
+    bool   m_gps_only_               = false;
 
     // Dynamic-pressure correction factor for baro altitude (0 = disabled).
     float  m_pitot_k                 = 0.0f;

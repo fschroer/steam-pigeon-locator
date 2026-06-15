@@ -10,6 +10,33 @@ public:
         : hspi_(hspi), cs_port_(cs_port), cs_pin_(cs_pin)
     {}
 
+    // Bring the flash to a known-good standard-SPI state.  A power-on reset does
+    // this in hardware, but an MCU-only reset (debugger/programmer flash, watchdog,
+    // soft reset) does NOT power-cycle the external flash — it is left in whatever
+    // mode or partial-command state it was in, which can make subsequent reads
+    // return garbage until the next true power cycle.  This replicates POR.
+    // Call once at boot, before any other flash access.
+    void ResetChip()
+    {
+        Deselect();   // ensure CS idle-high before issuing commands
+
+        // 1) Release from Deep Power-Down (wakes the device if it was parked and
+        //    aborts a stale/partial command left by an abnormal reset).
+        SendCommand(CMD_RELEASE_DPD);   // 0xAB
+        HAL_Delay(1);                    // tRES (~30 us datasheet); 1 ms is ample at boot
+
+        // 2) Software reset: Reset-Enable (0x66) then Reset-Memory (0x99).
+        //    NOTE: confirm 0x66/0x99 are implemented on the MX25L6436F revision
+        //    in use; if not, they are ignored and the 0xAB above still covers the
+        //    deep-power-down case.
+        SendCommand(CMD_RESET_ENABLE);   // 0x66
+        SendCommand(CMD_RESET_MEMORY);   // 0x99
+        HAL_Delay(1);                    // tRST (~30-100 us datasheet)
+
+        // 3) Wait until the device reports ready before allowing any access.
+        WaitWhileBusy(ERASE_TIMEOUT_MS);
+    }
+
     // ------------------------------------------------------------
     //  Public API (implements IFlashDriver)
     // ------------------------------------------------------------
@@ -17,6 +44,13 @@ public:
     bool Read(uint32_t address, void* dst, size_t length) override
     {
         if (!dst || length == 0)
+            return false;
+
+        // A read issued while a program/erase is still in progress returns
+        // undefined data on the MX25L6436F.  Because StartEraseSector4K() is
+        // non-blocking, a read can otherwise land mid-erase and return garbage
+        // (seen as all-zero / not-present stat slots).  Wait for WIP to clear.
+        if (!WaitWhileBusy(ERASE_TIMEOUT_MS))
             return false;
 
         uint8_t cmd[4];
@@ -134,6 +168,14 @@ private:
     inline void Select()   { HAL_GPIO_WritePin(cs_port_, cs_pin_, GPIO_PIN_RESET); }
     inline void Deselect() { HAL_GPIO_WritePin(cs_port_, cs_pin_, GPIO_PIN_SET);   }
 
+    // Issue a single-byte command with no address or data (e.g. reset, WREN).
+    void SendCommand(uint8_t opcode)
+    {
+        Select();
+        HAL_SPI_Transmit(hspi_, &opcode, 1, HAL_MAX_DELAY);
+        Deselect();
+    }
+
     bool WriteEnable()
     {
         uint8_t cmd = CMD_WREN;  // 0x06
@@ -220,6 +262,9 @@ private:
     static constexpr uint8_t CMD_SECTOR_ERASE_4K   = 0x20;
     static constexpr uint8_t CMD_WREN              = 0x06;
     static constexpr uint8_t CMD_RDSR              = 0x05;
+    static constexpr uint8_t CMD_RESET_ENABLE      = 0x66;
+    static constexpr uint8_t CMD_RESET_MEMORY      = 0x99;
+    static constexpr uint8_t CMD_RELEASE_DPD       = 0xAB;
 
     // ------------------------------------------------------------
     //  Status Register Bits

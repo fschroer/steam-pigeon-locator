@@ -181,12 +181,34 @@ void UserInteraction::ProcessChar(uint8_t uart_char, DeviceState &device_state) 
 		AdjustConfigTextSetting(uart_char, device_name_);
 		break;
 	case UserInteractionState::DataHome:
-		if (uart_char >= '0' && uart_char <= '9') {
+		if (erase_all_pending_) {
+			// Second keypress confirms or cancels the full-memory erase.
+			erase_all_pending_ = false;
+			StaticStringWriter<UART_LINE_MAX_LENGTH> line(&huart2_);
+			if (uart_char == 'y' || uart_char == 'Y') {
+				line.WriteMany(data_erase_progress_text_);
+				archive_.EraseAllMemory();
+				line.WriteMany(data_erase_done_text_);
+			} else {
+				line.WriteMany(data_cancel_text_);
+			}
+			DisplayDataMenu();
+		} else if (uart_char >= '0' && uart_char <= '9') {
 			if (!archive_.IsInitialized())
 				archive_.InitializeArchive();
 			ExportFlightStats((uint16_t) uart_char - '0');
 			ExportData((uint16_t) uart_char - '0');
+		} else if (uart_char == 'c' || uart_char == 'C') {
+			archive_.ReclaimGhostRecords();
+			StaticStringWriter<UART_LINE_MAX_LENGTH> line(&huart2_);
+			line.WriteMany(data_reclaim_done_text_);
+			DisplayDataMenu();
+		} else if (uart_char == 'e' || uart_char == 'E') {
+			erase_all_pending_ = true;
+			StaticStringWriter<UART_LINE_MAX_LENGTH> line(&huart2_);
+			line.WriteMany(data_erase_confirm_text_);
 		} else if (uart_char == 27) { // Esc key
+			erase_all_pending_ = false;
 			device_state = DeviceState::Disarmed;
 			user_interaction_state_ = UserInteractionState::WaitingForCommand;
 			uart_line_len = MakeLine(uart_line_, cancel_text_);

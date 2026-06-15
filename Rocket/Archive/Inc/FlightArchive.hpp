@@ -64,13 +64,36 @@ namespace FlightArchive
         Geometry GetGeometry() const;
         uint16_t GetRecordCount() const;
         uint16_t GetNextAvailableArchiveRecord() const;
+        // Find a record opened by a prior arm but never flown: valid header, not
+        // cleanly closed, and the caller-supplied "launched" stat absent (so it
+        // holds no recoverable flight data).  Such a record is already erased and
+        // can be re-adopted by the next arm without re-erasing — letting a
+        // disarm-in-WaitingLaunch reuse its slot even across a reboot.  Returns
+        // INVALID_RECORD_ID if none.
+        uint16_t FindUnflownOpenRecord(StatId launchedStatId) const;
         bool IsActiveOpen() { return m_rt.activeOpen; };
+        // Free a single record IF it is a dataless ghost — has a valid header,
+        // is not cleanly closed, holds zero committed chunks, and is not the
+        // currently-open record.  Erases only its first sector (header + valid
+        // marker + stats) so the slot reads as free.  Returns true if reclaimed.
+        bool ReclaimRecordIfDataless(uint16_t recordId);
+        // True when a record is open but no sample data has been written yet —
+        // i.e. armed and erased but never launched.  Such a record can be reused
+        // by the next arming instead of consuming/erasing a fresh slot.
+        bool IsOpenFlightPristine() const {
+            return m_rt.activeOpen && m_rt.committedSampleCount == 0u && m_rt.bufferedSamples == 0u;
+        }
 
         bool PrepareRecord(uint16_t recordId);
         bool BeginPrepareRecord(uint16_t recordId);
         bool PollPrepareRecord();
         bool InitializeFlightRecord(uint16_t recordId);
         bool CloseFlightRecord(uint16_t recordId);
+        // Reset the in-RAM open-flight state WITHOUT writing a close trailer.
+        // Used when an arm is abandoned (armed then disarmed with no flight): the
+        // record was opened but never closed, so activeOpen would otherwise stay
+        // set and block the next InitializeFlightRecord().
+        void AbortOpenFlight();
 
         bool WriteFlightDataSample(uint16_t recordId, const TSample& sample);
         bool FlushFlightData(uint16_t recordId);
@@ -135,6 +158,10 @@ namespace FlightArchive
         bool WriteCloseTrailer(uint16_t recordId, const RecordCloseTrailer& trailer);
 
         bool ReadChunkCommitHeader(uint16_t recordId, uint16_t chunkIndex, SampleChunkCommitHeader& header) const;
+        // Determine committed sample/chunk counts by scanning the per-chunk commit
+        // headers (no close trailer required).  Used to recover records that were
+        // never closed — e.g. power lost before landing was detected.
+        void ScanCommittedChunks(uint16_t recordId, uint32_t& sampleCountOut, uint16_t& chunkCountOut) const;
         bool ValidateHeaderForConfig(const RecordHeader& header, uint16_t recordId) const;
         bool EraseRecordRegion(uint16_t recordId);
 

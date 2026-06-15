@@ -584,6 +584,17 @@ namespace FlightArchive
     }
 
     template<typename TSample, typename TStatTraits, size_t ChunkPayloadBytes>
+    void Archive<TSample, TStatTraits, ChunkPayloadBytes>::AbortOpenFlight()
+    {
+        m_rt.activeOpen = false;
+        m_rt.activeRecordId = INVALID_RECORD_ID;
+        m_rt.bufferedSamples = 0u;
+        m_rt.committedChunkCount = 0u;
+        m_rt.committedSampleCount = 0u;
+        m_rt.runningDataCrc = 0xFFFFFFFFu;
+    }
+
+    template<typename TSample, typename TStatTraits, size_t ChunkPayloadBytes>
     bool Archive<TSample, TStatTraits, ChunkPayloadBytes>::RecoverFlightData(uint16_t recordId,
                                                                              TSample* outSamples,
                                                                              uint32_t maxSamples,
@@ -716,25 +727,34 @@ namespace FlightArchive
             return false;
         }
 
+        // Determine the committed counts.  Preferred path is the close trailer;
+        // fall back to scanning chunk commit headers for records that were never
+        // closed (e.g. power lost before landing), so their data is still
+        // recoverable.
+        uint32_t committedSampleCount = 0u;
+        uint32_t committedChunkCount  = 0u;
+
         RecordCloseTrailer t{};
-        if (!ReadCloseTrailer(recordId, t))
+        if (ReadCloseTrailer(recordId, t) && t.magic == CLOSE_MAGIC)
         {
-            return false;
+            committedSampleCount = t.committedSampleCount;
+            committedChunkCount  = t.committedChunkCount;
+        }
+        else
+        {
+            uint16_t scannedChunks = 0u;
+            ScanCommittedChunks(recordId, committedSampleCount, scannedChunks);
+            committedChunkCount = scannedChunks;
         }
 
-        if (t.magic != CLOSE_MAGIC)
-        {
-            return false;
-        }
-
-        if (startSampleIndex >= t.committedSampleCount)
+        if (committedSampleCount == 0u || startSampleIndex >= committedSampleCount)
         {
             return true;
         }
 
         const Geometry g = GetGeometry();
 
-        uint32_t remainingToRead = t.committedSampleCount - startSampleIndex;
+        uint32_t remainingToRead = committedSampleCount - startSampleIndex;
         if (remainingToRead > maxSamplesToRead)
         {
             remainingToRead = maxSamplesToRead;
@@ -743,7 +763,7 @@ namespace FlightArchive
         uint32_t globalSampleIndex = 0u;
         uint32_t outIndex = 0u;
 
-        for (uint32_t chunk = 0u; chunk < t.committedChunkCount && outIndex < remainingToRead; ++chunk)
+        for (uint32_t chunk = 0u; chunk < committedChunkCount && outIndex < remainingToRead; ++chunk)
         {
             SampleChunkCommitHeader ch{};
             if (!ReadChunkCommitHeader(recordId, static_cast<uint16_t>(chunk), ch))
@@ -810,23 +830,68 @@ namespace FlightArchive
     }
 
     template<typename TSample, typename TStatTraits, size_t ChunkPayloadBytes>
+    void Archive<TSample, TStatTraits, ChunkPayloadBytes>::ScanCommittedChunks(uint16_t recordId,
+                                                                               uint32_t& sampleCountOut,
+                                                                               uint16_t& chunkCountOut) const
+    {
+        sampleCountOut = 0u;
+        chunkCountOut  = 0u;
+
+        if (!m_rt.initialized || !IsRecordIdValid(recordId))
+        {
+            return;
+        }
+
+        const Geometry g = GetGeometry();
+
+        for (uint32_t i = 0u; i < g.maxChunkCount; ++i)
+        {
+            SampleChunkCommitHeader ch{};
+            if (!ReadChunkCommitHeader(recordId, static_cast<uint16_t>(i), ch))
+            {
+                break;
+            }
+
+            // Stop at the first chunk whose commit header is absent or
+            // inconsistent — that is the end of the recorded data.  Payload CRC
+            // is verified later, when the data itself is read.
+            if (ch.magic != CHUNK_MAGIC || ch.chunkIndex != i)
+            {
+                break;
+            }
+            if (ch.sampleCount == 0u || ch.sampleCount > g.samplesPerChunk)
+            {
+                break;
+            }
+            if (ch.payloadBytes != static_cast<uint32_t>(ch.sampleCount) * sizeof(TSample))
+            {
+                break;
+            }
+
+            sampleCountOut += ch.sampleCount;
+            chunkCountOut   = static_cast<uint16_t>(i + 1u);
+        }
+    }
+
+    template<typename TSample, typename TStatTraits, size_t ChunkPayloadBytes>
     bool Archive<TSample, TStatTraits, ChunkPayloadBytes>::GetFlightSampleCount(uint16_t recordId, uint32_t& sampleCountOut) const
     {
         sampleCountOut = 0u;
 
+        // Preferred path: a cleanly-closed record carries the exact count in its
+        // close trailer.
         RecordCloseTrailer t{};
-        if (!ReadCloseTrailer(recordId, t))
+        if (ReadCloseTrailer(recordId, t) && t.magic == CLOSE_MAGIC)
         {
-            return false;
+            sampleCountOut = t.committedSampleCount;
+            return true;
         }
 
-        if (t.magic != CLOSE_MAGIC)
-        {
-            return false;
-        }
-
-        sampleCountOut = t.committedSampleCount;
-        return true;
+        // Fallback: the record was never closed (e.g. power lost before landing
+        // was detected).  Recover the count by scanning committed chunk headers.
+        uint16_t scannedChunks = 0u;
+        ScanCommittedChunks(recordId, sampleCountOut, scannedChunks);
+        return sampleCountOut > 0u;
     }
 
     template<typename TSample, typename TStatTraits, size_t ChunkPayloadBytes>
@@ -939,6 +1004,107 @@ namespace FlightArchive
         }
 
         return found;
+    }
+
+    template<typename TSample, typename TStatTraits, size_t ChunkPayloadBytes>
+    bool Archive<TSample, TStatTraits, ChunkPayloadBytes>::ReclaimRecordIfDataless(uint16_t recordId)
+    {
+        if (!m_rt.initialized || !IsRecordIdValid(recordId))
+        {
+            return false;
+        }
+        // Never touch the record currently open for writing.
+        if (m_rt.activeOpen && m_rt.activeRecordId == recordId)
+        {
+            return false;
+        }
+
+        RecordHeader h{};
+        if (!ReadHeader(recordId, h))
+        {
+            return false;
+        }
+        if (h.magic != ARCHIVE_MAGIC)
+        {
+            return false;   // already free
+        }
+        if (!ValidateHeaderForConfig(h, recordId))
+        {
+            return false;   // foreign layout — leave for a full erase
+        }
+
+        bool valid = false;
+        if (!GetRecordValid(recordId, valid) || valid)
+        {
+            return false;   // cleanly closed flight — keep it
+        }
+
+        uint32_t samples = 0u;
+        uint16_t chunks  = 0u;
+        ScanCommittedChunks(recordId, samples, chunks);
+        if (chunks != 0u)
+        {
+            return false;   // unclosed flight WITH recoverable data — keep it
+        }
+
+        // Dataless opened record (empty husk or launched-no-detail ghost).  Erase
+        // just the first sector (header + valid marker + stats) so the slot reads
+        // as free; its chunk region is empty already and is fully erased on reuse.
+        return m_flash.EraseSector4K(GetRecordBaseAddress(recordId));
+    }
+
+    template<typename TSample, typename TStatTraits, size_t ChunkPayloadBytes>
+    uint16_t Archive<TSample, TStatTraits, ChunkPayloadBytes>::FindUnflownOpenRecord(StatId launchedStatId) const
+    {
+        if (!m_rt.initialized)
+        {
+            return INVALID_RECORD_ID;
+        }
+
+        for (uint16_t i = 0u; i < m_cfg.recordCount; ++i)
+        {
+            RecordHeader h{};
+            if (!ReadHeader(i, h))
+            {
+                continue;
+            }
+            if (h.magic != ARCHIVE_MAGIC)
+            {
+                continue;   // never opened (erased/free slot)
+            }
+            if (!ValidateHeaderForConfig(h, i))
+            {
+                continue;   // written under a different layout — leave it alone
+            }
+
+            bool valid = false;
+            if (!GetRecordValid(i, valid))
+            {
+                continue;   // could not read marker — be conservative, skip
+            }
+            if (valid)
+            {
+                continue;   // cleanly closed flight — keep it
+            }
+
+            // Opened but not closed.  Reuse ONLY if it never launched, so an
+            // unclosed flight that still holds recoverable sample data (which the
+            // recovery path can read back) is never discarded.
+            uint32_t launchedValue = 0u;
+            bool launched = false;
+            if (!ReadStat(i, launchedStatId, launchedValue, launched))
+            {
+                continue;   // read error — skip
+            }
+            if (launched)
+            {
+                continue;   // it left the pad — not a pristine slot
+            }
+
+            return i;
+        }
+
+        return INVALID_RECORD_ID;
     }
 
     template<typename TSample, typename TStatTraits, size_t ChunkPayloadBytes>

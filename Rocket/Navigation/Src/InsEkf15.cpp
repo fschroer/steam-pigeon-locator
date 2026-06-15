@@ -26,8 +26,10 @@ namespace RocketNav {
 //                  at burnout.
 //     Q_gbias=1e-7 Vibration transiently shifts bias.
 //     Q_abias=1e-4 Same.
-//     R_baro=25.0  Sigma=5m.  Port-hole lag causes baro to read behind
-//                  true altitude during fast ascent; let IMU drive altitude.
+//     R_baro=1.0   Sigma=1m.  Flight data shows baro leads (not lags) fused
+//                  during powered ascent; baro is more reliable than IMU at
+//                  launch because attitude may not be fully converged.
+//                  Previous R_baro=25.0 caused fused to lag raw by 30-65 m.
 //
 //   Burnout (quiet coast, baro recovering):
 //     Q_vel=1.0    Drag variation; no motor disturbance.
@@ -58,7 +60,7 @@ struct PhaseParams {
 
 static constexpr PhaseParams kPhaseParams[] = {
     { 0.01f,  5e-6f,  1e-9f,  1e-6f,  0.25f,  0.05f },  // WaitingLaunch [0]
-    { 50.0f,  5e-3f,  1e-7f,  1e-4f,  25.0f,  1.0f  },  // Launched      [1]
+    { 50.0f,  5e-3f,  1e-7f,  1e-4f,   1.0f,  1.0f  },  // Launched      [1]
     {  1.0f,  5e-6f,  1e-9f,  1e-6f,   1.0f,  0.2f  },  // Burnout       [2]
     {  3.0f,  1e-4f,  1e-9f,  1e-6f,  0.25f,  0.5f  },  // Noseover      [3]
     {  3.0f,  1e-4f,  1e-9f,  1e-6f,  0.25f,  0.5f  },  // DroguePrimary [4]
@@ -116,8 +118,6 @@ void InsEkf15::setPhase(FlightStates state) {
     // On the pad and after landing, lat/lon are held entirely by GPS corrections.
     // This prevents attitude-error gravity leakage from causing drift.
     switch (state) {
-        case FlightStates::Launched:
-        case FlightStates::Burnout:
         case FlightStates::Noseover:
         case FlightStates::DroguePrimaryEvent:
         case FlightStates::DrogueBackupEvent:
@@ -134,6 +134,12 @@ void InsEkf15::setPhase(FlightStates state) {
     // noise spikes would otherwise give an excessively large Kalman gain.
     m_floor_gps_acc_ = (state == FlightStates::Launched ||
                         state == FlightStates::Burnout);
+
+    // GPS-only mode: active from Noseover onward.  IMU acceleration integration
+    // is suppressed so inertial drift doesn't corrupt position after apogee.
+    // Baro is also skipped.  GPS position + velocity fusion remain active to
+    // capture a clean recovery fix before LoRA loses range near the horizon.
+    m_gps_only_ = (state >= FlightStates::Noseover);
 }
 
 // ---------------------------------------------------------------------------
@@ -228,9 +234,11 @@ void InsEkf15::predict(const ImuSample& imu, float dt_s) {
         a_n = {0.0f, 0.0f, 0.0f};
     m_sol.nav_accel_mps2 = a_n;
 
-    m_sol.vel_ned_mps.x += a_n.x * dt_s;
-    m_sol.vel_ned_mps.y += a_n.y * dt_s;
-    m_sol.vel_ned_mps.z += a_n.z * dt_s;
+    if (!m_gps_only_) {
+        m_sol.vel_ned_mps.x += a_n.x * dt_s;
+        m_sol.vel_ned_mps.y += a_n.y * dt_s;
+        m_sol.vel_ned_mps.z += a_n.z * dt_s;
+    }
 
     if (std::fabs(m_cached_cosLat) > 1e-8) {
         // Suppress ALL inertial position propagation on the pad and after landing.
@@ -266,43 +274,87 @@ void InsEkf15::predict(const ImuSample& imu, float dt_s) {
     m_sol.vertical_speed_mps = -m_sol.vel_ned_mps.z;
     m_sol.attitude_valid     = true;
 
+    // ------------------------------------------------------------------
+    // Error-state covariance propagation:  P = Phi P Phi^T + Q dt
+    //
+    // Phi = I + F dt is the discrete transition of the 15-state error
+    // (delta-pos[0:3] m NED, delta-vel[3:6] m/s NED, delta-theta[6:9] body-
+    // frame attitude error, delta-gyro-bias[9:12], delta-accel-bias[12:15]).
+    //
+    // The continuous error dynamics (Sola ESKF, body/local attitude error,
+    // right-multiplied as in injectErrorState) are:
+    //   d(dpos)  = [ +dvN, +dvE, -dvD ]           (alt up, vel_D down)
+    //   d(dvel)  = -Rbn [f_b x] dtheta - Rbn dba
+    //   d(dtheta)= -[w_b x] dtheta - dbg
+    //   d(dbg)   = 0 ,  d(dba) = 0                 (random walk via Q)
+    //
+    // Restoring these couplings is what makes accelerometer bias and
+    // attitude OBSERVABLE from baro/GPS: without them P[vel,bias] and
+    // P[vel,att] stay zero, the Kalman gain into bias/attitude is zero, and
+    // any bias/tilt error integrates into an unbounded velocity ramp
+    // (observed 2026-06-14: fused vspeed diverged past 2000 m/s at rest).
+    // ------------------------------------------------------------------
+    float Rbn[3][3];
+    Math::quatToDcmBn(m_sol.q_bn, Rbn);
+
+    auto skew = [](const Vec3f& v, float S[3][3]) {
+        S[0][0] = 0.0f;  S[0][1] = -v.z; S[0][2] =  v.y;
+        S[1][0] =  v.z;  S[1][1] = 0.0f; S[1][2] = -v.x;
+        S[2][0] = -v.y;  S[2][1] =  v.x; S[2][2] = 0.0f;
+    };
+    float Sf[3][3], Sw[3][3];
+    skew(f_b,     Sf);   // [f_b x]
+    skew(omega_b, Sw);   // [w_b x]
+
+    // Phi = I + F dt
+    static float Phi[n][n];
     for (int i = 0; i < n; ++i)
-        P[i * n + i] += Q[i * n + i] * dt_s;
+        for (int j = 0; j < n; ++j)
+            Phi[i][j] = (i == j) ? 1.0f : 0.0f;
 
-    // Position-velocity cross-covariance propagation (off-diagonal F*P*F^T terms).
-    //
-    // A full covariance propagation F*P*F^T with F[pos,vel]=dt produces:
-    //   P_new[pos,vel] = P[pos,vel] + P[vel,vel]*dt
-    //   P_new[pos,pos] = P[pos,pos] + 2*P[pos,vel]*dt + P[vel,vel]*dt^2
-    //
-    // Previously only the diagonal P[pos,pos] terms were updated (using the
-    // P[vel,vel]*dt^2 term), leaving P[pos,vel] permanently near zero.  With
-    // P[pos,vel]≈0 the Kalman gain for velocity from any position measurement
-    // (baro altitude, GPS position) is K[vel] = P[vel,pos]/S ≈ 0, meaning:
-    //   - Baro updates never correct vertical velocity → apogee detection and
-    //     deployment altitude accuracy rely entirely on IMU integration and
-    //     GPS velocity, with no baro-driven vel_D correction.
-    //   - GPS position updates never correct velocity → position and velocity
-    //     states decouple, requiring GPS velocity updates to carry the full
-    //     velocity correction burden.
-    //
-    // NED convention: alt_dot = -vel_D, so F[alt, vel_D] = -dt.
-    // Horizontal: lat_dot = vel_N/(R+alt), lon_dot = vel_E/((R+alt)*cosLat),
-    //             so F[lat, vel_N] = F[lon, vel_E] = +dt (approximate).
-    P[0*n+3] += P[3*n+3] * dt_s;   P[3*n+0] = P[0*n+3];   // lat  – vel_N
-    P[1*n+4] += P[4*n+4] * dt_s;   P[4*n+1] = P[1*n+4];   // lon  – vel_E
-    P[2*n+5] -= P[5*n+5] * dt_s;   P[5*n+2] = P[2*n+5];   // alt  – vel_D (sign: alt_dot = -vel_D)
+    // d(dpos) = + dvN, + dvE, - dvD
+    Phi[0][3] +=  dt_s;
+    Phi[1][4] +=  dt_s;
+    Phi[2][5] += -dt_s;
 
-    // Diagonal position variance growth = velocity-position coupling + explicit
-    // process noise.  The 2*P[pos,vel]*dt term is now included via the updated
-    // cross-covariance above; only the dt^2 and m_q_alt terms remain here.
-    // Without m_q_alt, baro updates at 20Hz shrink P[2,2] toward ~0.001 m²,
-    // giving K_baro ≈ 0.004 and a 12+ second correction time constant for tilt
-    // events.  m_q_alt keeps P[2,2] at a level where K_baro remains effective
-    // (~0.09 on pad with m_q_alt=0.05, giving ~0.5s recovery).
-    P[0*n+0] += P[3*n+3] * dt_s * dt_s;
-    P[1*n+1] += P[4*n+4] * dt_s * dt_s;
-    P[2*n+2] += P[5*n+5] * dt_s * dt_s + m_q_alt * dt_s;
+    // d(dvel) = -Rbn [f_b x] dtheta - Rbn dba
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j) {
+            float rsf = Rbn[i][0]*Sf[0][j] + Rbn[i][1]*Sf[1][j] + Rbn[i][2]*Sf[2][j];
+            Phi[3+i][6+j]  += -rsf      * dt_s;   // velocity <- attitude
+            Phi[3+i][12+j] += -Rbn[i][j]* dt_s;   // velocity <- accel bias
+        }
+
+    // d(dtheta) = -[w_b x] dtheta - dbg
+    for (int i = 0; i < 3; ++i) {
+        for (int j = 0; j < 3; ++j)
+            Phi[6+i][6+j] += -Sw[i][j] * dt_s;    // attitude <- attitude
+        Phi[6+i][9+i] += -dt_s;                   // attitude <- gyro bias
+    }
+
+    // tmp = Phi P
+    static float tmp[n][n];
+    for (int i = 0; i < n; ++i)
+        for (int j = 0; j < n; ++j) {
+            float s = 0.0f;
+            for (int k = 0; k < n; ++k)
+                s += Phi[i][k] * P[k*n + j];
+            tmp[i][j] = s;
+        }
+    // P = tmp Phi^T
+    for (int i = 0; i < n; ++i)
+        for (int j = 0; j < n; ++j) {
+            float s = 0.0f;
+            for (int k = 0; k < n; ++k)
+                s += tmp[i][k] * Phi[j][k];
+            P[i*n + j] = s;
+        }
+
+    // Process noise:  + Q dt  (plus the explicit altitude term m_q_alt).
+    for (int i = 0; i < n; ++i)
+        P[i*n + i] += Q[i*n + i] * dt_s;
+    P[2*n + 2] += m_q_alt * dt_s;
+
     symmetrizeP();
 }
 
@@ -314,9 +366,16 @@ void InsEkf15::predict(const ImuSample& imu, float dt_s) {
 // ---------------------------------------------------------------------------
 void InsEkf15::updateBaro(const BaroSample& baro) {
     if (!m_initialized || !baro.valid) return;
+    if (m_gps_only_) return;
     constexpr int n = 15;
 
     float z = baro.altitude_m_msl;
+    // Reject a non-finite baro sample outright.  A NaN/Inf altitude (bad I2C
+    // read or out-of-range pressure in the MS5611 conversion) would otherwise
+    // pass the innovation gate below — fabs(NaN) > 150 is false — and inject
+    // NaN into pos.alt_m, corrupting AGL and (via the position cross-covariance)
+    // lat/lon as well.
+    if (!std::isfinite(z)) { ++m_diag.baro_nonfinite_drops; return; }
 
     // Dynamic-pressure (pitot) correction: during fast ascent the sensor port
     // sees ram pressure and reads lower than true static altitude.  Add back
@@ -352,7 +411,13 @@ void InsEkf15::updateBaro(const BaroSample& baro) {
     // gate to ~3–4 m, after which valid baro corrections were permanently
     // rejected and altitude drifted without bound.  A fixed gate is immune
     // to this because its threshold does not shrink as P decreases.
-    if (std::fabs(y) > 40.0f) return;
+    //
+    // Gate widened from 40 m to 150 m: with R_baro reduced from 25.0 to 1.0
+    // in the Launched phase, K_baro is now larger and fused altitude tracks
+    // raw more closely.  The wider gate ensures baro remains active even if
+    // an initial EKF altitude error exceeds 40 m at launch.
+    if (!std::isfinite(y)) { ++m_diag.baro_nonfinite_drops; return; }
+    if (std::fabs(y) > 150.0f) { ++m_diag.baro_gate_rejects; return; }
 
     const float S_inv = 1.0f / S;
     float K[n];
@@ -531,7 +596,12 @@ void InsEkf15::updateGpsVelocity(const GpsSample& gps) {
         for (int c = 0; c < m; ++c)
             S[r*m+c] = P[(r+3)*n + (c+3)] + R[r*m+c];
 
-    if (S[0*m+0] > 1e-9f && y[0]*y[0] > 25.0f * S[0*m+0]) return; // 5-sigma gate
+    // 5-sigma gate, checked per-axis.  The previous version gated on the North
+    // residual only, so a diverged vertical (or East) velocity could never be
+    // rejected — and, worse, a large North residual would reject the whole
+    // update including the vertical correction that bounds vel_D drift.
+    for (int i = 0; i < m; ++i)
+        if (S[i*m+i] > 1e-9f && y[i]*y[i] > 25.0f * S[i*m+i]) return;
 
     float L[m*m] = {0.f};
     if (!Cholesky::decompose(S, L, m)) return;
@@ -644,6 +714,12 @@ void InsEkf15::applyZupt(float sigma_mps) {
 // injectErrorState
 // ---------------------------------------------------------------------------
 void InsEkf15::injectErrorState(const float dx[15]) {
+    // Never apply a non-finite correction: a single NaN/Inf in dx would poison
+    // the entire state (and, through the covariance couplings, spread across
+    // position/velocity/attitude on subsequent steps).  Drop the whole update.
+    for (int i = 0; i < 15; ++i)
+        if (!std::isfinite(dx[i])) { ++m_diag.nonfinite_dx_drops; return; }
+
     const double RM = WGS84::meridianRadius(m_sol.pos.lat_rad);
     const double RN = WGS84::primeVerticalRadius(m_sol.pos.lat_rad);
 

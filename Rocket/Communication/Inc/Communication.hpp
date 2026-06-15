@@ -103,7 +103,7 @@ public:
 	void BeginTransfer(uint8_t record_id);
 
 	// Call periodically from the main loop / task.
-	void Process();
+	void Process(DeviceState &device_state);
 
 	void OnAckReceived(const FlightDataAck &ack, DeviceState &device_state);
 	bool IsComplete() const { return complete_; }
@@ -124,6 +124,15 @@ private:
 	bool send_metadata_ = false;
 	uint32_t send_metadata_request_time_ = 0;
 	bool version_info_pending_ = false;
+
+	// Deferred radio-ISR work — executed in Process() (main-loop context) so the
+	// flash access never preempts a navigation SPI2 transaction (flash and the
+	// IMU/baro share SPI2).  The ISR stores the request and sets the flag; the
+	// flag is set last so the main loop sees consistent data.
+	volatile bool pending_cfg_save_ = false;
+	RocketPersistentSettings pending_cfg_settings_ { };
+	volatile bool pending_begin_transfer_ = false;
+	volatile uint8_t pending_transfer_record_ = 0;
 	static constexpr uint32_t kPreTransferGuardMs = 50u;
 	uint32_t transfer_ready_ms_ = 0;
 

@@ -37,7 +37,7 @@ public:
 	void SetTimingDiag(const TimingDiag &t) { m_timing_diag_ = t; }
 	void OnRadioTxDone();
 	void OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t LoraSnr_FskCfo);
-	void ProcessUART2Char(uint8_t uart_char);
+	void ProcessUART2Char(uint8_t uart_char);   // ISR context: enqueue only
 	void SetDeviceState(DeviceState device_state) {
 		device_state_ = device_state;
 	};
@@ -45,8 +45,26 @@ public:
 		return device_state_;
 	};
 	void MS5611OCCallback();
+	// Called continuously from the main super-loop: advances the baro
+	// conversion state machine (gated on real elapsed time) and drains queued
+	// SPI2 transactions, so all bus traffic runs here in main-loop context.
+	void ServiceBus();
 private:
 	void UartSend(const char* msg);
+
+	// Console (UART2) input is handled from the main loop, NOT the RX ISR.
+	// The flash and the IMU/baro share SPI2; doing flash I/O (e.g. the data
+	// dump) in the ISR could preempt an in-progress navigation SPI2 transaction
+	// and corrupt both.  The ISR only enqueues bytes here; ServiceConsole()
+	// drains and handles them in ProcessRocketEvents() context, serialized with
+	// navigation_.Update().
+	void ServiceConsole();
+	void HandleConsoleChar(uint8_t uart_char);
+
+	static constexpr uint16_t kUart2RxBufSize = 256;  // power of two
+	volatile uint8_t  uart2_rx_buf_[kUart2RxBufSize] = { };
+	volatile uint16_t uart2_rx_head_ = 0;  // producer: UART2 RX ISR
+	volatile uint16_t uart2_rx_tail_ = 0;  // consumer: main loop
 
 	UART_HandleTypeDef &huart2_;
 	SPI_HandleTypeDef &hspi2_;

@@ -104,22 +104,34 @@ bool FlightManager::DetectBurnout(const NavSolution& sol) {
 
 // ---------------------------------------------------------------------------
 // DetectApogee
-// Uses the fused vertical_speed_mps (smoother than raw baro velocity) plus
-// a no-new-maximum window to confirm apogee.  Also updates peak altitude
-// tracking used by FlightManager for the archive event.
+// Apogee is detected from RAW BARO altitude and velocity, with the fused
+// solution used only as a fallback when baro is momentarily invalid.
+//
+// Rationale (flight 2026-06-14): the fused vertical_speed_mps diverged
+// monotonically positive (never crossing zero) because, at 20 Hz, the extreme
+// body rates (660 dps boost, ~768 dps descent tumble = 33-38 deg/step) wreck
+// the attitude estimate, gravity leaks into the vertical channel, and baro
+// never corrects velocity (K[vel] ~ 0).  A fused-only detector therefore stayed
+// stuck in Burnout through apogee, descent, and landing, gating out every
+// deployment and landing event.  Raw baro altitude and velocity track the true
+// trajectory and are immune to EKF velocity drift, so they are authoritative
+// here.  Detection requires a sustained descent (raw baro velocity below
+// -kVzThresholdMps) plus no new altitude maximum for kNoIncreaseWindowMs.
 // ---------------------------------------------------------------------------
-bool FlightManager::DetectApogee(const NavSolution& sol) {
-    const float alt = sol.altitude_agl_m;
-    const float vz  = sol.vertical_speed_mps;   // positive = climbing
+bool FlightManager::DetectApogee(const NavSolution& sol, const BaroSample& baro_raw) {
+    const bool  baro_ok = baro_raw.valid;
+    const float alt = baro_ok ? baro_raw.altitude_m_agl : sol.altitude_agl_m;
+    const float vz  = baro_ok ? baro_raw.velocity       : sol.vertical_speed_mps;
+    const uint32_t now_ms = sol.timestamp_ms;   // 20 Hz flight clock for window timing
 
     if (alt > m_apogee_peak_agl_m_) {
         m_apogee_peak_agl_m_       = alt;
-        m_apogee_last_increase_ms_ = sol.timestamp_ms;
+        m_apogee_last_increase_ms_ = now_ms;
     }
 
-    const bool descending          = (vz < -kVzThresholdMps);
+    const bool descending          = (vz < -kVzThresholdMps);   // positive = climbing
     const bool no_new_max_for_window =
-        (sol.timestamp_ms - m_apogee_last_increase_ms_) > kNoIncreaseWindowMs;
+        (now_ms - m_apogee_last_increase_ms_) > kNoIncreaseWindowMs;
 
     return descending && no_new_max_for_window;
 }
@@ -191,7 +203,8 @@ void FlightManager::UpdateFlightState() {
 
     // --- Noseover / apogee detection ---
     if (flight_state_ > FlightStates::WaitingLaunch && flight_state_ < FlightStates::Noseover) {
-        if (DetectApogee(nav_solution)) {
+        const BaroSample baro_raw = nav_.getRawBaro();
+        if (DetectApogee(nav_solution, baro_raw)) {
             noseover_time_ = 0;
             flight_state_  = FlightStates::Noseover;
             nav_.setPhase(FlightStates::Noseover);

@@ -11,7 +11,11 @@ static constexpr uint8_t CMD_CONV_D2_OSR_4096 = 0x58;
 static constexpr uint8_t CMD_PROM_READ_BASE = 0xA0;
 
 MS5611::MS5611(SPI_HandleTypeDef *hspi, TIM_HandleTypeDef *htim17, GPIO_TypeDef *cs_port, uint16_t cs_pin) :
-		m_spi(hspi, cs_port, cs_pin), htim17_(htim17) {
+		m_spi(hspi, cs_port, cs_pin), htim17_(htim17),
+		hspi_(hspi), cs_port_(cs_port), cs_pin_(cs_pin) {
+	m_cmd_conv_d1_  = CMD_CONV_D1_OSR_4096;
+	m_cmd_conv_d2_  = CMD_CONV_D2_OSR_4096;
+	m_cmd_adc_read_ = CMD_ADC_READ;
 }
 
 bool MS5611::powerUp() {
@@ -156,6 +160,18 @@ bool MS5611::readSample(BaroSample &out) {
 	if (m_state == State::D1Converted) {
 		d1_converted_ms_ = TIM2->CNT;
 		d_d1_converted_ms_ = d1_converted_ms_;
+
+		// Flush any baro transactions the timer ISR queued (the D2 read and the
+		// D1 conversion-start) so m_d2_rx_ is populated before we use it.  This
+		// runs in main-loop context; the direct D1 read below is therefore the
+		// only bus access in flight.
+		Spi2Bus().drain();
+
+		// Assemble the D2 (temperature) word read by the queued transaction.
+		m_D2 = (static_cast<uint32_t>(m_d2_rx_[0]) << 16)
+		     | (static_cast<uint32_t>(m_d2_rx_[1]) << 8)
+		     |  static_cast<uint32_t>(m_d2_rx_[2]);
+
 		if (!readAdc(m_D1))
 			return false;
 
@@ -208,9 +224,16 @@ bool MS5611::readSample(BaroSample &out) {
 }
 
 bool MS5611::readSampleBlocking(BaroSample &out) {
+	// Synchronous path used during init() only (before timers/ISRs are live),
+	// so direct SpiDevice access is safe here.  Mirror the D2 word into m_d2_rx_
+	// because readSample() now reassembles m_D2 from that buffer (the live path
+	// fills it via a queued transaction).
 	startConversionD2();
 	HAL_Delay(10);
 	readAdc(m_D2);
+	m_d2_rx_[0] = static_cast<uint8_t>((m_D2 >> 16) & 0xFF);
+	m_d2_rx_[1] = static_cast<uint8_t>((m_D2 >> 8) & 0xFF);
+	m_d2_rx_[2] = static_cast<uint8_t>(m_D2 & 0xFF);
 	startConversionD1();
 	HAL_Delay(10);
 	m_state = State::D1Converted;
@@ -237,44 +260,77 @@ void MS5611::RearmCC1ForD2() {
  *--------------------------------------------------------------------------*/
 volatile int32_t d_d2_converting_ms_ = 0;
 volatile int32_t d_d1_converting_ms_ = 0;
+// OCCallback runs in the TIM17 CC interrupt.  It MUST NOT touch the SPI
+// peripheral directly (that is what corrupted the shared SPI2 bus when flash
+// logging ran concurrently in the main loop).  Instead it enqueues SpiBus
+// transactions; the main-loop drain executes them.  issue_ts captures the real
+// instant each conversion command goes out, so SetD1Converted() measures the
+// 9.12 ms D1 conversion from actual issue time, not from enqueue time.
 void MS5611::OCCallback() {
-    const uint32_t arr = __HAL_TIM_GET_AUTORELOAD(htim17_);
-	switch (m_state) {
-	case State::Idle:
-		d2_converting_ms_ = TIM2->CNT;
-		d_d2_converting_ms_ = d2_converting_ms_;
-		startConversionD2();
+	// Cadence kick only: at the CC1 instant (28 ms into the period) queue the
+	// D2 conversion-start.  Everything after this — the D2 read, the D1
+	// conversion-start, and the D1 read — is sequenced by ServiceConversions()
+	// (called SetD1Converted) in main-loop context, gated on the ACTUAL
+	// conversion-elapsed time so a busy main loop can never trigger a read
+	// before the MS5611 has finished converting.  No SPI is issued here.
+	if (m_state == State::Idle) {
+		m_d2_conv_started_ = false;
+		SpiBus::Txn d2{};
+		d2.hspi = hspi_; d2.cs_port = cs_port_; d2.cs_pin = cs_pin_;
+		d2.mode = SpiBus::Mode::Write;
+		d2.tx = &m_cmd_conv_d2_; d2.tx_len = 1;
+		d2.issue_ts = &d2_converting_ms_;     // real D2 conversion start time
+		d2.done     = &m_d2_conv_started_;
+		Spi2Bus().enqueue(d2);
 		m_state = State::D2Converting;
-        __HAL_TIM_SET_COMPARE(htim17_, TIM_CHANNEL_1, (arr * MS5611_D1_START_NUM) / MS5611_D1_START_DEN);  // ← dynamic
-		break;
-
-	case State::D2Converting:
-		d1_converting_ms_ = TIM2->CNT;
-		d_d1_converting_ms_ = d1_converting_ms_;
-		readAdc(m_D2);
-		startConversionD1();
-		m_state = State::D1Converting;
-		__HAL_TIM_DISABLE_IT(htim17_, TIM_IT_CC1);
-		break;
-
-	default:
-		m_state = State::Idle;
-		RearmCC1ForD2();
-		break;
 	}
+	// CC1 is a one-shot per cycle; disable until RearmCC1ForD2() re-arms it
+	// after the sample is consumed in readSample().
+	__HAL_TIM_DISABLE_IT(htim17_, TIM_IT_CC1);
 }
 
+// Conversion service — runs in main-loop context (called continuously from the
+// super-loop and once per ProcessRocketEvents tick).  MS5611 OSR-4096 max
+// conversion time is 9.04 ms ≈ 9040 TIM2 ticks @ 1 MHz; we wait 9700 (~660 µs
+// margin) measured from the ACTUAL command-issue timestamp captured by SpiBus.
+//
+// State flow (each transition only fires once the prior conversion is proven
+// complete, so deferred bus execution cannot cause an early read):
+//   D2Converting → (D2 done) → queue D2 read + D1 conversion-start → D1Converting
+//   D1Converting → (D1 done) → D1Converted   (readSample() then reads D1)
 void MS5611::SetD1Converted() {
-    if (m_state == State::D1Converting) {
-        // MS5611 OSR-4096 max conversion time is 9.12 ms = 9120 TIM2 ticks @ 1 MHz
-        // Add ~500 µs margin for SPI command overhead in OCCallback
-        constexpr uint32_t D1_READY_TICKS = 9700u;
-        const uint32_t elapsed = TIM2->CNT - d1_converting_ms_;   // wraps correctly
-        if (elapsed >= D1_READY_TICKS) {
+    constexpr uint32_t D2_READY_TICKS = 9700u;
+    constexpr uint32_t D1_READY_TICKS = 9700u;
+
+    if (m_state == State::D2Converting) {
+        if (m_d2_conv_started_ && (TIM2->CNT - d2_converting_ms_) >= D2_READY_TICKS) {
+            // D2 (temperature) conversion complete: queue its read, then start
+            // the D1 (pressure) conversion.  Executed in order by the drain.
+            m_d2_read_done_    = false;
+            m_d1_conv_started_ = false;
+
+            SpiBus::Txn rd{};
+            rd.hspi = hspi_; rd.cs_port = cs_port_; rd.cs_pin = cs_pin_;
+            rd.mode = SpiBus::Mode::WriteThenRead;
+            rd.tx = &m_cmd_adc_read_; rd.tx_len = 1;
+            rd.rx = m_d2_rx_; rd.rx_len = 3;
+            rd.done = &m_d2_read_done_;
+            Spi2Bus().enqueue(rd);
+
+            SpiBus::Txn d1{};
+            d1.hspi = hspi_; d1.cs_port = cs_port_; d1.cs_pin = cs_pin_;
+            d1.mode = SpiBus::Mode::Write;
+            d1.tx = &m_cmd_conv_d1_; d1.tx_len = 1;
+            d1.issue_ts = &d1_converting_ms_;   // real D1 conversion start time
+            d1.done     = &m_d1_conv_started_;
+            Spi2Bus().enqueue(d1);
+
+            m_state = State::D1Converting;
+        }
+    } else if (m_state == State::D1Converting) {
+        if (m_d1_conv_started_ && (TIM2->CNT - d1_converting_ms_) >= D1_READY_TICKS) {
             m_state = State::D1Converted;
         }
-        // else: leave in D1Converting; readSample will return false this cycle
-        // and the watchdog in readSample will eventually recover if truly stuck
     }
 }
 }

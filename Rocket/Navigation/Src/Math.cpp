@@ -74,19 +74,33 @@ Quaternionf quatFromAccel(const Vec3f& accel_mps2) {
 }
 
 Quaternionf quatIntegrateBodyRates(const Quaternionf& q, const Vec3f& omega_rps, float dt_s) {
-    const float wx = omega_rps.x;
-    const float wy = omega_rps.y;
-    const float wz = omega_rps.z;
+    // Exact rotation-vector integration:  q_new = q ⊗ exp([0, ½·θ]), where the
+    // body-frame rotation over the step is θ = ω·dt.  This is exact for the
+    // rotation itself, unlike the previous first-order Euler step
+    // (q + ½·q⊗ω·dt) whose error grows with (ω·dt)² — at 20 Hz a 660 dps roll
+    // is 33°/step, where the Euler approximation introduces large attitude
+    // error that then leaks gravity into the velocity solution.  (Sub-sample
+    // coning is still unmodelled; that needs IMU-rate sampling.)
+    const float theta = norm(omega_rps) * dt_s;   // total rotation angle this step
 
-    Quaternionf omega_q{0.0f, wx, wy, wz};
-    Quaternionf qdot = quatMultiply(q, omega_q);
+    Quaternionf dq;
+    if (theta < 1e-6f) {
+        // Small-angle: ½·θ with unit scalar; normalise handles the rest.
+        dq.w = 1.0f;
+        dq.x = 0.5f * omega_rps.x * dt_s;
+        dq.y = 0.5f * omega_rps.y * dt_s;
+        dq.z = 0.5f * omega_rps.z * dt_s;
+    } else {
+        const float half = 0.5f * theta;
+        const float s    = std::sin(half) / theta;   // sin(θ/2)·(ω̂)/... folded with dt
+        dq.w = std::cos(half);
+        dq.x = s * omega_rps.x * dt_s;
+        dq.y = s * omega_rps.y * dt_s;
+        dq.z = s * omega_rps.z * dt_s;
+    }
 
-    Quaternionf qn;
-    qn.w = q.w + 0.5f * qdot.w * dt_s;
-    qn.x = q.x + 0.5f * qdot.x * dt_s;
-    qn.y = q.y + 0.5f * qdot.y * dt_s;
-    qn.z = q.z + 0.5f * qdot.z * dt_s;
-    return quatNormalize(qn);
+    // Right-multiply: body-frame increment, consistent with q being body→nav.
+    return quatNormalize(quatMultiply(q, dq));
 }
 
 Eulerf quatToEuler(const Quaternionf& q) {

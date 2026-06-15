@@ -1,6 +1,7 @@
 #pragma once
 #include <Types.hpp>
 #include "SpiDevice.hpp"
+#include "SpiBus.hpp"
 #include "Velocity.tpp"
 
 namespace RocketNav {
@@ -49,6 +50,23 @@ private:
 
 	SpiDevice m_spi;
 	TIM_HandleTypeDef *htim17_;
+
+	// Bus identity, duplicated here so the timer callback can build SpiBus
+	// transactions (it must never touch the SPI peripheral directly).
+	SPI_HandleTypeDef *hspi_   = nullptr;
+	GPIO_TypeDef      *cs_port_ = nullptr;
+	uint16_t           cs_pin_  = 0;
+
+	// Command/scratch buffers referenced by queued transactions.  They must
+	// outlive the transaction (members do), and only one of each kind is ever
+	// in flight at a time given the conversion state machine.
+	uint8_t  m_cmd_conv_d1_ = 0;
+	uint8_t  m_cmd_conv_d2_ = 0;
+	uint8_t  m_cmd_adc_read_ = 0;
+	uint8_t  m_d2_rx_[3] = {};      // filled by the queued D2 ADC read
+	volatile bool m_d2_read_done_  = false;
+	volatile bool m_d2_conv_started_ = false;  // set when CONV_D2 command issued
+	volatile bool m_d1_conv_started_ = false;  // set when CONV_D1 command issued
 
 	enum class State : uint8_t {
 		Idle = 0, D2Converting, D1Converting, D1Converted
