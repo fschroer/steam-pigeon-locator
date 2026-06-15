@@ -12,6 +12,28 @@
 
 ---
 
+## Open Issues Tracker
+
+The gaps catalogued in **Appendix A** are tracked as GitHub issues in [`fschroer/steam-pigeon-locator`](https://github.com/fschroer/steam-pigeon-locator/issues), grouped into three milestones. The checkboxes mirror issue state — tick them as the issues close. (Issue numbers are not in Appendix order; see the map at the top of Appendix A.)
+
+**Milestone: [Fusion-vetting gate](https://github.com/fschroer/steam-pigeon-locator/milestone/1)** — the safety-critical raw-vs-fused decision and its prerequisite. Resolve #8 first; it gates the other two.
+- [ ] [#8 — Define the canonical velocity source per flight phase](https://github.com/fschroer/steam-pigeon-locator/issues/8) *(blocks #1 and #2)*
+- [ ] [#1 — Main-chute deploy fires on fused AGL, contradicting the raw-baro Priority-1 policy](https://github.com/fschroer/steam-pigeon-locator/issues/1)
+- [ ] [#2 — Physical-deployment sensing and main-velocity logic use fused vertical speed](https://github.com/fschroer/steam-pigeon-locator/issues/2)
+
+**Milestone: [Firmware/app contract integrity](https://github.com/fschroer/steam-pigeon-locator/milestone/2)** — keep the LoRa/BLE wire format and shared enums in sync.
+- [ ] [#4 — Wire protocol is defined twice by hand (C++ structs vs Kotlin offsets)](https://github.com/fschroer/steam-pigeon-locator/issues/4)
+- [ ] [#5 — Enum drift between firmware and app FlightStates/MsgType](https://github.com/fschroer/steam-pigeon-locator/issues/5)
+
+**Milestone: [Requirements & docs accuracy](https://github.com/fschroer/steam-pigeon-locator/milestone/3)** — fix factual errors and add requirement structure.
+- [ ] [#3 — Requirements claim GPS shares the SPI bus; it is actually on I2C](https://github.com/fschroer/steam-pigeon-locator/issues/3)
+- [ ] [#6 — Requirements outline lacks IDs, versioning, and acceptance criteria](https://github.com/fschroer/steam-pigeon-locator/issues/6)
+
+**Unmilestoned** — standalone housekeeping.
+- [ ] [#7 — Audit and remove residual/legacy definitions (MsgState, unused flight flags)](https://github.com/fschroer/steam-pigeon-locator/issues/7)
+
+---
+
 ## 1. Overall Purpose
 
 Steam Pigeon is a flight-tracking and recovery system for medium- to high-power model rockets. It exists to do three things, in order of importance: **fire the right recovery charges at the right moments, help the user find the rocket after it lands, and record enough data to understand and improve each flight.** Everything else — live telemetry, orientation visualization, voice prompts — is secondary to those goals.
@@ -178,28 +200,30 @@ Android / Kotlin / Jetpack Compose, organized around a `RocketViewModel` and a s
 
 These are points where the requirements outline, the firmware, and the app disagree, or where the requirements are ambiguous enough to invite divergent implementations. Ordered roughly by impact on the stated priorities. None of these are edits to the code or the requirements — they are flagged for an explicit decision.
 
-**1. Main-chute altitude trigger uses fused AGL, contradicting the Priority-1 "raw baro" policy. (High impact.)**
+> **Appendix item → GitHub issue** (numbers differ because the issues were filed in a different order): 1 → [#1](https://github.com/fschroer/steam-pigeon-locator/issues/1) · 2 → [#2](https://github.com/fschroer/steam-pigeon-locator/issues/2) · 3 → [#8](https://github.com/fschroer/steam-pigeon-locator/issues/8) · 4 → [#3](https://github.com/fschroer/steam-pigeon-locator/issues/3) · 5 → [#4](https://github.com/fschroer/steam-pigeon-locator/issues/4) · 6 → [#5](https://github.com/fschroer/steam-pigeon-locator/issues/5) · 7 → [#6](https://github.com/fschroer/steam-pigeon-locator/issues/6) · 8 → [#7](https://github.com/fschroer/steam-pigeon-locator/issues/7). See the **Open Issues Tracker** near the top for milestone grouping.
+
+**1. Main-chute altitude trigger uses fused AGL, contradicting the Priority-1 "raw baro" policy. (High impact.)** → [#1](https://github.com/fschroer/steam-pigeon-locator/issues/1)
 `FlightManager::UpdateFlightState()` fires main primary/backup on `nav_solution.altitude_agl_m` — the **EKF-fused** AGL — while the requirements mandate raw baro for deployment-critical altitude until fusion is vetted. This is especially notable because the apogee detector right above it was *deliberately* switched to raw baro after the 2026-06-14 flight, where the same EKF's vertical channel diverged. The most safety-critical altitude decision in the system currently trusts the output the apogee logic stopped trusting. *Decision needed:* either move main-deploy altitude to raw baro AGL for consistency with the policy, or formally declare fused AGL "vetted" for this use and update the requirements to match.
 
-**2. Physical-deployment sensing and main-velocity logic use fused vertical speed. (Medium impact.)**
+**2. Physical-deployment sensing and main-velocity logic use fused vertical speed. (Medium impact.)** → [#2](https://github.com/fschroer/steam-pigeon-locator/issues/2)
 `pre_main_velocity_`, physical drogue/main detection, and the main-deploy velocity checks all read `nav_solution.vertical_speed_mps`. Physical-deployment sensing is Priority 11 (general interest), so this is lower stakes than Item 1 — but it relies on the very fused-velocity signal the apogee detector abandoned as unreliable. *Decision needed:* confirm whether fused velocity is trustworthy here, or fall back to a raw-baro-derived velocity.
 
-**3. "Velocity must come from a proven source" is undefined. (Policy gap.)**
+**3. "Velocity must come from a proven source" is undefined. (Policy gap.)** → [#8](https://github.com/fschroer/steam-pigeon-locator/issues/8)
 The requirements require a "proven source" for velocity but never name one. Today, apogee uses raw-baro-derived velocity while main/physical logic uses fused velocity — two different "sources" for nominally the same quantity. *Decision needed:* designate the canonical velocity source(s) per flight phase so future code doesn't pick arbitrarily.
 
-**4. Requirements say the GPS shares the SPI bus; it is actually on I2C. (Documentation error.)**
+**4. Requirements say the GPS shares the SPI bus; it is actually on I2C. (Documentation error.)** → [#3](https://github.com/fschroer/steam-pigeon-locator/issues/3)
 The requirements state "the barometric pressure sensor, IMU, and GPS share a common SPI bus." In the firmware, `SAMM10Q` is an I2C device (addr 0x42, `hi2c2`), and `SpiBus` documents SPI2 as shared by baro + IMU + **flash**. The real contention to "avoid conflicting traffic" on is baro/IMU/flash, not the GPS. *Decision needed:* correct the requirements text to name the flash (and the actual buses), so the bus-contention requirement points at the right hazard.
 
-**5. Two hand-synchronized definitions of the wire protocol. (Architectural risk.)**
+**5. Two hand-synchronized definitions of the wire protocol. (Architectural risk.)** → [#4](https://github.com/fschroer/steam-pigeon-locator/issues/4)
 The packet structs in `MessageProtocol.hpp` and the manual offsets/sizes in the Kotlin app must be kept byte-identical by hand (the Kotlin source even carries "must stay in sync with MessageProtocol.hpp" comments). There is no single source of truth. *Recommendation:* generate both sides from one schema, or at minimum add a cross-checked layout test. This is the most likely origin of silent, hard-to-debug field-misalignment bugs.
 
-**6. Enum drift between firmware and app. (Low impact, but a sync hazard.)**
+**6. Enum drift between firmware and app. (Low impact, but a sync hazard.)** → [#5](https://github.com/fschroer/steam-pigeon-locator/issues/5)
 The app's `FlightStates` adds a client-only `NoSignal(9)` and renames states (`WaitingForLaunch` vs firmware `WaitingLaunch`; `DroguePrimaryDeployed` vs firmware `DroguePrimaryEvent`). The wire values (0–8) match, so it works today, but the naming implies different semantics — the firmware "Event" is *charge fired*, whereas the app "Deployed" reads as *physically deployed*, which the firmware tracks separately. *Recommendation:* align names or document the mapping in one place.
 
-**7. The requirements outline has no IDs, versioning, or acceptance criteria. (Process gap.)**
+**7. The requirements outline has no IDs, versioning, or acceptance criteria. (Process gap.)** → [#6](https://github.com/fschroer/steam-pigeon-locator/issues/6)
 For a document meant to "drive consistently to a goal," the outline would benefit from: numbered/traceable requirement IDs; a split between functional and non-functional ("other notes" mixes hard real-time constraints in with a bus-wiring claim); explicit acceptance criteria for the "vetted fusion" gate that governs Priority 1–2; and a glossary (noseover, AGL, ZUPT, primary/backup roles). Without the "vetted" gate being defined, Items 1–3 cannot ever be closed objectively.
 
-**8. Residual/legacy definitions worth auditing. (Cleanup.)**
+**8. Residual/legacy definitions worth auditing. (Cleanup.)** → [#7](https://github.com/fschroer/steam-pigeon-locator/issues/7)
 `MessageProtocol.hpp` carries both `MsgState` and `MsgType`; `MsgState` appears unused by the live path. `FlightManager` keeps several state flags (`burnout_detected_`, `drogue_deployed_`, `main_deployed_`) that are reset but not read. Not bugs, but they invite confusion during future edits. *Recommendation:* confirm and remove if dead.
 
 ---
