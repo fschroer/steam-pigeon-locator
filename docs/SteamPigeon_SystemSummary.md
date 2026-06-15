@@ -12,11 +12,23 @@
 
 ---
 
+## How this document is maintained
+
+This file is the **canonical, agreed reference** for the Steam Pigeon system — the record of *what we currently agree is true*. Open questions and design tensions are debated and decided in **GitHub issues** (the working layer), and flow *into* this document only once decided:
+
+- **Issues are the decision log.** Discuss in the issue; record the outcome as a comment beginning `DECISION:` and tick the chosen option under "Decision needed".
+- **This doc is the source of truth for "what".** It is never edited to contradict a *decided* issue without a new decision — that rule is what keeps fixes from conflicting.
+- **Decisions flow issue → doc via small pull requests** that reference the issue (`Closes #N`), linking the decision and the text change in history.
+- **Load-bearing policy decisions are promoted to ADRs** in [`docs/adr/`](adr/) (e.g. the fusion-vetting gate, [ADR-0001](adr/0001-fusion-vetting-gate.md)). The Appendix A items and the tracker below link to the issues; the ADRs capture the durable rationale.
+- **Issue status** is visible via the `status: needs-decision` → `status: decided` → `status: in-doc` labels.
+
+---
+
 ## Open Issues Tracker
 
 The gaps catalogued in **Appendix A** are tracked as GitHub issues in [`fschroer/steam-pigeon-locator`](https://github.com/fschroer/steam-pigeon-locator/issues), grouped into three milestones. The checkboxes mirror issue state — tick them as the issues close. (Issue numbers are not in Appendix order; see the map at the top of Appendix A.)
 
-**Milestone: [Fusion-vetting gate](https://github.com/fschroer/steam-pigeon-locator/milestone/1)** — the safety-critical raw-vs-fused decision and its prerequisite. Resolve #8 first; it gates the other two.
+**Milestone: [Fusion-vetting gate](https://github.com/fschroer/steam-pigeon-locator/milestone/1)** — the safety-critical raw-vs-fused decision and its prerequisite. Resolve #8 first; it gates the other two. Rationale and proposed gate criteria in [ADR-0001](adr/0001-fusion-vetting-gate.md).
 - [ ] [#8 — Define the canonical velocity source per flight phase](https://github.com/fschroer/steam-pigeon-locator/issues/8) *(blocks #1 and #2)*
 - [ ] [#1 — Main-chute deploy fires on fused AGL, contradicting the raw-baro Priority-1 policy](https://github.com/fschroer/steam-pigeon-locator/issues/1)
 - [ ] [#2 — Physical-deployment sensing and main-velocity logic use fused vertical speed](https://github.com/fschroer/steam-pigeon-locator/issues/2)
