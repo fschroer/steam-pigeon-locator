@@ -114,7 +114,7 @@ This policy is **partially** honored in the current firmware — apogee detectio
 
 ### 3.2 Firmware structure (Locator)
 
-The firmware is organized as a composition root (`Factory`) that owns and wires every subsystem; there is no RTOS. Modules:
+The firmware is organized as a composition root (`Factory`) that owns and wires every subsystem. There is no RTOS — execution is a single bare-metal super-loop (§3.3). ST's `UTIL_SEQ` sequencer ships with the SubGHz framework but is compiled out (its only caller, `MX_SubGHz_Phy_Process()`, is gated by the undefined `MX_SUBGHZ_PHY_PROCESS`); the radio is serviced from IRQ callbacks instead. This choice is recorded in [ADR-0002](adr/0002-execution-model-superloop-vs-rtos.md). Modules:
 
 - **`Factory`** — constructs and connects all subsystems, owns the main-loop entry points (`ProcessRocketEvents`, `ServiceBus`), and routes radio/UART callbacks. C linkage is exposed through `Factory_C_Interface` so the CubeMX-generated C `main.c` can call into the C++ world.
 - **`Navigation`** (`RocketNav`) — owns the three sensors (`ISM6HG256X`, `MS5611`, `SAMM10Q`) and the `InsEkf15` EKF. Produces both a fused `NavSolution` and raw per-sensor samples. Handles on-pad calibration (ZUPT, gyro-bias freeze, AGL zeroing), cardinal-axis mounting detection on each arm, GPS rate-limiting, and per-phase EKF tuning (`setPhase`).
