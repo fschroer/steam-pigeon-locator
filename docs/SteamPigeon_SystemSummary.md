@@ -28,10 +28,10 @@ This file is the **canonical, agreed reference** for the Steam Pigeon system —
 
 The gaps catalogued in **Appendix A** are tracked as GitHub issues in [`fschroer/steam-pigeon-locator`](https://github.com/fschroer/steam-pigeon-locator/issues), grouped into three milestones. The checkboxes mirror issue state — tick them as the issues close. (Issue numbers are not in Appendix order; see the map at the top of Appendix A.)
 
-**Milestone: [Fusion-vetting gate](https://github.com/fschroer/steam-pigeon-locator/milestone/1)** — the safety-critical raw-vs-fused decision and its prerequisite. Resolve #8 first; it gates the other two. Policy in [ADR-0003](adr/0003-priority1-deployment-raw-baro.md); general vetting method in [ADR-0004](adr/0004-fusion-vetting-method.md).
-- [ ] [#8 — Define the canonical velocity source per flight phase](https://github.com/fschroer/steam-pigeon-locator/issues/8) *(blocks #1 and #2)*
-- [ ] [#1 — Main-chute deploy fires on fused AGL, contradicting the raw-baro Priority-1 policy](https://github.com/fschroer/steam-pigeon-locator/issues/1)
-- [ ] [#2 — Physical-deployment sensing and main-velocity logic use fused vertical speed](https://github.com/fschroer/steam-pigeon-locator/issues/2)
+**Milestone: [Fusion-vetting gate](https://github.com/fschroer/steam-pigeon-locator/milestone/1)** — the safety-critical raw-vs-fused decision and its prerequisite. **Policy decided:** [ADR-0003](adr/0003-priority1-deployment-raw-baro.md) is **Accepted** — Priority-1 stays raw baro, fusion as a robustness layer only; #8 resolved. #1 and #2 remain open as the firmware implementation of that policy. General vetting method: [ADR-0004](adr/0004-fusion-vetting-method.md) (Proposed).
+- [x] [#8 — Define the canonical velocity source per flight phase](https://github.com/fschroer/steam-pigeon-locator/issues/8) — resolved by accepted [ADR-0003](adr/0003-priority1-deployment-raw-baro.md) (canonical source = raw baro)
+- [ ] [#1 — Main-chute deploy fires on fused AGL, contradicting the raw-baro Priority-1 policy](https://github.com/fschroer/steam-pigeon-locator/issues/1) — *policy decided (ADR-0003); firmware change pending*
+- [ ] [#2 — Physical-deployment sensing and main-velocity logic use fused vertical speed](https://github.com/fschroer/steam-pigeon-locator/issues/2) — *policy decided (ADR-0003); firmware change pending*
 
 **Milestone: [Firmware/app contract integrity](https://github.com/fschroer/steam-pigeon-locator/milestone/2)** — keep the LoRa/BLE wire format and shared enums in sync.
 - [ ] [#4 — Wire protocol is defined twice by hand (C++ structs vs Kotlin offsets)](https://github.com/fschroer/steam-pigeon-locator/issues/4)
