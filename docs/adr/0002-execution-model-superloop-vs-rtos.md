@@ -1,6 +1,6 @@
 # ADR-0002: Execution model — cooperative super-loop vs. RTOS (Locator)
 
-- **Status:** Proposed — documents the current architecture; awaiting ratification to Accepted
+- **Status:** Accepted — documents the current architecture
 - **Date:** 2026-06-15
 - **Deciders:** fschroer
 - **Related issues:** none (architectural record)
