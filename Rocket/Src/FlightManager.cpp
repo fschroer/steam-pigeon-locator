@@ -220,6 +220,13 @@ void FlightManager::UpdateFlightState() {
         if (noseover_time_ > SAMPLES_PER_SECOND * (-drogue_velocity_threshold / G0_F + 0.5f))
             near_apogee_ = false;
 
+        // ADR-0003: Priority-1 deployment gates on RAW baro (altitude and velocity);
+        // the fused solution is only a fallback when raw baro is invalid. Fusion is
+        // never the deployment authority. See docs/adr/0003-priority1-deployment-raw-baro.md.
+        const BaroSample baro_raw = nav_.getRawBaro();
+        const float deploy_agl    = baro_raw.valid ? baro_raw.altitude_m_agl : nav_solution.altitude_agl_m;
+        const float deploy_vspeed = baro_raw.valid ? baro_raw.velocity       : nav_solution.vertical_speed_mps;
+
         // Drogue primary
         if (flight_state_ < FlightStates::DroguePrimaryEvent
                 && noseover_time_ >= SAMPLES_PER_SECOND * locator_settings.drogue_primary_deploy_delay / 10) {
@@ -296,9 +303,9 @@ void FlightManager::UpdateFlightState() {
 
         // Main primary
         if (flight_state_ < FlightStates::MainPrimaryEvent
-                && nav_solution.altitude_agl_m <= locator_settings.main_primary_deploy_altitude) {
+                && deploy_agl <= locator_settings.main_primary_deploy_altitude) {
             uint8_t status = DeploymentChannelContinuity();
-            pre_main_velocity_ = nav_solution.vertical_speed_mps;
+            pre_main_velocity_ = deploy_vspeed;
             if (locator_settings.deployment_ch1_mode == DeployMode::MainPrimary) {
                 deploy_ch1_time_ = 0;
                 deployment_ch1_stats_ = (deployment_ch1_stats_ | (1 << bit_shift_fired));
@@ -334,10 +341,10 @@ void FlightManager::UpdateFlightState() {
 
         // Main backup
         if (flight_state_ < FlightStates::MainBackupEvent
-                && nav_solution.altitude_agl_m <= locator_settings.main_backup_deploy_altitude) {
+                && deploy_agl <= locator_settings.main_backup_deploy_altitude) {
             uint8_t status = DeploymentChannelContinuity();
-            if (nav_solution.vertical_speed_mps < pre_main_velocity_)
-                pre_main_velocity_ = nav_solution.vertical_speed_mps;
+            if (deploy_vspeed < pre_main_velocity_)
+                pre_main_velocity_ = deploy_vspeed;
             if (locator_settings.deployment_ch1_mode == DeployMode::MainBackup) {
                 deploy_ch1_time_ = 0;
                 deployment_ch1_stats_ = (deployment_ch1_stats_ | (1 << bit_shift_fired));
@@ -374,20 +381,19 @@ void FlightManager::UpdateFlightState() {
         // Physical drogue deployment detection
         if (flight_state_ >= FlightStates::DroguePrimaryEvent
                 && !near_apogee_
-                && nav_solution.vertical_speed_mps > drogue_velocity_threshold) {
+                && deploy_vspeed > drogue_velocity_threshold) {
             physical_deployment_stats_ = (physical_deployment_stats_ | (1 << bit_shift_drogue_deployed));
             archive_.WriteEvent(FlightArchive::Statistic::DrogueVelocityThresholdTimestampMs, flight_time_ms);
         }
 
         // Physical main deployment detection
         if (flight_state_ >= FlightStates::MainPrimaryEvent
-                && nav_solution.vertical_speed_mps > pre_main_velocity_ + parachute_velocity_change_threshold) {
+                && deploy_vspeed > pre_main_velocity_ + parachute_velocity_change_threshold) {
             physical_deployment_stats_ = (physical_deployment_stats_ | (1 << bit_shift_main_deployed));
             archive_.WriteEvent(FlightArchive::Statistic::MainVelocityThresholdTimestampMs, flight_time_ms);
         }
 
-        // Landing detection
-        BaroSample baro_raw = nav_.getRawBaro();
+        // Landing detection (reuses baro_raw fetched at the top of this block)
         if (!near_apogee_ && DetectLanded(nav_solution, baro_raw)) {
             flight_state_ = FlightStates::Landed;
             nav_.setPhase(FlightStates::Landed);
