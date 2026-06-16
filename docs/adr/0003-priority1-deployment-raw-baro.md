@@ -1,6 +1,6 @@
 # ADR-0003: Priority-1 deployment uses raw baro; fusion is a robustness layer, not the authority
 
-- **Status:** Proposed (awaiting ratification)
+- **Status:** Accepted
 - **Date:** 2026-06-15
 - **Deciders:** fschroer
 - **Related issues:** #8 (canonical source), #1 (main on fused AGL), #2 (physical sensing on fused velocity)
