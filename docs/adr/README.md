@@ -15,5 +15,7 @@ Write an ADR for a decision that is costly to reverse, or that future work must 
 ## Index
 | ADR | Title | Status |
 |-----|-------|--------|
-| [0001](0001-fusion-vetting-gate.md) | Fusion-vetting gate: raw sensors vs. EKF for Priority 1–2 | Proposed |
+| [0001](0001-fusion-vetting-gate.md) | Fusion-vetting gate (split into 0003 + 0004) | Superseded |
 | [0002](0002-execution-model-superloop-vs-rtos.md) | Execution model: cooperative super-loop vs. RTOS (Locator) | Proposed |
+| [0003](0003-priority1-deployment-raw-baro.md) | Priority-1 deployment uses raw baro; fusion as robustness layer | Proposed |
+| [0004](0004-fusion-vetting-method.md) | Fusion-vetting method: validate against an independent reference | Proposed |
