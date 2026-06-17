@@ -3,7 +3,7 @@
 > **Status:** Draft summary, compiled 2026-06-15.
 > **Scope:** Consolidates the *Steam Pigeon Requirements* outline with the current state of the three implementation repos.
 > **Sources:**
-> - Requirements: `G:\My Drive\Rocketry\Reference\Steam Pigeon Requirements.docx`
+> - Requirements: [docs/SteamPigeonRequirements.md](SteamPigeonRequirements.md) (maintained source as of v2.0; originally `G:\My Drive\Rocketry\Reference\Steam Pigeon Requirements.docx`)
 > - Locator firmware: `C:\STM32_Projects\Locator` (version `2026.06.14-ca0e991-dirty`)
 > - Receiver firmware: `C:\STM32_Projects\Receiver` (version `2026.06.14-0c2f27a-dirty`)
 > - Android app: `C:\Users\ftsch\StudioProjects\rocket-flight-manager`
@@ -39,7 +39,7 @@ The gaps catalogued in **Appendix A** are tracked as GitHub issues in [`fschroer
 
 **Milestone: [Requirements & docs accuracy](https://github.com/fschroer/steam-pigeon-locator/milestone/3)** — fix factual errors and add requirement structure.
 - [x] [#3 — Requirements claim GPS shares the SPI bus; it is actually on I2C](https://github.com/fschroer/steam-pigeon-locator/issues/3) — resolved 2026-06-16: requirements doc corrected (SPI = baro/IMU/flash; GPS on I2C)
-- [ ] [#6 — Requirements outline lacks IDs, versioning, and acceptance criteria](https://github.com/fschroer/steam-pigeon-locator/issues/6)
+- [x] [#6 — Requirements outline lacks IDs, versioning, and acceptance criteria](https://github.com/fschroer/steam-pigeon-locator/issues/6) — resolved 2026-06-16: restructured to [SteamPigeonRequirements.md](SteamPigeonRequirements.md) v2.0 (IDs, functional/non-functional split, vetted-gate definition, glossary, change log)
 
 **Unmilestoned** — standalone housekeeping.
 - [x] [#7 — Audit and remove residual/legacy definitions (MsgState, unused flight flags)](https://github.com/fschroer/steam-pigeon-locator/issues/7) — resolved 2026-06-16: `MsgState` and the unused `burnout_detected_`/`drogue_deployed_`/`main_deployed_` flags removed
@@ -232,7 +232,7 @@ The packet structs in `MessageProtocol.hpp` and the manual offsets/sizes in the 
 **6. Enum drift between firmware and app. (Low impact, but a sync hazard.)** → [#5](https://github.com/fschroer/steam-pigeon-locator/issues/5)
 The app's `FlightStates` adds a client-only `NoSignal(9)` and renames states (`WaitingForLaunch` vs firmware `WaitingLaunch`; `DroguePrimaryDeployed` vs firmware `DroguePrimaryEvent`). The wire values (0–8) match, so it works today, but the naming implies different semantics — the firmware "Event" is *charge fired*, whereas the app "Deployed" reads as *physically deployed*, which the firmware tracks separately. *Recommendation:* align names or document the mapping in one place.
 
-**7. The requirements outline has no IDs, versioning, or acceptance criteria. (Process gap.)** → [#6](https://github.com/fschroer/steam-pigeon-locator/issues/6)
+**7. The requirements outline has no IDs, versioning, or acceptance criteria. (Process gap.)** → [#6](https://github.com/fschroer/steam-pigeon-locator/issues/6) — **Resolved 2026-06-16:** restructured to [SteamPigeonRequirements.md](SteamPigeonRequirements.md) v2.0 with `FR-`/`NFR-`/`HW-` IDs, a functional/non-functional split, the vetted-fusion gate (NFR-2), a glossary, and a change log.
 For a document meant to "drive consistently to a goal," the outline would benefit from: numbered/traceable requirement IDs; a split between functional and non-functional ("other notes" mixes hard real-time constraints in with a bus-wiring claim); explicit acceptance criteria for the "vetted fusion" gate that governs Priority 1–2; and a glossary (noseover, AGL, ZUPT, primary/backup roles). Without the "vetted" gate being defined, Items 1–3 cannot ever be closed objectively.
 
 **8. Residual/legacy definitions worth auditing. (Cleanup.)** → [#7](https://github.com/fschroer/steam-pigeon-locator/issues/7) — **Resolved 2026-06-16:** `MsgState` (unused) and the reset-but-unread `burnout_detected_` / `drogue_deployed_` / `main_deployed_` flags removed.
