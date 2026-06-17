@@ -38,7 +38,7 @@ The gaps catalogued in **Appendix A** are tracked as GitHub issues in [`fschroer
 - [ ] [#5 — Enum drift between firmware and app FlightStates/MsgType](https://github.com/fschroer/steam-pigeon-locator/issues/5)
 
 **Milestone: [Requirements & docs accuracy](https://github.com/fschroer/steam-pigeon-locator/milestone/3)** — fix factual errors and add requirement structure.
-- [ ] [#3 — Requirements claim GPS shares the SPI bus; it is actually on I2C](https://github.com/fschroer/steam-pigeon-locator/issues/3)
+- [x] [#3 — Requirements claim GPS shares the SPI bus; it is actually on I2C](https://github.com/fschroer/steam-pigeon-locator/issues/3) — resolved 2026-06-16: requirements doc corrected (SPI = baro/IMU/flash; GPS on I2C)
 - [ ] [#6 — Requirements outline lacks IDs, versioning, and acceptance criteria](https://github.com/fschroer/steam-pigeon-locator/issues/6)
 
 **Unmilestoned** — standalone housekeeping.
@@ -223,7 +223,7 @@ These are points where the requirements outline, the firmware, and the app disag
 **3. "Velocity must come from a proven source" is undefined. (Policy gap.)** → [#8](https://github.com/fschroer/steam-pigeon-locator/issues/8)
 The requirements require a "proven source" for velocity but never name one. Today, apogee uses raw-baro-derived velocity while main/physical logic uses fused velocity — two different "sources" for nominally the same quantity. *Decision needed:* designate the canonical velocity source(s) per flight phase so future code doesn't pick arbitrarily.
 
-**4. Requirements say the GPS shares the SPI bus; it is actually on I2C. (Documentation error.)** → [#3](https://github.com/fschroer/steam-pigeon-locator/issues/3)
+**4. Requirements say the GPS shares the SPI bus; it is actually on I2C. (Documentation error.)** → [#3](https://github.com/fschroer/steam-pigeon-locator/issues/3) — **Resolved 2026-06-16:** requirements outline corrected to "baro, IMU, and external flash share SPI; GPS on a separate I2C bus."
 The requirements state "the barometric pressure sensor, IMU, and GPS share a common SPI bus." In the firmware, `SAMM10Q` is an I2C device (addr 0x42, `hi2c2`), and `SpiBus` documents SPI2 as shared by baro + IMU + **flash**. The real contention to "avoid conflicting traffic" on is baro/IMU/flash, not the GPS. *Decision needed:* correct the requirements text to name the flash (and the actual buses), so the bus-contention requirement points at the right hazard.
 
 **5. Two hand-synchronized definitions of the wire protocol. (Architectural risk.)** → [#4](https://github.com/fschroer/steam-pigeon-locator/issues/4)
