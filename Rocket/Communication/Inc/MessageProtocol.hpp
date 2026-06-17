@@ -184,4 +184,28 @@ struct ParsedMessage {
 
 #pragma pack(pop)
 
+// ─── Wire-layout cross-check (issue #4) ──────────────────────────────────────
+// Pin the on-wire size of every message struct so any field change fails the
+// firmware build until the literal is updated — a reminder to update the matching
+// Kotlin sizes in the app (Protocol.* / FlightDataRepository consts, locked by
+// app/src/test/java/com/steampigeon/flightmanager/WireLayoutTest.kt).  Keep these
+// literals equal on both sides.  app payload = sizeof(struct) − header(6) [+ any
+// receiver-appended bytes].  Catches size drift (field add/remove/resize); a
+// same-size field reorder would need offsetof asserts (omitted for portability).
+static_assert(sizeof(PacketHeader)                   ==   6, "PacketHeader size changed — sync app Protocol.HEADER_SIZE");
+static_assert(kPayloadSize                           == 239, "FlightData payload size changed");
+static_assert(sizeof(StartupMessage)                 ==  74, "StartupMessage size changed");
+static_assert(sizeof(VersionInfoMessage)             ==  70, "VersionInfoMessage size changed");
+static_assert(sizeof(PreLaunchData)                  == 107, "PreLaunchData size changed (app payload 101)");
+static_assert(sizeof(TelemetryData)                  ==  68, "TelemetryData size changed (app payload 62 + rssi 2 = 64)");
+static_assert(sizeof(FlightMetadataRecord)           ==  10, "FlightMetadataRecord size changed");
+static_assert(sizeof(FlightMetadata)                 == 106, "FlightMetadata size changed (app payload 100)");
+static_assert(sizeof(FlightDataPacket)               == 255, "FlightDataPacket size changed (max LoRa frame 255)");
+static_assert(sizeof(RocketPersistentSettings)       ==  34, "RocketPersistentSettings size changed");
+static_assert(sizeof(LocatorSettings)                ==  40, "LocatorSettings size changed");
+static_assert(sizeof(FlightDataAck)                  ==  42, "FlightDataAck size changed (app FLIGHT_DATA_ACK_SIZE)");
+static_assert(sizeof(DeploymentTestCountdownMessage) ==   7, "DeploymentTestCountdownMessage size changed");
+static_assert(sizeof(FlightDataRequest)              ==   7, "FlightDataRequest size changed");
+static_assert(sizeof(DeploymentTestRequest)          ==   7, "DeploymentTestRequest size changed");
+
 } // namespace Communication

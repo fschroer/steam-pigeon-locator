@@ -39,6 +39,11 @@ struct CompressedDelta {
     int32_t d_lon_scaled;   // (lon_rad - base_lon_rad) * LATLON_SCALE
 };
 
+// Wire-layout cross-check (issue #4): keep equal to the app's COMPRESSED_HEADER_SIZE
+// / COMPRESSED_DELTA_SIZE (FlightDataRepository.kt, locked by WireLayoutTest.kt).
+static_assert(sizeof(CompressedHeader) == 48, "CompressedHeader size changed — sync app COMPRESSED_HEADER_SIZE");
+static_assert(sizeof(CompressedDelta)  == 24, "CompressedDelta size changed — sync app COMPRESSED_DELTA_SIZE");
+
 // Encode up to sample_count samples into out_payload.
 // Returns the number of samples actually written (may be less than
 // sample_count if out_capacity is exhausted).
