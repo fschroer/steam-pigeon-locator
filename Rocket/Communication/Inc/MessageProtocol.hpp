@@ -23,10 +23,6 @@ constexpr uint16_t kCrc16Key = 0xFFFF;   // standard initial value
 static constexpr uint16_t kWindowSize = 4;
 static constexpr uint16_t kParityGroupSize = 4;
 
-enum class MsgState : uint8_t {
-	None = 0, Arm = 1, Disarm = 2, Test = 3, Config = 4, FlightMetadata = 5, FlightData = 6
-};
-
 // Message type for the packet header
 enum class MsgType : uint8_t {
 	Startup = 0, // Initial message at startup

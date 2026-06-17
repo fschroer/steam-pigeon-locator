@@ -42,7 +42,7 @@ The gaps catalogued in **Appendix A** are tracked as GitHub issues in [`fschroer
 - [ ] [#6 — Requirements outline lacks IDs, versioning, and acceptance criteria](https://github.com/fschroer/steam-pigeon-locator/issues/6)
 
 **Unmilestoned** — standalone housekeeping.
-- [ ] [#7 — Audit and remove residual/legacy definitions (MsgState, unused flight flags)](https://github.com/fschroer/steam-pigeon-locator/issues/7)
+- [x] [#7 — Audit and remove residual/legacy definitions (MsgState, unused flight flags)](https://github.com/fschroer/steam-pigeon-locator/issues/7) — resolved 2026-06-16: `MsgState` and the unused `burnout_detected_`/`drogue_deployed_`/`main_deployed_` flags removed
 
 ---
 
@@ -235,7 +235,7 @@ The app's `FlightStates` adds a client-only `NoSignal(9)` and renames states (`W
 **7. The requirements outline has no IDs, versioning, or acceptance criteria. (Process gap.)** → [#6](https://github.com/fschroer/steam-pigeon-locator/issues/6)
 For a document meant to "drive consistently to a goal," the outline would benefit from: numbered/traceable requirement IDs; a split between functional and non-functional ("other notes" mixes hard real-time constraints in with a bus-wiring claim); explicit acceptance criteria for the "vetted fusion" gate that governs Priority 1–2; and a glossary (noseover, AGL, ZUPT, primary/backup roles). Without the "vetted" gate being defined, Items 1–3 cannot ever be closed objectively.
 
-**8. Residual/legacy definitions worth auditing. (Cleanup.)** → [#7](https://github.com/fschroer/steam-pigeon-locator/issues/7)
+**8. Residual/legacy definitions worth auditing. (Cleanup.)** → [#7](https://github.com/fschroer/steam-pigeon-locator/issues/7) — **Resolved 2026-06-16:** `MsgState` (unused) and the reset-but-unread `burnout_detected_` / `drogue_deployed_` / `main_deployed_` flags removed.
 `MessageProtocol.hpp` carries both `MsgState` and `MsgType`; `MsgState` appears unused by the live path. `FlightManager` keeps several state flags (`burnout_detected_`, `drogue_deployed_`, `main_deployed_`) that are reset but not read. Not bugs, but they invite confusion during future edits. *Recommendation:* confirm and remove if dead.
 
 ---

@@ -491,11 +491,8 @@ void FlightManager::ResetFlight() {
     deployment_ch3_stats_   = 0;
     deployment_ch4_stats_   = 0;
     physical_deployment_stats_ = 0;
-    burnout_detected_       = false;
     noseover_time_          = 0;
     near_apogee_            = false;
-    drogue_deployed_        = false;
-    main_deployed_          = false;
     deploy_ch1_time_        = 0;
     deploy_ch2_time_        = 0;
     deploy_ch3_time_        = 0;

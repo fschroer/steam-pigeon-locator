@@ -58,11 +58,8 @@ private:
     uint8_t      deployment_ch3_stats_  = 0;
     uint8_t      deployment_ch4_stats_  = 0;
     uint8_t      physical_deployment_stats_ = 0;
-    bool         burnout_detected_      = false;
     int          noseover_time_         = 0;
     bool         near_apogee_           = false;
-    bool         drogue_deployed_       = false;
-    bool         main_deployed_         = false;
     int          deploy_ch1_time_       = 0;
     int          deploy_ch2_time_       = 0;
     int          deploy_ch3_time_       = 0;
