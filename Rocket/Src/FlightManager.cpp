@@ -170,6 +170,59 @@ bool FlightManager::DetectLanded(const NavSolution& sol, const BaroSample& baro_
 }
 
 // ---------------------------------------------------------------------------
+// SelectDeploymentSource  (ADR-0003 Decision 2)  — DRAFT, see #10
+// Returns the deployment altitude/velocity for this cycle from RAW baro, with a
+// tiered cross-checked fallback.  Sign convention: positive = climbing (matches
+// BaroSample::velocity and NavSolution::vertical_speed_mps).
+// ---------------------------------------------------------------------------
+FlightManager::DeploySource
+FlightManager::SelectDeploymentSource(const NavSolution& sol, const BaroSample& baro_raw) {
+    const uint32_t now_ms = sol.timestamp_ms;
+
+    // A present raw sample is a "spike" if it disagrees with fused beyond the bound.
+    const bool raw_spike = baro_raw.valid
+        && (std::fabs(baro_raw.altitude_m_agl - sol.altitude_agl_m)     > kDeployAltDistrustM
+         || std::fabs(baro_raw.velocity        - sol.vertical_speed_mps) > kDeployVelDistrustMps);
+
+    // Tier 1 — raw valid and trustworthy: use it and refresh the reference.
+    if (baro_raw.valid && !raw_spike) {
+        m_last_raw_agl_m_  = baro_raw.altitude_m_agl;
+        m_last_raw_vspeed_ = baro_raw.velocity;
+        m_last_raw_ms_     = now_ms;
+        m_have_raw_ref_    = true;
+        return { baro_raw.altitude_m_agl, baro_raw.velocity };
+    }
+
+    // No proven raw reference yet (should not happen post-launch): use fused.
+    if (!m_have_raw_ref_)
+        return { sol.altitude_agl_m, sol.vertical_speed_mps };
+
+    const uint32_t outage_ms = now_ms - m_last_raw_ms_;
+    const float    dt_s      = outage_ms * 0.001f;
+    const float    coast_agl = m_last_raw_agl_m_ + m_last_raw_vspeed_ * dt_s;  // first-order hold
+
+    // Tier 2 — brief outage: coast on the last proven raw trajectory.
+    if (outage_ms <= kDeployCoastMs)
+        return { coast_agl, m_last_raw_vspeed_ };
+
+    // Tier 3 — longer outage: accept fused ONLY if consistent with the coasted
+    // projection (bound widened with elapsed outage).
+    const float widen = kDeployAltDistrustM
+                      + std::fabs(m_last_raw_vspeed_) * (dt_s - kDeployCoastMs * 0.001f);
+    if (outage_ms <= kDeployRefLostMs
+            && std::fabs(sol.altitude_agl_m - coast_agl) <= widen)
+        return { sol.altitude_agl_m, sol.vertical_speed_mps };
+
+    // Tier 4 (terminal) — reference lost and fused inconsistent: keep coasting a
+    // DESCENDING projection so a deployment is never withheld (conservative
+    // deploy-bias).  Floor the descent rate so a reference lost near apogee still
+    // trends downward toward the main-deploy altitude.
+    const float term_vspeed = (m_last_raw_vspeed_ < -kTerminalDescentMps)
+                            ? m_last_raw_vspeed_ : -kTerminalDescentMps;
+    return { m_last_raw_agl_m_ + term_vspeed * dt_s, term_vspeed };
+}
+
+// ---------------------------------------------------------------------------
 // UpdateFlightState
 // Single consolidated location for all flight state transitions.
 // Calls nav_.setPhase() at each transition to switch EKF Q/R parameters.
@@ -220,12 +273,13 @@ void FlightManager::UpdateFlightState() {
         if (noseover_time_ > SAMPLES_PER_SECOND * (-drogue_velocity_threshold / G0_F + 0.5f))
             near_apogee_ = false;
 
-        // ADR-0003: Priority-1 deployment gates on RAW baro (altitude and velocity);
-        // the fused solution is only a fallback when raw baro is invalid. Fusion is
-        // never the deployment authority. See docs/adr/0003-priority1-deployment-raw-baro.md.
+        // ADR-0003 Decision 2: tiered, cross-checked raw-baro source selection
+        // (raw -> coast -> gated fused -> conservative deploy-bias). Fusion is never
+        // the deployment authority. See docs/adr/0003-priority1-deployment-raw-baro.md and #10.
         const BaroSample baro_raw = nav_.getRawBaro();
-        const float deploy_agl    = baro_raw.valid ? baro_raw.altitude_m_agl : nav_solution.altitude_agl_m;
-        const float deploy_vspeed = baro_raw.valid ? baro_raw.velocity       : nav_solution.vertical_speed_mps;
+        const DeploySource dsrc   = SelectDeploymentSource(nav_solution, baro_raw);
+        const float deploy_agl    = dsrc.agl_m;
+        const float deploy_vspeed = dsrc.vspeed_mps;
 
         // Drogue primary
         if (flight_state_ < FlightStates::DroguePrimaryEvent
@@ -517,4 +571,8 @@ void FlightManager::ResetFlight() {
     m_apogee_last_increase_ms_ = 0;
     m_burnout_count_        = 0;
     m_landed_count_         = 0;
+    m_last_raw_agl_m_       = 0.0f;
+    m_last_raw_vspeed_      = 0.0f;
+    m_last_raw_ms_          = 0;
+    m_have_raw_ref_         = false;
 }

@@ -103,4 +103,28 @@ private:
     // exceed the span of the recorded data.
     static constexpr uint32_t kMaxFlightMs             = 8u * 60u * 1000u;
     uint8_t m_landed_count_  = 0;
+
+    // ── Priority-1 deployment source selection (ADR-0003 Decision 2) ──────────
+    // Produces the per-cycle deployment altitude/velocity from RAW baro with a
+    // tiered, cross-checked fallback so neither a raw spike nor a raw dropout can
+    // mis-gate a deployment:
+    //   raw (valid, not a spike) -> coast (first-order hold) -> gated fused (only
+    //   if consistent with the coasted projection) -> terminal: keep coasting a
+    //   descending projection (conservative deploy-bias — never withholds).
+    // DRAFT for PR #9; the tunables below are placeholders to be set in #10.
+    // Designed to be shared with DetectApogee() (apogee-path wiring tracked in #10).
+    struct DeploySource { float agl_m; float vspeed_mps; };
+    DeploySource SelectDeploymentSource(const NavSolution& sol, const BaroSample& baro_raw);
+
+    float    m_last_raw_agl_m_  = 0.0f;
+    float    m_last_raw_vspeed_ = 0.0f;
+    uint32_t m_last_raw_ms_     = 0;
+    bool     m_have_raw_ref_    = false;
+
+    // Tunables — TUNE against archived flights and record in ADR-0003 (see #10).
+    static constexpr float    kDeployAltDistrustM   = 30.0f;  // |raw-fused| alt spike/gate bound (m)
+    static constexpr float    kDeployVelDistrustMps = 10.0f;  // |raw-fused| vel spike/gate bound (m/s)
+    static constexpr uint32_t kDeployCoastMs        = 300u;   // first-order-hold window (ms)
+    static constexpr uint32_t kDeployRefLostMs      = 1500u;  // beyond this: terminal conservative bias
+    static constexpr float    kTerminalDescentMps   = 5.0f;   // floored descent rate in terminal coast
 };
