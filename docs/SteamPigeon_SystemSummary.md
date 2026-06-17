@@ -34,7 +34,7 @@ The gaps catalogued in **Appendix A** are tracked as GitHub issues in [`fschroer
 - [ ] [#2 — Physical-deployment sensing and main-velocity logic use fused vertical speed](https://github.com/fschroer/steam-pigeon-locator/issues/2) — *policy decided (ADR-0003); firmware change pending*
 
 **Milestone: [Firmware/app contract integrity](https://github.com/fschroer/steam-pigeon-locator/milestone/2)** — keep the LoRa/BLE wire format and shared enums in sync.
-- [ ] [#4 — Wire protocol is defined twice by hand (C++ structs vs Kotlin offsets)](https://github.com/fschroer/steam-pigeon-locator/issues/4)
+- [ ] [#4 — Wire protocol is defined twice by hand (C++ structs vs Kotlin offsets)](https://github.com/fschroer/steam-pigeon-locator/issues/4) — *layout cross-check: firmware `static_assert`s committed; app `WireLayoutTest.kt` pending commit*
 - [ ] [#5 — Enum drift between firmware and app FlightStates/MsgType](https://github.com/fschroer/steam-pigeon-locator/issues/5)
 
 **Milestone: [Requirements & docs accuracy](https://github.com/fschroer/steam-pigeon-locator/milestone/3)** — fix factual errors and add requirement structure.
@@ -226,7 +226,7 @@ The requirements require a "proven source" for velocity but never name one. Toda
 **4. Requirements say the GPS shares the SPI bus; it is actually on I2C. (Documentation error.)** → [#3](https://github.com/fschroer/steam-pigeon-locator/issues/3) — **Resolved 2026-06-16:** requirements outline corrected to "baro, IMU, and external flash share SPI; GPS on a separate I2C bus."
 The requirements state "the barometric pressure sensor, IMU, and GPS share a common SPI bus." In the firmware, `SAMM10Q` is an I2C device (addr 0x42, `hi2c2`), and `SpiBus` documents SPI2 as shared by baro + IMU + **flash**. The real contention to "avoid conflicting traffic" on is baro/IMU/flash, not the GPS. *Decision needed:* correct the requirements text to name the flash (and the actual buses), so the bus-contention requirement points at the right hazard.
 
-**5. Two hand-synchronized definitions of the wire protocol. (Architectural risk.)** → [#4](https://github.com/fschroer/steam-pigeon-locator/issues/4)
+**5. Two hand-synchronized definitions of the wire protocol. (Architectural risk.)** → [#4](https://github.com/fschroer/steam-pigeon-locator/issues/4) — **Addressed 2026-06-16** with a layout cross-check (decision: cross-check over codegen): firmware `static_assert`s on every message struct's `sizeof` (`MessageProtocol.hpp`, `FlightProfileCodec.hpp`) + app `WireLayoutTest.kt` asserting the matching constants. Catches size drift; a same-size field reorder would still need offsetof asserts.
 The packet structs in `MessageProtocol.hpp` and the manual offsets/sizes in the Kotlin app must be kept byte-identical by hand (the Kotlin source even carries "must stay in sync with MessageProtocol.hpp" comments). There is no single source of truth. *Recommendation:* generate both sides from one schema, or at minimum add a cross-checked layout test. This is the most likely origin of silent, hard-to-debug field-misalignment bugs.
 
 **6. Enum drift between firmware and app. (Low impact, but a sync hazard.)** → [#5](https://github.com/fschroer/steam-pigeon-locator/issues/5)
