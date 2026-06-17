@@ -119,9 +119,13 @@ bool FlightManager::DetectBurnout(const NavSolution& sol) {
 // -kVzThresholdMps) plus no new altitude maximum for kNoIncreaseWindowMs.
 // ---------------------------------------------------------------------------
 bool FlightManager::DetectApogee(const NavSolution& sol, const BaroSample& baro_raw) {
-    const bool  baro_ok = baro_raw.valid;
-    const float alt = baro_ok ? baro_raw.altitude_m_agl : sol.altitude_agl_m;
-    const float vz  = baro_ok ? baro_raw.velocity       : sol.vertical_speed_mps;
+    // Route through the shared ADR-0003 per-channel source selector so apogee uses
+    // the same raw / spike-reject / coast / gated-fused logic as the deployment
+    // block.  Spike detection is raw self-consistency (not raw-vs-fused), so a
+    // diverged fused velocity cannot reject good raw here (#10).
+    const DeploySource src = SelectDeploymentSource(sol, baro_raw);
+    const float alt = src.agl_m;
+    const float vz  = src.vspeed_mps;
     const uint32_t now_ms = sol.timestamp_ms;   // 20 Hz flight clock for window timing
 
     if (alt > m_apogee_peak_agl_m_) {
@@ -170,56 +174,93 @@ bool FlightManager::DetectLanded(const NavSolution& sol, const BaroSample& baro_
 }
 
 // ---------------------------------------------------------------------------
-// SelectDeploymentSource  (ADR-0003 Decision 2)  — DRAFT, see #10
-// Returns the deployment altitude/velocity for this cycle from RAW baro, with a
-// tiered cross-checked fallback.  Sign convention: positive = climbing (matches
-// BaroSample::velocity and NavSolution::vertical_speed_mps).
+// Priority-1 deployment source selection (ADR-0003 Decision 2) — DRAFT, see #10
+// Altitude and velocity are validated and coasted INDEPENDENTLY (per channel).
+// Spike detection is by raw self-consistency — a raw sample is checked against the
+// coasted projection of the last good raw sample, NOT against the fused estimate —
+// so a diverged fused solution can never reject a good raw sample.  Fused is a
+// gated last resort after a sustained outage.  Sign: positive = climbing.
 // ---------------------------------------------------------------------------
-FlightManager::DeploySource
-FlightManager::SelectDeploymentSource(const NavSolution& sol, const BaroSample& baro_raw) {
+
+// Velocity channel: zero-order hold; spike bound kept loose so a real chute-opening
+// deceleration passes (that signal is what physical-deployment sensing detects).
+// No conservative descent floor — velocity gates only apogee, which also has the
+// altitude no-new-max path.
+float FlightManager::SelectDeployVspeed(const NavSolution& sol, const BaroSample& baro_raw) {
     const uint32_t now_ms = sol.timestamp_ms;
 
-    // A present raw sample is a "spike" if it disagrees with fused beyond the bound.
-    const bool raw_spike = baro_raw.valid
-        && (std::fabs(baro_raw.altitude_m_agl - sol.altitude_agl_m)     > kDeployAltDistrustM
-         || std::fabs(baro_raw.velocity        - sol.vertical_speed_mps) > kDeployVelDistrustMps);
-
-    // Tier 1 — raw valid and trustworthy: use it and refresh the reference.
-    if (baro_raw.valid && !raw_spike) {
-        m_last_raw_agl_m_  = baro_raw.altitude_m_agl;
-        m_last_raw_vspeed_ = baro_raw.velocity;
-        m_last_raw_ms_     = now_ms;
-        m_have_raw_ref_    = true;
-        return { baro_raw.altitude_m_agl, baro_raw.velocity };
+    if (!m_have_raw_vspeed_) {
+        if (baro_raw.valid) {
+            m_last_raw_vspeed_    = baro_raw.velocity;
+            m_last_raw_vspeed_ms_ = now_ms;
+            m_have_raw_vspeed_    = true;
+            return baro_raw.velocity;
+        }
+        return sol.vertical_speed_mps;          // no proven raw velocity yet
     }
 
-    // No proven raw reference yet (should not happen post-launch): use fused.
-    if (!m_have_raw_ref_)
-        return { sol.altitude_agl_m, sol.vertical_speed_mps };
+    // Accept raw if self-consistent with the last good raw velocity.
+    if (baro_raw.valid
+            && std::fabs(baro_raw.velocity - m_last_raw_vspeed_) <= kDeployVelDistrustMps) {
+        m_last_raw_vspeed_    = baro_raw.velocity;
+        m_last_raw_vspeed_ms_ = now_ms;
+        return baro_raw.velocity;
+    }
 
-    const uint32_t outage_ms = now_ms - m_last_raw_ms_;
-    const float    dt_s      = outage_ms * 0.001f;
-    const float    coast_agl = m_last_raw_agl_m_ + m_last_raw_vspeed_ * dt_s;  // first-order hold
-
-    // Tier 2 — brief outage: coast on the last proven raw trajectory.
+    const uint32_t outage_ms = now_ms - m_last_raw_vspeed_ms_;
     if (outage_ms <= kDeployCoastMs)
-        return { coast_agl, m_last_raw_vspeed_ };
-
-    // Tier 3 — longer outage: accept fused ONLY if consistent with the coasted
-    // projection (bound widened with elapsed outage).
-    const float widen = kDeployAltDistrustM
-                      + std::fabs(m_last_raw_vspeed_) * (dt_s - kDeployCoastMs * 0.001f);
+        return m_last_raw_vspeed_;              // hold (zero-order)
     if (outage_ms <= kDeployRefLostMs
-            && std::fabs(sol.altitude_agl_m - coast_agl) <= widen)
-        return { sol.altitude_agl_m, sol.vertical_speed_mps };
+            && std::fabs(sol.vertical_speed_mps - m_last_raw_vspeed_) <= kDeployVelDistrustMps)
+        return sol.vertical_speed_mps;          // gated fused
+    return m_last_raw_vspeed_;                  // terminal: hold last good
+}
 
-    // Tier 4 (terminal) — reference lost and fused inconsistent: keep coasting a
-    // DESCENDING projection so a deployment is never withheld (conservative
-    // deploy-bias).  Floor the descent rate so a reference lost near apogee still
-    // trends downward toward the main-deploy altitude.
-    const float term_vspeed = (m_last_raw_vspeed_ < -kTerminalDescentMps)
-                            ? m_last_raw_vspeed_ : -kTerminalDescentMps;
-    return { m_last_raw_agl_m_ + term_vspeed * dt_s, term_vspeed };
+// Altitude channel: first-order hold (coasts on the best current velocity); a raw
+// sample deviating from the coasted projection beyond a dt-widened bound is rejected
+// as a spike; terminal = conservative deploy-bias (keep coasting a floored descent).
+float FlightManager::SelectDeployAgl(const NavSolution& sol, const BaroSample& baro_raw,
+                                     float vspeed_est) {
+    const uint32_t now_ms = sol.timestamp_ms;
+
+    if (!m_have_raw_agl_) {
+        if (baro_raw.valid) {
+            m_last_raw_agl_m_  = baro_raw.altitude_m_agl;
+            m_last_raw_agl_ms_ = now_ms;
+            m_have_raw_agl_    = true;
+            return baro_raw.altitude_m_agl;
+        }
+        return sol.altitude_agl_m;              // no proven raw altitude yet
+    }
+
+    const uint32_t outage_ms = now_ms - m_last_raw_agl_ms_;
+    const float    dt_s      = outage_ms * 0.001f;
+    const float    coast     = m_last_raw_agl_m_ + vspeed_est * dt_s;   // first-order hold
+    const float    bound     = kDeployAltDistrustM + std::fabs(vspeed_est) * dt_s;
+
+    // Accept raw only if self-consistent with its own coasted projection.
+    if (baro_raw.valid && std::fabs(baro_raw.altitude_m_agl - coast) <= bound) {
+        m_last_raw_agl_m_  = baro_raw.altitude_m_agl;
+        m_last_raw_agl_ms_ = now_ms;
+        return baro_raw.altitude_m_agl;
+    }
+
+    if (outage_ms <= kDeployCoastMs)
+        return coast;                           // brief outage / single spike
+    if (outage_ms <= kDeployRefLostMs && std::fabs(sol.altitude_agl_m - coast) <= bound)
+        return sol.altitude_agl_m;              // gated fused
+
+    // Terminal: conservative deploy-bias — keep coasting a descending projection,
+    // floored so a reference lost near apogee still trends down toward main.
+    const float term_v = (vspeed_est < -kTerminalDescentMps) ? vspeed_est : -kTerminalDescentMps;
+    return m_last_raw_agl_m_ + term_v * dt_s;
+}
+
+FlightManager::DeploySource
+FlightManager::SelectDeploymentSource(const NavSolution& sol, const BaroSample& baro_raw) {
+    const float vspeed = SelectDeployVspeed(sol, baro_raw);        // velocity first
+    const float agl    = SelectDeployAgl(sol, baro_raw, vspeed);   // altitude coasts on it
+    return { agl, vspeed };
 }
 
 // ---------------------------------------------------------------------------
@@ -572,7 +613,9 @@ void FlightManager::ResetFlight() {
     m_burnout_count_        = 0;
     m_landed_count_         = 0;
     m_last_raw_agl_m_       = 0.0f;
+    m_last_raw_agl_ms_      = 0;
+    m_have_raw_agl_         = false;
     m_last_raw_vspeed_      = 0.0f;
-    m_last_raw_ms_          = 0;
-    m_have_raw_ref_         = false;
+    m_last_raw_vspeed_ms_   = 0;
+    m_have_raw_vspeed_      = false;
 }
