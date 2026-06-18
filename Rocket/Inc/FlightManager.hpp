@@ -8,6 +8,7 @@ extern "C" {
 #include "Types.hpp"
 #include "Navigation.hpp"
 #include "PowerManagement.hpp"
+#include "AirStart.hpp"
 
 class FlightManager {
 public:
@@ -33,6 +34,11 @@ public:
         }
     }
     uint8_t GetPhysicalDeploymentStats() const { return physical_deployment_stats_; }
+
+    // FR-P13 air-start gate inhibit bitmask (RocketNav::AirStartInhibit). Read-only
+    // status for diagnostics; AS_OK (0) means all gates pass. Not yet surfaced in a
+    // telemetry packet (that would change the wire layout) nor wired to any output.
+    uint16_t GetAirStartInhibit() const { return m_airstart_inhibit_; }
 
 private:
     RocketNav::Navigation &nav_;
@@ -132,4 +138,11 @@ private:
     static constexpr uint32_t kDeployCoastMs        = 300u;   // hold window before fused considered (ms)
     static constexpr uint32_t kDeployRefLostMs      = 1500u;  // beyond this: terminal
     static constexpr float    kTerminalDescentMps   = 5.0f;   // floored descent in altitude terminal
+
+    // ── FR-P13 air-start safety gate (ADR-0005, NFR-9) ───────────────────────
+    // Evaluated read-only in the post-burnout coast; produces an inhibit bitmask
+    // only.  Master switch defaults OFF, and the firing path is intentionally not
+    // wired here — that is deferred safety-critical integration (see ADR-0005).
+    RocketNav::AirStartConfig m_airstart_cfg_{};
+    uint16_t                  m_airstart_inhibit_ = RocketNav::AS_DISABLED;
 };

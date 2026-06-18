@@ -309,6 +309,29 @@ void FlightManager::UpdateFlightState() {
         }
     }
 
+    // --- FR-P13 air-start safety gate (ADR-0005) ---
+    // Read-only: evaluate whether sustainer ignition would be permitted during the
+    // post-burnout coast and record the inhibit reasons.  Does NOT fire anything —
+    // the master switch defaults OFF and the output wiring is deliberately deferred
+    // (safety-critical).  Inputs come from raw baro and the NFR-9 strapdown.
+    if (flight_state_ == FlightStates::Burnout) {
+        const BaroSample baro_as = nav_.getRawBaro();
+        RocketNav::AirStartInputs as_in;
+        as_in.burnout_confirmed = true;
+        as_in.t_since_launch_ms = flight_time_ms;                // reset to 0 at launch
+        as_in.agl_m             = baro_as.altitude_m_agl;        // raw baro
+        as_in.ascent_rate_mps   = baro_as.velocity;             // raw baro, +up
+        as_in.tilt_rad          = nav_.getTiltFromVerticalRad(); // NFR-9 strapdown
+        as_in.attitude_age_ms   = nav_.attitudeReady()
+                                ? (HAL_GetTick() - nav_.attitudeLastUpdateMs())
+                                : 0xFFFFFFFFu;
+        m_airstart_inhibit_ = RocketNav::AirStartEvaluate(m_airstart_cfg_, as_in);
+        // If m_airstart_inhibit_ == AS_OK, ignition would be permitted — the fire
+        // path is intentionally absent here (ADR-0005, safety-critical).
+    } else {
+        m_airstart_inhibit_ = RocketNav::AS_DISABLED;
+    }
+
     // --- Deployment and landing events (Noseover through MainBackupEvent) ---
     if (flight_state_ >= FlightStates::Noseover && flight_state_ < FlightStates::Landed) {
         if (noseover_time_ > SAMPLES_PER_SECOND * (-drogue_velocity_threshold / G0_F + 0.5f))
