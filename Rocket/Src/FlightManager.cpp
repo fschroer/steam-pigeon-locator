@@ -43,27 +43,27 @@ void FlightManager::Init() {
 bool FlightManager::DetectLaunch(const NavSolution& sol) {
     const RocketPersistentSettings settings = archive_.GetLocatorSettings();
 
-    // Use the EKF fused accel (= raw IMU as set by Navigation::Update) and the
-    // EKF fused AGL (initialized to 0.0 in InsEkf15::initialize, always valid)
-    // rather than getRawBaro().altitude_m_agl, which is only zeroed after
-    // CalibrateOnPadAndZeroAglUntilLaunch has converged.  Before that converges
-    // (e.g. when the user arms before GPS lock), the raw baro AGL can read an
-    // unzeroed MSL altitude (hundreds of metres), falsely triggering launch.
+    // Accel term: the fused solution's body_accel is the raw IMU accel copied each
+    // Update, so it is a proven raw signal (not an EKF-estimated quantity).
     const float accel_g = RocketNav::Math::norm(sol.body_accel_mps2) / G0_F;
 
+    // AGL term (#11): use RAW baro AGL per NFR-1, gated on the on-pad ground
+    // reference having been zeroed (nav_.baroAglReferenceReady()).  Before it is
+    // zeroed, raw baro AGL reads an unzeroed MSL altitude (hundreds of metres) and
+    // could false-trigger, so until then only the high-accel path is active.
+    const BaroSample baro = nav_.getRawBaro();
+    const bool agl_ready  = nav_.baroAglReferenceReady() && baro.valid;
+
     // Two independent paths to launch detection:
-    //   1. High-accel alone (≥5 g): fast response regardless of AGL validity.
-    //      Covers a bad barometer or a pad reference that has not yet converged.
-    //   2. AGL + moderate-accel combined: requires the rocket to have risen past
-    //      the configured threshold AND to be under at least partial thrust
-    //      (>= 1.5 g total = any net acceleration above gravity).  The accel gate
-    //      prevents a spurious AGL reading caused by an unzeroed pad reference
-    //      from triggering launch while the locator sits on the ground (where
-    //      body accel ≈ 1 g, well below kLaunchConfirmAccelG).
+    //   1. High-accel alone (≥5 g): fast response regardless of AGL availability.
+    //   2. AGL + moderate-accel combined: rocket has risen past the configured
+    //      threshold (raw baro AGL) AND is under at least partial thrust (≥1.5 g).
+    //      Active only once the AGL reference is ready.
     constexpr float kLaunchConfirmAccelG = 1.5f;  // >= 1.5 g = thrust is present
     const bool threshold = (accel_g >= 5.0f)
                         || (accel_g >= kLaunchConfirmAccelG
-                            && sol.altitude_agl_m >= settings.launch_detect_altitude);
+                            && agl_ready
+                            && baro.altitude_m_agl >= settings.launch_detect_altitude);
 
     const uint32_t now = HAL_GetTick();
     if (threshold) {

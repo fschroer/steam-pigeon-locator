@@ -53,6 +53,9 @@ public:
     SensorStatus baroStatus() const { return m_baro.getStatus(); }
     SensorStatus gpsStatus()  const { return m_gps.getStatus(); }
 
+    // True once the raw baro on-pad AGL reference has been zeroed (#11).
+    bool baroAglReferenceReady() const { return m_baro.aglReferenceReady(); }
+
     // Raw sensor accessors.
     // In NAV_TEST mode these return the currently injected archived sample
     // so that FlightManager sees archived sensor data during replay.

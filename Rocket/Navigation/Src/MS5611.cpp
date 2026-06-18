@@ -243,6 +243,16 @@ bool MS5611::readSampleBlocking(BaroSample &out) {
 bool MS5611::zeroAglReference(float alpha) {
 	if (!m_last.valid)
 		return false;
+	if (!m_agl_ref_set_) {
+		// First stationary fix (#11): hard-set the ground reference so raw AGL
+		// reads ~0 immediately.  The 101325 Pa default would otherwise take the
+		// LPF ~10 s to converge at a high-altitude site, during which raw AGL
+		// reads an unzeroed MSL altitude.  Subsequent calls LPF-refine.
+		m_ground_pressure_pa    = m_last.pressure_pa;
+		m_ground_altitude_msl_m = m_last.altitude_m_msl;
+		m_agl_ref_set_          = true;
+		return true;
+	}
 	m_ground_pressure_pa = (1.0f - alpha) * m_ground_pressure_pa + alpha * m_last.pressure_pa;
 	m_ground_altitude_msl_m = (1.0f - alpha) * m_ground_altitude_msl_m + alpha * m_last.altitude_m_msl;
 	return true;
