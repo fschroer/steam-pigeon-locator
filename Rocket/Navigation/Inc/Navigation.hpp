@@ -4,6 +4,7 @@
 #include "MS5611.hpp"
 #include "SAMM10Q.hpp"
 #include "InsEkf15.hpp"
+#include "AttitudeEstimator.hpp"
 
 // Define NAV_TEST to compile in flight-archive replay support.
 // Leave undefined in production builds to save ~800 bytes of RAM.
@@ -55,6 +56,15 @@ public:
 
     // True once the raw baro on-pad AGL reference has been zeroed (#11).
     bool baroAglReferenceReady() const { return m_baro.aglReferenceReady(); }
+
+    // ── Strapdown attitude (ADR-0005 / NFR-9) — real-time orientation source ──
+    // Replaces the retired EKF for telemetry orientation and the FR-P13 air-start
+    // tilt gate.  tiltFromVerticalRad() is the safety-relevant output.
+    const AttitudeEstimator& attitude()  const { return m_attitude; }
+    Quaternionf getStrapdownQuat()        const { return m_attitude.quaternion(); }
+    float       getTiltFromVerticalRad()  const { return m_attitude.tiltFromVerticalRad(); }
+    bool        attitudeReady()           const { return m_attitude.initialized(); }
+    uint32_t    attitudeLastUpdateMs()    const { return m_attitude.lastUpdateMs(); }
 
     // Raw sensor accessors.
     // In NAV_TEST mode these return the currently injected archived sample
@@ -156,6 +166,11 @@ private:
     MS5611     m_baro;
     SAMM10Q    m_gps;
     InsEkf15   m_ekf;
+    AttitudeEstimator m_attitude;   // strapdown (ADR-0005 / NFR-9)
+
+    // Complementary gain for quasi-static accel tilt correction of the strapdown
+    // (pad / gentle descent only).  Small: trust the gyro, nudge toward gravity.
+    static constexpr float kStrapdownTiltGain = 0.02f;
 
     NavConfig  m_cfg{};
     NavSolution m_solution{};

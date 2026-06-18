@@ -1,44 +1,57 @@
-//#include <Math.hpp>
-//#include "AttitudeEstimator.hpp"
-//#include "Units.hpp"
-//#include <cmath>
-//
-//namespace RocketNav {
-//
-//bool AttitudeEstimator::initializeFromRestAccel(const ImuSample& imu) {
-//    if (!imu.low_g_valid && !imu.high_g_valid) return false;
-//    m_q_bn = Math::quatFromAccel(imu.accel_selected_mps2);
-//    m_initialized = true;
-//    return true;
-//}
-//
-//void AttitudeEstimator::propagate(const ImuSample& imu, float dt_s, const Vec3f& gyro_bias_rps) {
-//    if (!m_initialized) {
-//        initializeFromRestAccel(imu);
-//    }
-//
-//    Vec3f w = imu.gyro_rps - gyro_bias_rps;
-//    m_q_bn = Math::quatIntegrateBodyRates(m_q_bn, w, dt_s);
-//}
-//
-//void AttitudeEstimator::correctTiltFromAccel(const ImuSample& imu, float gain, bool only_when_stationary) {
-//    const float a_norm = Math::norm(imu.accel_selected_mps2);
-//    const bool quasi_static = std::fabs(a_norm - G0_F) < 0.3f * G0_F;
-//
-//    if (only_when_stationary && !quasi_static) return;
-//
-//    Quaternionf q_acc = Math::quatFromAccel(imu.accel_selected_mps2);
-//
-//    Quaternionf q;
-//    q.w = (1.0f - gain) * m_q_bn.w + gain * q_acc.w;
-//    q.x = (1.0f - gain) * m_q_bn.x + gain * q_acc.x;
-//    q.y = (1.0f - gain) * m_q_bn.y + gain * q_acc.y;
-//    q.z = (1.0f - gain) * m_q_bn.z + gain * q_acc.z;
-//    m_q_bn = Math::quatNormalize(q);
-//}
-//
-//Eulerf AttitudeEstimator::getEuler() const {
-//    return Math::quatToEuler(m_q_bn);
-//}
-//
-//}
+#include "AttitudeEstimator.hpp"
+#include "Math.hpp"
+#include <cmath>
+
+namespace RocketNav {
+
+void AttitudeEstimator::initializeFromRestAccel(const Vec3f& accel_mps2, uint32_t now_ms) {
+    m_q_bn           = Math::quatFromAccel(accel_mps2);
+    m_initialized    = true;
+    m_last_update_ms = now_ms;
+}
+
+void AttitudeEstimator::propagate(const Vec3f& gyro_rps, float dt_s,
+                                  const Vec3f& gyro_bias_rps, uint32_t now_ms) {
+    m_last_update_ms = now_ms;
+    if (!m_initialized || dt_s <= 0.0f) return;
+    const Vec3f omega = gyro_rps - gyro_bias_rps;
+    m_q_bn = Math::quatIntegrateBodyRates(m_q_bn, omega, dt_s);   // already normalized
+}
+
+void AttitudeEstimator::correctTiltFromAccel(const Vec3f& accel_mps2, float gain) {
+    if (!m_initialized || gain <= 0.0f) return;
+    if (gain > 1.0f) gain = 1.0f;
+
+    // quatFromAccel resolves roll/pitch from gravity (yaw left at 0), so blending
+    // toward it nudges tilt without asserting a heading.  Sign-align to the
+    // current quaternion first (q and −q are the same rotation) to take the short
+    // way around, then renormalize.
+    Quaternionf qa = Math::quatFromAccel(accel_mps2);
+    const float d = m_q_bn.w*qa.w + m_q_bn.x*qa.x + m_q_bn.y*qa.y + m_q_bn.z*qa.z;
+    if (d < 0.0f) { qa.w = -qa.w; qa.x = -qa.x; qa.y = -qa.y; qa.z = -qa.z; }
+
+    const float k = 1.0f - gain;
+    m_q_bn = Math::quatNormalize(Quaternionf{
+        k*m_q_bn.w + gain*qa.w,
+        k*m_q_bn.x + gain*qa.x,
+        k*m_q_bn.y + gain*qa.y,
+        k*m_q_bn.z + gain*qa.z });
+}
+
+Eulerf AttitudeEstimator::euler() const {
+    return Math::quatToEuler(m_q_bn);
+}
+
+float AttitudeEstimator::tiltFromVerticalRad() const {
+    // Nose axis (+X body) expressed in nav (NED).  Launch-vertical "up" = (0,0,−1).
+    // cos(tilt) = dot(nose_nav, up) = −nose_nav.z.  Convention-agnostic: depends
+    // only on m_q_bn being a valid body→nav rotation.  (Bench-verify the sign:
+    // nose-up ⇒ ~0°, horizontal ⇒ ~90° — this value gates motor ignition.)
+    const Vec3f nose_nav = Math::rotateBodyToNav(m_q_bn, Vec3f{1.0f, 0.0f, 0.0f});
+    float c = -nose_nav.z;
+    if (c >  1.0f) c =  1.0f;
+    if (c < -1.0f) c = -1.0f;
+    return std::acos(c);
+}
+
+} // namespace RocketNav

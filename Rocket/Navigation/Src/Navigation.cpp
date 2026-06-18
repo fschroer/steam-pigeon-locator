@@ -356,6 +356,24 @@ bool Navigation::Update() {
         m_solution.body_rates_rps  = imu.gyro_rps;
         m_solution.body_accel_mps2 = imu.accel_selected_mps2;
 
+        // ── Strapdown attitude (ADR-0005 / NFR-9) ─────────────────────────────
+        // Independent of the EKF: seed from gravity while stationary on the pad,
+        // then dead-reckon by integrating the (bias-corrected) gyro.  Driven here
+        // at the 20 Hz loop rate; the ≥ 480 Hz FIFO/ISR path of NFR-9 is follow-on
+        // hardware integration.  Accel tilt correction only when quasi-static
+        // (pad / gentle descent) — there is no gravity reference in powered or
+        // ballistic flight, so confidence then decays with time (the FR-P13
+        // attitude-freshness gate).  gyro_bias_rps borrows the EKF estimate while
+        // the EKF still runs; the strapdown should own pad-bias once it is removed.
+        if (!m_attitude.initialized()) {
+            if (IsStationary(imu, baro))
+                m_attitude.initializeFromRestAccel(imu.accel_selected_mps2, now);
+        } else {
+            m_attitude.propagate(imu.gyro_rps, dt_s, m_solution.gyro_bias_rps, now);
+            if (!m_gps_velocity_enabled_ && IsStationary(imu, baro))
+                m_attitude.correctTiltFromAccel(imu.accel_selected_mps2, kStrapdownTiltGain);
+        }
+
         if (m_solution.altitude_agl_m > m_max_altitude_agl_m) {
             m_max_altitude_agl_m    = m_solution.altitude_agl_m;
             m_last_increase_time_ms = m_solution.timestamp_ms;

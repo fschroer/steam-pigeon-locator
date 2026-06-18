@@ -59,8 +59,11 @@ void Communication::SendGenericPacket(const uint8_t *data, size_t len) {
 
 void Communication::SendPreLaunchData() {
 	PreLaunchData msg;
-	NavSolution nav_solution = nav_.getFused();
-	GpsSample gps_sample = nav_.getRawGps();
+	// ADR-0005: telemetry is raw-primary (no getFused()). Position from raw GPS,
+	// AGL from raw baro, accel/rates from raw IMU.
+	GpsSample  gps_sample  = nav_.getRawGps();
+	BaroSample baro_sample = nav_.getRawBaro();
+	ImuSample  imu_sample  = nav_.getRawImu();
 	RocketPersistentSettings rocket_settings = archive_.GetLocatorSettings();
 
 	msg.packet_header.system_id = system_id;
@@ -68,8 +71,8 @@ void Communication::SendPreLaunchData() {
 	msg.packet_header.msg_count = 0;
 	msg.packet_header.crc = 0;
 
-	msg.latitude = nav_solution.pos.lat_rad * RAD2DEG;
-	msg.longitude = nav_solution.pos.lon_rad * RAD2DEG;
+	msg.latitude = gps_sample.lat_rad * RAD2DEG;
+	msg.longitude = gps_sample.lon_rad * RAD2DEG;
 	msg.raw_latitude = gps_sample.lat_rad * RAD2DEG;
 	msg.raw_longitude = gps_sample.lon_rad * RAD2DEG;
 	msg.satellites = gps_sample.num_sv;
@@ -78,9 +81,9 @@ void Communication::SendPreLaunchData() {
 	msg.baro_status = nav_.baroStatus().health;
 	msg.gps_status = nav_.gpsStatus().health;
 	msg.deploy_status = DeploymentChannelContinuity();
-	msg.agl = nav_solution.altitude_agl_m;
-	msg.accel = nav_solution.body_accel_mps2;
-	msg.gyro = nav_solution.body_rates_rps;
+	msg.agl = baro_sample.altitude_m_agl;
+	msg.accel = imu_sample.accel_selected_mps2;
+	msg.gyro = imu_sample.gyro_rps;
 	msg.deploy_ch1_mode = rocket_settings.deployment_ch1_mode;
 	msg.deploy_ch2_mode = rocket_settings.deployment_ch2_mode;
 	msg.deploy_ch3_mode = rocket_settings.deployment_ch3_mode;
@@ -99,16 +102,18 @@ void Communication::SendPreLaunchData() {
 
 void Communication::SendTelemetryData() {
 	TelemetryData msg;
-	NavSolution nav_solution = nav_.getFused();
-	GpsSample gps_sample = nav_.getRawGps();
+	// ADR-0005: raw-primary telemetry. Raw GPS position + raw-baro AGL/velocity;
+	// orientation from the NFR-9 strapdown (q_bn), not the retired EKF.
+	GpsSample  gps_sample  = nav_.getRawGps();
+	BaroSample baro_sample = nav_.getRawBaro();
 
 	msg.packet_header.system_id = system_id;
 	msg.packet_header.msg_type = MsgType::TelemetryData;
 	msg.packet_header.msg_count = 0;
 	msg.packet_header.crc = 0;
 
-	msg.latitude = nav_solution.pos.lat_rad * RAD2DEG;
-	msg.longitude = nav_solution.pos.lon_rad * RAD2DEG;
+	msg.latitude = gps_sample.lat_rad * RAD2DEG;
+	msg.longitude = gps_sample.lon_rad * RAD2DEG;
 	msg.satellites = gps_sample.num_sv;
 	msg.hacc = gps_sample.h_acc_m;
 	msg.imu_status = nav_.imuStatus().health;
@@ -120,9 +125,10 @@ void Communication::SendTelemetryData() {
 	msg.deployment_ch3_stats = flight_.GetDeploymentStats(3) | ((status & 0x04) << (bit_shift_continuity - 2));
 	msg.deployment_ch4_stats = flight_.GetDeploymentStats(4) | ((status & 0x08) << (bit_shift_continuity - 3));
 	msg.physical_deployment_stats = flight_.GetPhysicalDeploymentStats();
-	msg.agl = nav_solution.altitude_agl_m;
-	msg.vel_ned_mps = nav_solution.vel_ned_mps;
-	msg.q_bn = nav_solution.q_bn;
+	msg.agl = baro_sample.altitude_m_agl;
+	// Raw NED velocity: GPS horizontal + raw-baro vertical (−d(AGL)/dt = +down).
+	msg.vel_ned_mps = Vec3f{ gps_sample.vel_n_mps, gps_sample.vel_e_mps, -baro_sample.velocity };
+	msg.q_bn = nav_.getStrapdownQuat();
 	msg.flight_state = flight_.GetFlightState();
 
 	msg.packet_header.crc = ComputeMessageCrc(msg);
