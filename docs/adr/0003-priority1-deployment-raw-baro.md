@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Amended:** 2026-06-16 — Decision 2 refined from a binary raw/fused fallback to a tiered, cross-checked fallback ladder (coast → gated fused → conservative deploy-bias terminal); see #10.
+- **Amended:** 2026-06-18 — [ADR-0005](0005-retire-ekf-raw-primary.md) supersedes this ADR's "fusion still runs for Priorities 8–9" framing: with FR-P8/FR-P9 deferred, the EKF is **retired from the real-time path**, not merely de-authorized for Priority 1. The raw-baro deployment policy below is unchanged.
 - **Date:** 2026-06-15
 - **Deciders:** fschroer
 - **Related issues:** #8 (canonical source), #1 (main on fused AGL), #2 (physical sensing on fused velocity)

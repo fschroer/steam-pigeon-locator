@@ -64,22 +64,22 @@ Data path: **Locator ⇄ (LoRa) ⇄ Receiver ⇄ (BLE) ⇄ App.** The locator an
 
 ## 2. Priorities
 
-The requirements outline defines a strict, ranked list of functional goals. This ranking is the system's contract for resolving trade-offs (CPU budget, code complexity, what to trust during flight). It is reproduced here verbatim in intent, with the current implementation status noted.
+The requirements outline defines a strict, ranked list of functional goals. This ranking is the system's contract for resolving trade-offs (CPU budget, code complexity, what to trust during flight). The authoritative list — with stable IDs now decoupled from priority — is [SteamPigeonRequirements.md](SteamPigeonRequirements.md) §2; it is mirrored here with implementation status. As of 2026-06-18 air starts (FR-P13) enter at Priority 3, and the two fusion goals (FR-P8/FR-P9) are **Deferred** ([ADR-0005](adr/0005-retire-ekf-raw-primary.md), #13).
 
-| # | Goal | Implemented in |
+| # | Goal (FR ID) | Implemented in |
 |---|---|---|
-| 1 | **Flight-critical events** — launch, noseover/apogee (drogue charge timing), descent altitude (main charge timing). | `FlightManager` state machine |
-| 2 | **Post-landing location** — regularly updated lat/lon to find the rocket after it lands. | GPS in telemetry + last-known position |
-| 3 | **Device configuration.** | App settings screens, USB-C consoles, persistent settings |
-| 4 | **Data archival** — for troubleshooting, fusion tuning, flight-dynamics study, sensor evaluation, design improvement. | `Archive` / `FlightArchive` → external flash |
-| 5 | **In-flight location** — regularly updated lat/lon during flight. | Telemetry stream |
-| 6 | **Locator sound** — power-on, arm/disarm, and a recovery-aid beacon. | `Buzzer` / `BuzzerPhase` |
-| 7 | **G-forces during flight.** | IMU accel in telemetry/archive |
-| 8 | **Fused 3D location.** | `InsEkf15` (15-state INS EKF) |
-| 9 | **Fused 3D orientation.** | EKF attitude quaternion |
-| 10 | **Rocket rotation during flight.** | IMU gyro in telemetry/archive |
-| 11 | **General-interest flight data** — motor burnout, pre/post-deployment channel continuity, physical parachute-deployment sensing. | `FlightManager` event stats |
-| 12 | **App text-to-speech** for locator status. | Android TTS in app |
+| 1 | **Flight-critical events** — launch, noseover/apogee (drogue charge timing), descent altitude (main charge timing). (FR-P1) | `FlightManager` state machine, on raw baro (ADR-0003) |
+| 2 | **Post-landing location** — regularly updated lat/lon to find the rocket after it lands. (FR-P2) | GPS in telemetry + last-known position |
+| 3 | **Air-start (staged ignition) safety gate.** (FR-P13) | *Planned:* high-rate gyro strapdown tilt gate (NFR-9, ADR-0005) |
+| 4 | **Device configuration.** (FR-P3) | App settings screens, USB-C consoles, persistent settings |
+| 5 | **Data archival** — for troubleshooting, fusion tuning, flight-dynamics study, sensor evaluation, design improvement. (FR-P4) | `Archive` / `FlightArchive` → external flash |
+| 6 | **In-flight location** — regularly updated lat/lon during flight. (FR-P5) | Telemetry stream |
+| 7 | **Locator sound** — power-on, arm/disarm, and a recovery-aid beacon. (FR-P6) | `Buzzer` / `BuzzerPhase` |
+| 8 | **G-forces during flight.** (FR-P7) | IMU accel in telemetry/archive |
+| 9 | **Rocket rotation during flight.** (FR-P10) | IMU gyro in telemetry/archive |
+| 10 | **General-interest flight data** — motor burnout, pre/post-deployment channel continuity, physical parachute-deployment sensing. (FR-P11) | `FlightManager` event stats |
+| 11 | **App text-to-speech** for locator status. (FR-P12) | Android TTS in app |
+| — | **Deferred:** Fused 3D location (FR-P8), Fused 3D orientation (FR-P9). | `InsEkf15` EKF — **retired from the real-time path ([ADR-0005](adr/0005-retire-ekf-raw-primary.md))** |
 
 ### 2.1 The governing policy: proven sensors over unproven fusion
 
@@ -87,9 +87,9 @@ The single most important cross-cutting rule in the requirements is this:
 
 > **Known sensor capabilities must be prioritized over unknown or untested sensor-fusion algorithms when supporting Priorities 1 and 2, until the fusion algorithms have been thoroughly vetted through extensive model tuning and real-world flight testing.**
 
-Concretely, the requirements state that **Priority 1 (deployment-critical altitude and velocity) and Priority 2 (post-landing GPS) must rely on raw barometric and raw GPS data**, not on EKF-fused outputs, until fusion is proven. Velocity used for Priority 1 must come from a "proven source."
+Concretely (NFR-1), **Priority 1 (deployment-critical altitude and velocity), Priority 2 (post-landing GPS), and the Priority-3 air-start tilt gate (FR-P13) rely on proven sources — raw baro, raw GPS, and the high-rate gyro strapdown (NFR-9)** — not on EKF-fused outputs. Velocity used for Priority 1 must come from a "proven source."
 
-This policy is **partially** honored in the current firmware — apogee detection was deliberately moved to raw baro after a real flight (2026-06-14) showed the fused vertical velocity diverging — but the **main-chute altitude trigger and physical-deployment sensing still run on fused outputs.** See **Appendix A, Items 1–2.** This is the most consequential open issue in the system and the one most likely to produce "conflicting patches" if it is not resolved explicitly.
+This policy is now **honored** in the current firmware: apogee moved to raw baro after the 2026-06-14 fused-velocity divergence, and PR #9 (merged 2026-06-18, ADR-0003) moved the **main-chute altitude trigger and physical-deployment sensing onto raw-baro-derived altitude/velocity** via the shared `SelectDeploymentSource()` ladder (#1, #2 — closed). With FR-P8/FR-P9 deferred, the EKF is being **retired from the real-time path** (ADR-0005, #13); the residual work is tuning the robustness-layer thresholds against archived flights (#10).
 
 ---
 
@@ -200,7 +200,7 @@ Android / Kotlin / Jetpack Compose, organized around a `RocketViewModel` and a s
 - **Real-time budget is hard, not soft.** Every code path must complete within the 50 ms window; the design target is ~25 ms. `TimingDiag` instrumentation is archived each cycle — watch `process_dur_us` as features are added.
 - **The shared SPI2 bus is a known hazard.** Baro + IMU + flash share it. The ISR-enqueue / main-loop-drain rule in `SpiBus` exists specifically because a violation caused a false apogee and premature deployment. Any new SPI user must obey it.
 - **Software baro filtering is mandatory.** The MS5611 has no hardware spike rejection; spurious values must be filtered in software, and D1/D2 conversion sequencing must keep a valid pressure available every window.
-- **Raw vs. fused is a policy, not an implementation detail.** The requirements mandate raw baro/GPS for Priorities 1–2 until fusion is vetted. The code is mid-migration on this point (apogee is raw; main-deploy altitude is still fused). Treat this as a deliberate decision to be tracked, not as something to "fix" ad hoc — see Appendix A.
+- **Raw vs. fused is a policy, not an implementation detail.** The requirements mandate raw baro/GPS for Priorities 1–2 (and the high-rate gyro strapdown for the Priority-3 air-start gate) over unvetted fusion. As of PR #9 (2026-06-18) the deployment path is fully on raw baro — apogee, main-deploy altitude, and deployment velocity all flow through `SelectDeploymentSource()` — and the EKF is being retired from the real-time path (ADR-0005). Treat the raw-vs-fused boundary as a deliberate, tracked policy, not something to "fix" ad hoc.
 - **The wire format is defined in two places.** `MessageProtocol.hpp` (C++ packed structs) and the Kotlin side (`RocketState.kt` + `FlightDataRepository.kt` manual byte offsets) must be hand-synchronized. There is no shared schema or generator. This is the highest-probability source of future "conflicting patches."
 - **Arming triggers re-calibration.** Mounting detection and EKF re-init happen on each arm; arming the rocket in a non-final orientation and then re-orienting it will invalidate the calibration.
 - **Flights are capped at 8 minutes** of recorded data; the state machine force-closes to `Landed` at that limit so timestamps never exceed the recorded span.
@@ -214,13 +214,13 @@ These are points where the requirements outline, the firmware, and the app disag
 
 > **Appendix item → GitHub issue** (numbers differ because the issues were filed in a different order): 1 → [#1](https://github.com/fschroer/steam-pigeon-locator/issues/1) · 2 → [#2](https://github.com/fschroer/steam-pigeon-locator/issues/2) · 3 → [#8](https://github.com/fschroer/steam-pigeon-locator/issues/8) · 4 → [#3](https://github.com/fschroer/steam-pigeon-locator/issues/3) · 5 → [#4](https://github.com/fschroer/steam-pigeon-locator/issues/4) · 6 → [#5](https://github.com/fschroer/steam-pigeon-locator/issues/5) · 7 → [#6](https://github.com/fschroer/steam-pigeon-locator/issues/6) · 8 → [#7](https://github.com/fschroer/steam-pigeon-locator/issues/7). See the **Open Issues Tracker** near the top for milestone grouping.
 
-**1. Main-chute altitude trigger uses fused AGL, contradicting the Priority-1 "raw baro" policy. (High impact.)** → [#1](https://github.com/fschroer/steam-pigeon-locator/issues/1)
+**1. Main-chute altitude trigger uses fused AGL, contradicting the Priority-1 "raw baro" policy. (High impact.)** → [#1](https://github.com/fschroer/steam-pigeon-locator/issues/1) — **Resolved 2026-06-18** (PR #9, ADR-0003): main primary/backup now gate on raw-baro-derived AGL via `SelectDeploymentSource()`; #1 closed.
 `FlightManager::UpdateFlightState()` fires main primary/backup on `nav_solution.altitude_agl_m` — the **EKF-fused** AGL — while the requirements mandate raw baro for deployment-critical altitude until fusion is vetted. This is especially notable because the apogee detector right above it was *deliberately* switched to raw baro after the 2026-06-14 flight, where the same EKF's vertical channel diverged. The most safety-critical altitude decision in the system currently trusts the output the apogee logic stopped trusting. *Decision needed:* either move main-deploy altitude to raw baro AGL for consistency with the policy, or formally declare fused AGL "vetted" for this use and update the requirements to match.
 
-**2. Physical-deployment sensing and main-velocity logic use fused vertical speed. (Medium impact.)** → [#2](https://github.com/fschroer/steam-pigeon-locator/issues/2)
+**2. Physical-deployment sensing and main-velocity logic use fused vertical speed. (Medium impact.)** → [#2](https://github.com/fschroer/steam-pigeon-locator/issues/2) — **Resolved 2026-06-18** (PR #9, ADR-0003): `pre_main_velocity_` and the physical drogue/main thresholds now use raw-baro-derived velocity; #2 closed.
 `pre_main_velocity_`, physical drogue/main detection, and the main-deploy velocity checks all read `nav_solution.vertical_speed_mps`. Physical-deployment sensing is Priority 11 (general interest), so this is lower stakes than Item 1 — but it relies on the very fused-velocity signal the apogee detector abandoned as unreliable. *Decision needed:* confirm whether fused velocity is trustworthy here, or fall back to a raw-baro-derived velocity.
 
-**3. "Velocity must come from a proven source" is undefined. (Policy gap.)** → [#8](https://github.com/fschroer/steam-pigeon-locator/issues/8)
+**3. "Velocity must come from a proven source" is undefined. (Policy gap.)** → [#8](https://github.com/fschroer/steam-pigeon-locator/issues/8) — **Resolved** (ADR-0003): the canonical Priority-1 velocity source is raw-baro-derived velocity, used uniformly by apogee, main, and physical sensing via `SelectDeploymentSource()`; #8 closed (`in-doc`).
 The requirements require a "proven source" for velocity but never name one. Today, apogee uses raw-baro-derived velocity while main/physical logic uses fused velocity — two different "sources" for nominally the same quantity. *Decision needed:* designate the canonical velocity source(s) per flight phase so future code doesn't pick arbitrarily.
 
 **4. Requirements say the GPS shares the SPI bus; it is actually on I2C. (Documentation error.)** → [#3](https://github.com/fschroer/steam-pigeon-locator/issues/3) — **Resolved 2026-06-16:** requirements outline corrected to "baro, IMU, and external flash share SPI; GPS on a separate I2C bus."

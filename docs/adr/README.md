@@ -19,3 +19,4 @@ Write an ADR for a decision that is costly to reverse, or that future work must 
 | [0002](0002-execution-model-superloop-vs-rtos.md) | Execution model: cooperative super-loop vs. RTOS (Locator) | Accepted |
 | [0003](0003-priority1-deployment-raw-baro.md) | Priority-1 deployment uses raw baro; fusion as robustness layer | Accepted |
 | [0004](0004-fusion-vetting-method.md) | Fusion-vetting method: validate against an independent reference | Proposed |
+| [0005](0005-retire-ekf-raw-primary.md) | Retire the EKF from the real-time path — raw-primary navigation | Accepted |
