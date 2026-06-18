@@ -18,7 +18,7 @@ The requirements outline prioritizes proven sensors over unproven fusion for Pri
 
 ## Decision
 
-1. **For all Priority-1 deployment gating — apogee/drogue timing, main-deploy altitude, and deployment velocity signatures — raw baro is the permanent primary source.** This is a standing policy, not an "until vetted" placeholder.
+1. **For all Priority-1 deployment gating — apogee/drogue timing, main-deploy altitude, and deployment velocity signatures — raw baro is the permanent primary source.** This is a standing policy, not an "until vetted" placeholder. *Scope: **launch** detection is not governed by this ADR — its primary trigger is raw IMU acceleration, and its fused-AGL secondary gate is tracked in [#11](https://github.com/fschroer/steam-pigeon-locator/issues/11).*
 2. **Fused outputs may serve Priority 1 only as a cross-checked robustness layer, never as the deployment authority.** A single shared source-selection step — used by both the deployment block and the apogee path — produces the deployment altitude/velocity each cycle by this ladder:
    - **Raw valid, not a spike** → use raw. A raw sample disagreeing with the fused estimate by more than the distrust bound is treated as a spike and rejected.
    - **Raw invalid (brief outage)** → *coast*: hold the last valid raw value extrapolated by the last valid raw velocity (first-order hold), up to the coast window.
