@@ -43,27 +43,27 @@ void FlightManager::Init() {
 bool FlightManager::DetectLaunch(const NavSolution& sol) {
     const RocketPersistentSettings settings = archive_.GetLocatorSettings();
 
-    // Use the EKF fused accel (= raw IMU as set by Navigation::Update) and the
-    // EKF fused AGL (initialized to 0.0 in InsEkf15::initialize, always valid)
-    // rather than getRawBaro().altitude_m_agl, which is only zeroed after
-    // CalibrateOnPadAndZeroAglUntilLaunch has converged.  Before that converges
-    // (e.g. when the user arms before GPS lock), the raw baro AGL can read an
-    // unzeroed MSL altitude (hundreds of metres), falsely triggering launch.
+    // Accel term: the fused solution's body_accel is the raw IMU accel copied each
+    // Update, so it is a proven raw signal (not an EKF-estimated quantity).
     const float accel_g = RocketNav::Math::norm(sol.body_accel_mps2) / G0_F;
 
+    // AGL term (#11): use RAW baro AGL per NFR-1, gated on the on-pad ground
+    // reference having been zeroed (nav_.baroAglReferenceReady()).  Before it is
+    // zeroed, raw baro AGL reads an unzeroed MSL altitude (hundreds of metres) and
+    // could false-trigger, so until then only the high-accel path is active.
+    const BaroSample baro = nav_.getRawBaro();
+    const bool agl_ready  = nav_.baroAglReferenceReady() && baro.valid;
+
     // Two independent paths to launch detection:
-    //   1. High-accel alone (≥5 g): fast response regardless of AGL validity.
-    //      Covers a bad barometer or a pad reference that has not yet converged.
-    //   2. AGL + moderate-accel combined: requires the rocket to have risen past
-    //      the configured threshold AND to be under at least partial thrust
-    //      (>= 1.5 g total = any net acceleration above gravity).  The accel gate
-    //      prevents a spurious AGL reading caused by an unzeroed pad reference
-    //      from triggering launch while the locator sits on the ground (where
-    //      body accel ≈ 1 g, well below kLaunchConfirmAccelG).
+    //   1. High-accel alone (≥5 g): fast response regardless of AGL availability.
+    //   2. AGL + moderate-accel combined: rocket has risen past the configured
+    //      threshold (raw baro AGL) AND is under at least partial thrust (≥1.5 g).
+    //      Active only once the AGL reference is ready.
     constexpr float kLaunchConfirmAccelG = 1.5f;  // >= 1.5 g = thrust is present
     const bool threshold = (accel_g >= 5.0f)
                         || (accel_g >= kLaunchConfirmAccelG
-                            && sol.altitude_agl_m >= settings.launch_detect_altitude);
+                            && agl_ready
+                            && baro.altitude_m_agl >= settings.launch_detect_altitude);
 
     const uint32_t now = HAL_GetTick();
     if (threshold) {
@@ -119,9 +119,13 @@ bool FlightManager::DetectBurnout(const NavSolution& sol) {
 // -kVzThresholdMps) plus no new altitude maximum for kNoIncreaseWindowMs.
 // ---------------------------------------------------------------------------
 bool FlightManager::DetectApogee(const NavSolution& sol, const BaroSample& baro_raw) {
-    const bool  baro_ok = baro_raw.valid;
-    const float alt = baro_ok ? baro_raw.altitude_m_agl : sol.altitude_agl_m;
-    const float vz  = baro_ok ? baro_raw.velocity       : sol.vertical_speed_mps;
+    // Route through the shared ADR-0003 per-channel source selector so apogee uses
+    // the same raw / spike-reject / coast / gated-fused logic as the deployment
+    // block.  Spike detection is raw self-consistency (not raw-vs-fused), so a
+    // diverged fused velocity cannot reject good raw here (#10).
+    const DeploySource src = SelectDeploymentSource(sol, baro_raw);
+    const float alt = src.agl_m;
+    const float vz  = src.vspeed_mps;
     const uint32_t now_ms = sol.timestamp_ms;   // 20 Hz flight clock for window timing
 
     if (alt > m_apogee_peak_agl_m_) {
@@ -167,6 +171,96 @@ bool FlightManager::DetectLanded(const NavSolution& sol, const BaroSample& baro_
         m_landed_count_ = 0;
     }
     return m_landed_count_ >= kLandedConfirmSamples;
+}
+
+// ---------------------------------------------------------------------------
+// Priority-1 deployment source selection (ADR-0003 Decision 2) — DRAFT, see #10
+// Altitude and velocity are validated and coasted INDEPENDENTLY (per channel).
+// Spike detection is by raw self-consistency — a raw sample is checked against the
+// coasted projection of the last good raw sample, NOT against the fused estimate —
+// so a diverged fused solution can never reject a good raw sample.  Fused is a
+// gated last resort after a sustained outage.  Sign: positive = climbing.
+// ---------------------------------------------------------------------------
+
+// Velocity channel: zero-order hold; spike bound kept loose so a real chute-opening
+// deceleration passes (that signal is what physical-deployment sensing detects).
+// No conservative descent floor — velocity gates only apogee, which also has the
+// altitude no-new-max path.
+float FlightManager::SelectDeployVspeed(const NavSolution& sol, const BaroSample& baro_raw) {
+    const uint32_t now_ms = sol.timestamp_ms;
+
+    if (!m_have_raw_vspeed_) {
+        if (baro_raw.valid) {
+            m_last_raw_vspeed_    = baro_raw.velocity;
+            m_last_raw_vspeed_ms_ = now_ms;
+            m_have_raw_vspeed_    = true;
+            return baro_raw.velocity;
+        }
+        return sol.vertical_speed_mps;          // no proven raw velocity yet
+    }
+
+    // Accept raw if self-consistent with the last good raw velocity.
+    if (baro_raw.valid
+            && std::fabs(baro_raw.velocity - m_last_raw_vspeed_) <= kDeployVelDistrustMps) {
+        m_last_raw_vspeed_    = baro_raw.velocity;
+        m_last_raw_vspeed_ms_ = now_ms;
+        return baro_raw.velocity;
+    }
+
+    const uint32_t outage_ms = now_ms - m_last_raw_vspeed_ms_;
+    if (outage_ms <= kDeployCoastMs)
+        return m_last_raw_vspeed_;              // hold (zero-order)
+    if (outage_ms <= kDeployRefLostMs
+            && std::fabs(sol.vertical_speed_mps - m_last_raw_vspeed_) <= kDeployVelDistrustMps)
+        return sol.vertical_speed_mps;          // gated fused
+    return m_last_raw_vspeed_;                  // terminal: hold last good
+}
+
+// Altitude channel: first-order hold (coasts on the best current velocity); a raw
+// sample deviating from the coasted projection beyond a dt-widened bound is rejected
+// as a spike; terminal = conservative deploy-bias (keep coasting a floored descent).
+float FlightManager::SelectDeployAgl(const NavSolution& sol, const BaroSample& baro_raw,
+                                     float vspeed_est) {
+    const uint32_t now_ms = sol.timestamp_ms;
+
+    if (!m_have_raw_agl_) {
+        if (baro_raw.valid) {
+            m_last_raw_agl_m_  = baro_raw.altitude_m_agl;
+            m_last_raw_agl_ms_ = now_ms;
+            m_have_raw_agl_    = true;
+            return baro_raw.altitude_m_agl;
+        }
+        return sol.altitude_agl_m;              // no proven raw altitude yet
+    }
+
+    const uint32_t outage_ms = now_ms - m_last_raw_agl_ms_;
+    const float    dt_s      = outage_ms * 0.001f;
+    const float    coast     = m_last_raw_agl_m_ + vspeed_est * dt_s;   // first-order hold
+    const float    bound     = kDeployAltDistrustM + std::fabs(vspeed_est) * dt_s;
+
+    // Accept raw only if self-consistent with its own coasted projection.
+    if (baro_raw.valid && std::fabs(baro_raw.altitude_m_agl - coast) <= bound) {
+        m_last_raw_agl_m_  = baro_raw.altitude_m_agl;
+        m_last_raw_agl_ms_ = now_ms;
+        return baro_raw.altitude_m_agl;
+    }
+
+    if (outage_ms <= kDeployCoastMs)
+        return coast;                           // brief outage / single spike
+    if (outage_ms <= kDeployRefLostMs && std::fabs(sol.altitude_agl_m - coast) <= bound)
+        return sol.altitude_agl_m;              // gated fused
+
+    // Terminal: conservative deploy-bias — keep coasting a descending projection,
+    // floored so a reference lost near apogee still trends down toward main.
+    const float term_v = (vspeed_est < -kTerminalDescentMps) ? vspeed_est : -kTerminalDescentMps;
+    return m_last_raw_agl_m_ + term_v * dt_s;
+}
+
+FlightManager::DeploySource
+FlightManager::SelectDeploymentSource(const NavSolution& sol, const BaroSample& baro_raw) {
+    const float vspeed = SelectDeployVspeed(sol, baro_raw);        // velocity first
+    const float agl    = SelectDeployAgl(sol, baro_raw, vspeed);   // altitude coasts on it
+    return { agl, vspeed };
 }
 
 // ---------------------------------------------------------------------------
@@ -219,6 +313,14 @@ void FlightManager::UpdateFlightState() {
     if (flight_state_ >= FlightStates::Noseover && flight_state_ < FlightStates::Landed) {
         if (noseover_time_ > SAMPLES_PER_SECOND * (-drogue_velocity_threshold / G0_F + 0.5f))
             near_apogee_ = false;
+
+        // ADR-0003 Decision 2: tiered, cross-checked raw-baro source selection
+        // (raw -> coast -> gated fused -> conservative deploy-bias). Fusion is never
+        // the deployment authority. See docs/adr/0003-priority1-deployment-raw-baro.md and #10.
+        const BaroSample baro_raw = nav_.getRawBaro();
+        const DeploySource dsrc   = SelectDeploymentSource(nav_solution, baro_raw);
+        const float deploy_agl    = dsrc.agl_m;
+        const float deploy_vspeed = dsrc.vspeed_mps;
 
         // Drogue primary
         if (flight_state_ < FlightStates::DroguePrimaryEvent
@@ -296,9 +398,9 @@ void FlightManager::UpdateFlightState() {
 
         // Main primary
         if (flight_state_ < FlightStates::MainPrimaryEvent
-                && nav_solution.altitude_agl_m <= locator_settings.main_primary_deploy_altitude) {
+                && deploy_agl <= locator_settings.main_primary_deploy_altitude) {
             uint8_t status = DeploymentChannelContinuity();
-            pre_main_velocity_ = nav_solution.vertical_speed_mps;
+            pre_main_velocity_ = deploy_vspeed;
             if (locator_settings.deployment_ch1_mode == DeployMode::MainPrimary) {
                 deploy_ch1_time_ = 0;
                 deployment_ch1_stats_ = (deployment_ch1_stats_ | (1 << bit_shift_fired));
@@ -334,10 +436,10 @@ void FlightManager::UpdateFlightState() {
 
         // Main backup
         if (flight_state_ < FlightStates::MainBackupEvent
-                && nav_solution.altitude_agl_m <= locator_settings.main_backup_deploy_altitude) {
+                && deploy_agl <= locator_settings.main_backup_deploy_altitude) {
             uint8_t status = DeploymentChannelContinuity();
-            if (nav_solution.vertical_speed_mps < pre_main_velocity_)
-                pre_main_velocity_ = nav_solution.vertical_speed_mps;
+            if (deploy_vspeed < pre_main_velocity_)
+                pre_main_velocity_ = deploy_vspeed;
             if (locator_settings.deployment_ch1_mode == DeployMode::MainBackup) {
                 deploy_ch1_time_ = 0;
                 deployment_ch1_stats_ = (deployment_ch1_stats_ | (1 << bit_shift_fired));
@@ -374,20 +476,19 @@ void FlightManager::UpdateFlightState() {
         // Physical drogue deployment detection
         if (flight_state_ >= FlightStates::DroguePrimaryEvent
                 && !near_apogee_
-                && nav_solution.vertical_speed_mps > drogue_velocity_threshold) {
+                && deploy_vspeed > drogue_velocity_threshold) {
             physical_deployment_stats_ = (physical_deployment_stats_ | (1 << bit_shift_drogue_deployed));
             archive_.WriteEvent(FlightArchive::Statistic::DrogueVelocityThresholdTimestampMs, flight_time_ms);
         }
 
         // Physical main deployment detection
         if (flight_state_ >= FlightStates::MainPrimaryEvent
-                && nav_solution.vertical_speed_mps > pre_main_velocity_ + parachute_velocity_change_threshold) {
+                && deploy_vspeed > pre_main_velocity_ + parachute_velocity_change_threshold) {
             physical_deployment_stats_ = (physical_deployment_stats_ | (1 << bit_shift_main_deployed));
             archive_.WriteEvent(FlightArchive::Statistic::MainVelocityThresholdTimestampMs, flight_time_ms);
         }
 
-        // Landing detection
-        BaroSample baro_raw = nav_.getRawBaro();
+        // Landing detection (reuses baro_raw fetched at the top of this block)
         if (!near_apogee_ && DetectLanded(nav_solution, baro_raw)) {
             flight_state_ = FlightStates::Landed;
             nav_.setPhase(FlightStates::Landed);
@@ -508,4 +609,10 @@ void FlightManager::ResetFlight() {
     m_apogee_last_increase_ms_ = 0;
     m_burnout_count_        = 0;
     m_landed_count_         = 0;
+    m_last_raw_agl_m_       = 0.0f;
+    m_last_raw_agl_ms_      = 0;
+    m_have_raw_agl_         = false;
+    m_last_raw_vspeed_      = 0.0f;
+    m_last_raw_vspeed_ms_   = 0;
+    m_have_raw_vspeed_      = false;
 }

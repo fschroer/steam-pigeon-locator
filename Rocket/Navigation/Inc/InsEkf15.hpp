@@ -51,6 +51,7 @@ public:
         uint32_t nonfinite_dx_drops   = 0;
         uint32_t baro_nonfinite_drops = 0;
         uint32_t baro_gate_rejects    = 0;
+        uint32_t vel_divergence_resets = 0;   // velocity guard fired (#12)
     };
     EkfDiag getDiag() const { return m_diag; }
 

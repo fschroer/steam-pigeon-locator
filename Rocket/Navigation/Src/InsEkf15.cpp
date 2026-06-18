@@ -240,6 +240,28 @@ void InsEkf15::predict(const ImuSample& imu, float dt_s) {
         m_sol.vel_ned_mps.z += a_n.z * dt_s;
     }
 
+    // Velocity divergence guard (#12).  With no corrector active (no GPS fix, and
+    // ZUPT runs only while stationary) the integrated velocity can grow without
+    // bound, and once it goes non-finite it LATCHES: injectErrorState() drops any
+    // non-finite dx, so no later ZUPT/GPS/baro correction can heal it.  If velocity
+    // is non-finite or implausibly large, reset the velocity STATE to 0 so a finite
+    // dx can be computed again and ZUPT/baro/GPS can pull it back.
+    //
+    // Reset the STATE ONLY — do NOT touch the covariance.  Zeroing the velocity
+    // cross-covariances destroys the P[vel,att]/P[vel,bias] couplings that keep
+    // attitude and accel-bias observable (see the covariance-propagation note
+    // below); doing so de-stabilises attitude (Inc/Hdg -> NaN) and ramps velocity.
+    {
+        constexpr float kVelDivergenceMps = 1500.0f;   // >> any model-rocket speed
+        const float vmag2 = m_sol.vel_ned_mps.x * m_sol.vel_ned_mps.x
+                          + m_sol.vel_ned_mps.y * m_sol.vel_ned_mps.y
+                          + m_sol.vel_ned_mps.z * m_sol.vel_ned_mps.z;
+        if (!std::isfinite(vmag2) || vmag2 > kVelDivergenceMps * kVelDivergenceMps) {
+            m_sol.vel_ned_mps = {0.0f, 0.0f, 0.0f};
+            ++m_diag.vel_divergence_resets;
+        }
+    }
+
     if (std::fabs(m_cached_cosLat) > 1e-8) {
         // Suppress ALL inertial position propagation on the pad and after landing.
         // The same gravity-leakage mechanism that caused horizontal drift also

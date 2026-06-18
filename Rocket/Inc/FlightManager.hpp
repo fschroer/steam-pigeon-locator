@@ -100,4 +100,36 @@ private:
     // exceed the span of the recorded data.
     static constexpr uint32_t kMaxFlightMs             = 8u * 60u * 1000u;
     uint8_t m_landed_count_  = 0;
+
+    // ── Priority-1 deployment source selection (ADR-0003 Decision 2) ──────────
+    // Produces the per-cycle deployment altitude and velocity from RAW baro, each
+    // channel validated and coasted INDEPENDENTLY (a raw-altitude spike does not
+    // discard a good raw velocity, and vice versa).  Spike detection is by raw
+    // SELF-consistency — a raw sample is checked against the coasted projection of
+    // the last good raw sample, NOT against the fused estimate — so a diverged
+    // fused solution can never reject a good raw sample (this is what makes it safe
+    // to share with DetectApogee()).  Fused is a gated last resort after a
+    // sustained outage.  Ladder per channel: raw -> coast -> gated fused -> terminal.
+    // Altitude terminal = keep coasting a descending projection (conservative
+    // deploy-bias, never withholds).  Velocity terminal = hold last good.
+    // DRAFT for PR #9; the tunables below are placeholders to be set in #10.
+    struct DeploySource { float agl_m; float vspeed_mps; };
+    DeploySource SelectDeploymentSource(const NavSolution& sol, const BaroSample& baro_raw);
+    float SelectDeployVspeed(const NavSolution& sol, const BaroSample& baro_raw);
+    float SelectDeployAgl(const NavSolution& sol, const BaroSample& baro_raw, float vspeed_est);
+
+    float    m_last_raw_agl_m_     = 0.0f;
+    uint32_t m_last_raw_agl_ms_    = 0;
+    bool     m_have_raw_agl_       = false;
+    float    m_last_raw_vspeed_    = 0.0f;
+    uint32_t m_last_raw_vspeed_ms_ = 0;
+    bool     m_have_raw_vspeed_    = false;
+
+    // Tunables — TUNE against archived flights and record in ADR-0003 (see #10).
+    static constexpr float    kDeployAltDistrustM   = 30.0f;  // max raw-alt deviation from projection (m)
+    static constexpr float    kDeployVelDistrustMps = 20.0f;  // max raw-vel jump/cycle (m/s) — keep loose
+                                                              // so real chute-opening decel passes
+    static constexpr uint32_t kDeployCoastMs        = 300u;   // hold window before fused considered (ms)
+    static constexpr uint32_t kDeployRefLostMs      = 1500u;  // beyond this: terminal
+    static constexpr float    kTerminalDescentMps   = 5.0f;   // floored descent in altitude terminal
 };

@@ -66,30 +66,22 @@ struct Note {
 };
 
 constexpr Note PowerOn[] = {
-//		{ Tone::F7, 2, 3 },
-//		{ Tone::Fs7, 2, 3 },
-//		{ Tone::G7, 2, 3 },
-//		{ Tone::Gs7, 2, 3},
-//		{ Tone::A7, 2, 3 },
-//		{ Tone::As7, 2, 3 },
-//		{ Tone::B7, 4, 3 },
-		{ Tone::C8, 4, 3 },
-		{ Tone::C8, 4, 3 },
-//		{ Tone::D8, 4, 3 },
-//		{ Tone::Ds8, 4, 3 },
-		{ Tone::E8, 4, 3 },
-//		{ Tone::F8, 2, 3 },
+		{ Tone::C8, 2, 3 },
+		{ Tone::Cs8, 2, 3 },
+		{ Tone::D8, 2, 3 },
+		{ Tone::Ds8, 2, 3 },
+		{ Tone::E8, 2, 3 },
 };
 
 constexpr Note Arming[] = {
-		{ Tone::C8, 3, 1 },
-		{ Tone::D8, 3, 1 },
+		{ Tone::Cs8, 2, 1 },
+		{ Tone::Rest, 1, 0 },
+		{ Tone::Cs8, 2, 1 },
 		{ Tone::Rest, 34, 0 },
 };
 
 constexpr Note Disarming[] = {
-		{ Tone::D8, 3, 1 },
-		{ Tone::C8, 3, 1 },
+		{ Tone::Cs8, 2, 1 },
 };
 
 constexpr Note Armed[] = {

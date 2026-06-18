@@ -35,6 +35,11 @@ public:
 	float getGroundPressurePa() const {
 		return m_ground_pressure_pa;
 	}
+	// True once the on-pad ground reference has been zeroed (#11); raw AGL is
+	// reliable only after this.
+	bool aglReferenceReady() const {
+		return m_agl_ref_set_;
+	}
 
 	void OCCallback();
 	void SetD1Converted();
@@ -79,6 +84,7 @@ private:
 	uint16_t m_prom[8] { };
 	float m_ground_altitude_msl_m = 0.0f;
 	float m_ground_pressure_pa = 101325.0f;
+	bool  m_agl_ref_set_ = false;   // hard-set on first stationary fix (#11)
 	float m_sample_rate_hz = 50.0f;
 
 	uint32_t m_D1 = 0, m_D2 = 0;

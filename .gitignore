@@ -1,1 +1,4 @@
 /Debug/
+
+# Generated at build time by Scripts/GenVersion.sh (git-describe stamp)
+/Core/Inc/version.h
