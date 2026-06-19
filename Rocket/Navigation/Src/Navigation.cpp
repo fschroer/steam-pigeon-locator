@@ -136,6 +136,15 @@ void Navigation::commitMountingFrame(const Vec3f& avg_raw_accel) {
     // getSolution() reflects the new pad altitude.  Same pattern as Init().
     m_ekf.zeroPadReferenceAgl(m_ekf.getSolution().altitude_msl_m, 0.0f);
     m_solution = m_ekf.getSolution();
+
+    // Re-seed the strapdown from the freshly-remapped at-rest accel so its
+    // attitude reference matches the committed body frame (the EKF reset above
+    // does the same).  Mounting calibration only commits while stationary, so
+    // this accel is a valid gravity reference.  Without this re-seed the strapdown
+    // keeps its stale pre-calibration (identity-frame) seed and renders a wrong —
+    // e.g. inverted "pointing down" — orientation after arming.
+    m_attitude.initializeFromRestAccel(imu.accel_selected_mps2, HAL_GetTick());
+    m_attitude.updateGyroBiasAtRest(imu.gyro_rps, 1.0f);
 }
 
 bool Navigation::Init(const uint16_t output_rate_hz) {
