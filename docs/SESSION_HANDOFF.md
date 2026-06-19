@@ -2,12 +2,9 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
-## ⚠️ Resume here first — orientation convention fix awaits bench verification
-The orientation display work ended on an **unverified fix** (`8f61a1e`). Confirm it on the bench before anything else:
-- **Arm** the locator, then check the app's 3D rocket + Inc/Hdg: nose-up → points up; **roll right → display rolls right; yaw CW → display yaws CW** (i.e. roll/yaw track the *same* direction now, not mirrored).
-- Background: the **EKF `q_bn` was itself rendering wrong** (it was never the ground truth — a false premise that cost most of the convention chase). The negated-accel strapdown was closest: pitch correct, only roll+yaw mirrored. `8f61a1e` adds the two-part fix — negate accel into `quatFromAccel` (pitch) **+** Y-reflect `q → (w,−x,y,−z)` in `Navigation::getStrapdownQuat` (roll/yaw handedness, leaves tilt unchanged).
-- **Do NOT use CubeMonitor for orientation diagnostics** — acquiring many vars perturbs/stops the LoRa TX. Read values in the app instead. Full saga (every approach + why it failed) is in memory `[[ekf-role-reconsideration]]`.
-- If still off: tell me the exact axis + direction. The FR-P13 tilt is computed from the un-reflected internal attitude (reflection preserves tilt), so it's unaffected.
+## Orientation convention — RESOLVED (`8f61a1e`, bench-verified 2026-06-19)
+The strapdown drives the orientation display correctly (pitch/roll/yaw track the locator). Two-part fix: negate accel into `quatFromAccel` (pitch) **+** Y-reflect `q → (w,−x,y,−z)` in `Navigation::getStrapdownQuat` (roll/yaw handedness; leaves tilt unchanged, so the FR-P13 tilt is unaffected).
+- **Hard-won lessons — don't relitigate:** the **EKF `q_bn` was itself rendering wrong** (never the ground truth — a false premise that cost most of the convention chase); and **do NOT use CubeMonitor for orientation diagnostics** (acquiring many vars perturbs/stops the LoRa TX — read values in the app). Full saga in memory `[[ekf-role-reconsideration]]`.
 
 ## Where things are
 - **Canonical reference:** [SteamPigeon_SystemSummary.md](SteamPigeon_SystemSummary.md) (+ Appendix A tracker). **Requirements v2.1:** [SteamPigeonRequirements.md](SteamPigeonRequirements.md) — air starts (**FR-P13**) at Pri 3; **FR-P8/P9 deferred**; IDs decoupled from priority; **NFR-9** (high-rate strapdown).
@@ -16,7 +13,7 @@ The orientation display work ended on an **unverified fix** (`8f61a1e`). Confirm
 
 ## Git state
 - **`master` = `8f61a1e`, single working line** (firmware branch merged + deleted). Builds clean (0 errors). **No firmware is flight-validated**; the orientation display is mid-bench-verification (above).
-- **App repo** (`rocket-flight-manager`): #4/#5 work committed (`bd91e5a`). **Uncommitted: warning cleanup** — 36 unused-import lines removed + 5 deprecation/nullability fixes (Divider→HorizontalDivider, getParcelableExtra→IntentCompat, menuAnchor type, enumConstants?.). Compiles clean. **Needs committing** (you commit the app from Android Studio). 2 `Theme.kt` warnings (`statusBarColor`/`navigationBarColor`) left for an edge-to-edge decision.
+- **App repo** (`rocket-flight-manager`): #4/#5 committed (`bd91e5a`); warning cleanup committed (`4fe00a2`) — 36 unused imports removed + 5 deprecation/nullability fixes. 2 `Theme.kt` warnings (`statusBarColor`/`navigationBarColor`) intentionally left, pending an edge-to-edge migration decision.
 
 ## Issues
 - **Closed this session:** #1, #2 (raw-baro deploy), #11 (launch raw gate), #12 (EKF velocity guard), **#13 (EKF role → ADR-0005)**, #4 (wire cross-check), #5 (enum align).
@@ -32,12 +29,11 @@ EKF (`InsEkf15`) **retired from the real-time path** (still compiled/running, bu
 - ISM6HG256X registers **confirmed** against datasheet (`9818ecc`).
 
 ## Remaining work (priority order)
-1. **Verify the orientation fix `8f61a1e`** on the bench (top of this doc).
-2. **Commit the app warning-cleanup** (uncommitted in working tree); decide `Theme.kt` edge-to-edge migration; optionally enable AS "Optimize imports on commit" to stop import warnings recurring.
-3. **NFR-9 high-rate (≥480 Hz) gyro path** — FIFO/timer ISR, decoupled from the 20 Hz loop. Not started.
-4. **FR-P13 sustainer firing wiring** (output channel, arming interlock) — safety-critical; not started.
-5. Strapdown to own its pad gyro-bias once the EKF is fully removed (FlightManager launch/burnout detection still read `getFused()`); surface air-start status in telemetry (wire change → app coordination).
-6. Bench/flight-validate the deployment firmware (#12 guard: disarmed AGL tracks, no Spd Infinity); set **#10** tunables once flight data exists.
+1. **NFR-9 high-rate (≥480 Hz) gyro path** — FIFO/timer ISR, decoupled from the 20 Hz loop. Not started. (Orientation display is correct at 20 Hz; high-rate is needed for in-flight / air-start attitude through the boost roll.)
+2. **FR-P13 sustainer firing wiring** (output channel, arming interlock) — safety-critical; not started. Gate logic is in place (read-only, master switch OFF).
+3. Strapdown to own its pad gyro-bias once the EKF is fully removed (FlightManager launch/burnout detection still read `getFused()`); surface air-start status in telemetry (wire change → app coordination).
+4. Bench/flight-validate the deployment firmware (#12 guard: disarmed AGL tracks, no Spd Infinity); set **#10** tunables once flight data exists.
+5. Minor: decide `Theme.kt` edge-to-edge migration (2 deprecation warnings); optionally enable AS "Optimize imports on commit" to stop import warnings recurring.
 
 ## Build
 - **Locator (firmware):** CubeIDE 1.19.0 toolchain at `C:\ST\STM32CubeIDE_1.19.0\…`; headless = put its `gnu-tools-…/tools/bin` + `make.win32…/tools/bin` on PATH, then `make -C Debug`.
