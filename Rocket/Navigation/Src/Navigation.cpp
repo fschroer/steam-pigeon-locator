@@ -145,6 +145,9 @@ void Navigation::commitMountingFrame(const Vec3f& avg_raw_accel) {
     // e.g. inverted "pointing down" — orientation after arming.
     m_attitude.initializeFromRestAccel(imu.accel_selected_mps2, HAL_GetTick());
     m_attitude.updateGyroBiasAtRest(imu.gyro_rps, 1.0f);
+    // Re-capture the strapdown→EKF convention offset after this fresh seed.
+    m_conv_offset_captured_ = false;
+    m_conv_settle_count_    = 0;
 }
 
 bool Navigation::Init(const uint16_t output_rate_hz) {
@@ -374,6 +377,7 @@ bool Navigation::Update() {
         // ballistic flight, so confidence then decays with time (the FR-P13
         // attitude-freshness gate).  gyro_bias_rps borrows the EKF estimate while
         // the EKF still runs; the strapdown should own pad-bias once it is removed.
+        const bool quasi_static = !m_gps_velocity_enabled_ && IsStationary(imu, baro);
         if (!m_attitude.initialized()) {
             if (IsStationary(imu, baro)) {
                 m_attitude.initializeFromRestAccel(imu.accel_selected_mps2, now);
@@ -385,7 +389,6 @@ bool Navigation::Update() {
             // At rest the gyro reads ≈ pure bias: learn it (so integration nets
             // ~0 and the attitude holds) and nudge tilt toward gravity.  Off the
             // pad / while moving, neither runs — dead-reckon on the learned bias.
-            const bool quasi_static = !m_gps_velocity_enabled_ && IsStationary(imu, baro);
             if (quasi_static)
                 m_attitude.updateGyroBiasAtRest(imu.gyro_rps, kStrapdownBiasAlpha);
             m_attitude.propagate(imu.gyro_rps, dt_s, now);
@@ -393,27 +396,30 @@ bool Navigation::Update() {
                 m_attitude.correctTiltFromAccel(imu.accel_selected_mps2, kStrapdownTiltGain);
         }
 
-        // Convention-validation diagnostics: strapdown vs EKF orientation (deg),
-        // read live in CubeMonitor at known attitudes (ADR-0005 follow-up).
-        constexpr float kRad2Deg = 57.29577951f;
-        const Eulerf se = m_attitude.euler();
-        cm_strapdown_roll_deg  = se.roll_rad  * kRad2Deg;
-        cm_strapdown_pitch_deg = se.pitch_rad * kRad2Deg;
-        cm_strapdown_yaw_deg   = se.yaw_rad   * kRad2Deg;
-        cm_strapdown_tilt_deg  = m_attitude.tiltFromVerticalRad() * kRad2Deg;
-        cm_ekf_roll_deg  = m_solution.euler.roll_rad  * kRad2Deg;
-        cm_ekf_pitch_deg = m_solution.euler.pitch_rad * kRad2Deg;
-        cm_ekf_yaw_deg   = m_solution.euler.yaw_rad   * kRad2Deg;
-
-        // Relative rotation strapdown↔EKF. Read while STATIONARY: whichever of L
-        // (nav-frame) or R (body-frame) is constant across attitudes is the fixed
-        // convention offset to hard-code (see CubeMonitorGlobals.hpp).
+        // One-time convention bootstrap (ADR-0005): the strapdown seed convention
+        // does not match the EKF/app render convention (the strapdown rendered
+        // inverted).  Once both have settled while stationary, freeze the relative
+        // rotation qL = q_ekf ⊗ conj(q_strap) and left-apply it, so the corrected
+        // strapdown matches the (correct) EKF convention while still tracking on
+        // its own gyro.  Re-captured each arm (commitMountingFrame resets it).  If
+        // the difference is a fixed nav-frame rotation, the corrected output stays
+        // correct as the rocket rotates (verified by the bench rotation test); if
+        // it tracks wrong, the offset is not a fixed nav-frame rotation.
         const Quaternionf qs = m_attitude.quaternion();
-        const Quaternionf qs_conj{ qs.w, -qs.x, -qs.y, -qs.z };
-        const Quaternionf qL = Math::quatMultiply(m_solution.q_bn, qs_conj);
-        const Quaternionf qR = Math::quatMultiply(qs_conj, m_solution.q_bn);
-        cm_qoff_L_w = qL.w; cm_qoff_L_x = qL.x; cm_qoff_L_y = qL.y; cm_qoff_L_z = qL.z;
-        cm_qoff_R_w = qR.w; cm_qoff_R_x = qR.x; cm_qoff_R_y = qR.y; cm_qoff_R_z = qR.z;
+        if (!m_conv_offset_captured_ && m_attitude.initialized()) {
+            if (quasi_static) {
+                if (++m_conv_settle_count_ >= kConvSettleCycles) {
+                    const Quaternionf qs_conj{ qs.w, -qs.x, -qs.y, -qs.z };
+                    m_conv_offset_          = Math::quatMultiply(m_solution.q_bn, qs_conj);
+                    m_conv_offset_captured_ = true;
+                }
+            } else {
+                m_conv_settle_count_ = 0;
+            }
+        }
+        m_strapdown_q_out_ = m_conv_offset_captured_
+                           ? Math::quatMultiply(m_conv_offset_, qs)
+                           : qs;
 
         if (m_solution.altitude_agl_m > m_max_altitude_agl_m) {
             m_max_altitude_agl_m    = m_solution.altitude_agl_m;
