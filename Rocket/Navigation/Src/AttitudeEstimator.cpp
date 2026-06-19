@@ -5,10 +5,12 @@
 namespace RocketNav {
 
 void AttitudeEstimator::initializeFromRestAccel(const Vec3f& accel_mps2, uint32_t now_ms) {
-    // Seed from the accelerometer exactly as the EKF does (InsEkf15 ~line 150).
-    // The seed need not be exact: correctTiltFromAccel() converges roll/pitch to
-    // gravity each cycle using the EKF's proven method (yaw is unobservable).
-    m_q_bn           = Math::quatFromAccel(accel_mps2);
+    // Negate accel: the IMU reports specific force (+1 g "up" at rest) but
+    // quatFromAccel expects the gravity (nav-down) direction — this gets PITCH
+    // right.  The residual roll/yaw handedness (the strapdown runs in a left-
+    // handed frame) is fixed downstream by the Y-reflect in
+    // Navigation::getStrapdownQuat (ADR-0005).
+    m_q_bn           = Math::quatFromAccel(accel_mps2 * -1.0f);
     m_initialized    = true;
     m_last_update_ms = now_ms;
 }
@@ -35,22 +37,23 @@ void AttitudeEstimator::correctTiltFromAccel(const Vec3f& accel_mps2, float gain
     const float a_norm = Math::norm(accel_mps2);
     if (a_norm < 1e-6f) return;
 
-    // Verbatim method from InsEkf15::correctTiltFromAccel + injectErrorState, which
-    // renders correctly in all axes: rotate nav-down [0,0,1] into the body frame
-    // (expected gravity), cross it with the measured accel direction to get the
-    // body-frame tilt error, and apply it as a right-multiplied small-angle
-    // rotation (q ⊗ δq) — exactly how the EKF injects dx[6..8].  Corrects roll and
-    // pitch only; yaw is left to the gyro (gravity cannot observe heading).
-    //
-    // Replaces an earlier blend toward quatFromAccel(): that converged onto the
-    // seed's handedness, which rendered the attitude inverted, and negating the
-    // accel to "fix" it only mirrored roll and yaw.  Using the EKF's cross-product
-    // injection removes the convention guesswork entirely.
-    const Vec3f g_expected = Math::rotateNavToBody(m_q_bn, Vec3f{0.0f, 0.0f, 1.0f});
-    const Vec3f g_measured = accel_mps2 / a_norm;
-    const Vec3f err        = Math::cross(g_expected, g_measured);
-    const Quaternionf dq   = Math::quatFromSmallAngle(err * gain);
-    m_q_bn = Math::quatNormalize(Math::quatMultiply(m_q_bn, dq));
+    if (gain > 1.0f) gain = 1.0f;
+    // Blend toward the gravity-derived attitude (negated accel, matching the seed),
+    // nudging roll/pitch toward gravity without asserting a heading.  Sign-align to
+    // the current quaternion first (q and −q are the same rotation) for the short
+    // path, then renormalize.  The output Y-reflect (getStrapdownQuat) fixes the
+    // roll/yaw handedness; this keeps the internal attitude self-consistent so the
+    // FR-P13 tilt (which the reflect leaves unchanged) stays correct.
+    Quaternionf qa = Math::quatFromAccel(accel_mps2 * -1.0f);
+    const float d = m_q_bn.w*qa.w + m_q_bn.x*qa.x + m_q_bn.y*qa.y + m_q_bn.z*qa.z;
+    if (d < 0.0f) { qa.w = -qa.w; qa.x = -qa.x; qa.y = -qa.y; qa.z = -qa.z; }
+
+    const float k = 1.0f - gain;
+    m_q_bn = Math::quatNormalize(Quaternionf{
+        k*m_q_bn.w + gain*qa.w,
+        k*m_q_bn.x + gain*qa.x,
+        k*m_q_bn.y + gain*qa.y,
+        k*m_q_bn.z + gain*qa.z });
 }
 
 Eulerf AttitudeEstimator::euler() const {

@@ -128,12 +128,10 @@ void Communication::SendTelemetryData() {
 	msg.agl = baro_sample.altitude_m_agl;
 	// Raw NED velocity: GPS horizontal + raw-baro vertical (−d(AGL)/dt = +down).
 	msg.vel_ned_mps = Vec3f{ gps_sample.vel_n_mps, gps_sample.vel_e_mps, -baro_sample.velocity };
-	// Orientation display uses the EKF quaternion (known-good). The strapdown's
-	// body→nav convention could not be reconciled remotely (it rendered inverted/
-	// unstable); that's deferred to hands-on bench work when the FR-P13 air-start
-	// gate is brought up. The strapdown still runs for that gate (OFF, fires nothing).
-	// TODO(ADR-0005): switch to nav_.getStrapdownQuat() once the convention is fixed.
-	msg.q_bn = nav_.getFused().q_bn;
+	// Orientation = strapdown (ADR-0005). Negated accel in the estimator fixes
+	// pitch; getStrapdownQuat Y-reflects to fix the roll/yaw handedness. (The EKF
+	// q_bn was itself not rendering correctly, so this replaces it.)
+	msg.q_bn = nav_.getStrapdownQuat();
 	msg.flight_state = flight_.GetFlightState();
 
 	msg.packet_header.crc = ComputeMessageCrc(msg);

@@ -61,7 +61,14 @@ public:
     // Replaces the retired EKF for telemetry orientation and the FR-P13 air-start
     // tilt gate.  tiltFromVerticalRad() is the safety-relevant output.
     const AttitudeEstimator& attitude()  const { return m_attitude; }
-    Quaternionf getStrapdownQuat()        const { return m_attitude.quaternion(); }
+    // Y-reflect (q → (w,−x,y,−z)) the strapdown quaternion: it runs in a left-
+    // handed frame, so roll and yaw otherwise render mirrored.  The reflection
+    // negates roll and yaw and leaves pitch — hence tilt/inclination — unchanged,
+    // recovering the true attitude for the orientation display (ADR-0005).
+    Quaternionf getStrapdownQuat() const {
+        const Quaternionf q = m_attitude.quaternion();
+        return Quaternionf{ q.w, -q.x, q.y, -q.z };
+    }
     float       getTiltFromVerticalRad()  const { return m_attitude.tiltFromVerticalRad(); }
     bool        attitudeReady()           const { return m_attitude.initialized(); }
     uint32_t    attitudeLastUpdateMs()    const { return m_attitude.lastUpdateMs(); }
