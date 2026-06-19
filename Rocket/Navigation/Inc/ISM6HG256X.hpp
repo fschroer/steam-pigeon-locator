@@ -44,8 +44,7 @@ private:
     float m_gyro_lsb_per_dps = 0.14f;
 
 private:
-    // CONFIRM THESE REGISTERS AGAINST THE EXACT ISM6HG256X DATASHEET.
-    // These placeholders intentionally force confirmation before flight.
+    // Register map confirmed against the ISM6HG256X datasheet.
     static constexpr uint8_t WHO_AM_I_EXPECTED  = 0x73;
 
     static constexpr uint8_t INT1_CTRL          = 0x0D;
