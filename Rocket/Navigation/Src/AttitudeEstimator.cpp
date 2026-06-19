@@ -10,12 +10,21 @@ void AttitudeEstimator::initializeFromRestAccel(const Vec3f& accel_mps2, uint32_
     m_last_update_ms = now_ms;
 }
 
-void AttitudeEstimator::propagate(const Vec3f& gyro_rps, float dt_s,
-                                  const Vec3f& gyro_bias_rps, uint32_t now_ms) {
+void AttitudeEstimator::propagate(const Vec3f& gyro_rps, float dt_s, uint32_t now_ms) {
     m_last_update_ms = now_ms;
     if (!m_initialized || dt_s <= 0.0f) return;
-    const Vec3f omega = gyro_rps - gyro_bias_rps;
+    const Vec3f omega = gyro_rps - m_gyro_bias_rps;
     m_q_bn = Math::quatIntegrateBodyRates(m_q_bn, omega, dt_s);   // already normalized
+}
+
+void AttitudeEstimator::updateGyroBiasAtRest(const Vec3f& gyro_rps, float alpha) {
+    if (alpha <= 0.0f) return;
+    if (alpha > 1.0f) alpha = 1.0f;
+    const float k = 1.0f - alpha;
+    m_gyro_bias_rps = Vec3f{
+        k*m_gyro_bias_rps.x + alpha*gyro_rps.x,
+        k*m_gyro_bias_rps.y + alpha*gyro_rps.y,
+        k*m_gyro_bias_rps.z + alpha*gyro_rps.z };
 }
 
 void AttitudeEstimator::correctTiltFromAccel(const Vec3f& accel_mps2, float gain) {

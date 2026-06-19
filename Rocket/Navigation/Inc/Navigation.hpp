@@ -171,6 +171,8 @@ private:
     // Complementary gain for quasi-static accel tilt correction of the strapdown
     // (pad / gentle descent only).  Small: trust the gyro, nudge toward gravity.
     static constexpr float kStrapdownTiltGain = 0.02f;
+    // LPF gain for learning the strapdown gyro bias while stationary (≈1 s at 20 Hz).
+    static constexpr float kStrapdownBiasAlpha = 0.05f;
 
     NavConfig  m_cfg{};
     NavSolution m_solution{};

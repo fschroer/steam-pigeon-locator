@@ -366,11 +366,21 @@ bool Navigation::Update() {
         // attitude-freshness gate).  gyro_bias_rps borrows the EKF estimate while
         // the EKF still runs; the strapdown should own pad-bias once it is removed.
         if (!m_attitude.initialized()) {
-            if (IsStationary(imu, baro))
+            if (IsStationary(imu, baro)) {
                 m_attitude.initializeFromRestAccel(imu.accel_selected_mps2, now);
+                // Prime the bias to the current at-rest gyro so the net rate is
+                // ~0 from the first sample (no settling drift on the display).
+                m_attitude.updateGyroBiasAtRest(imu.gyro_rps, 1.0f);
+            }
         } else {
-            m_attitude.propagate(imu.gyro_rps, dt_s, m_solution.gyro_bias_rps, now);
-            if (!m_gps_velocity_enabled_ && IsStationary(imu, baro))
+            // At rest the gyro reads ≈ pure bias: learn it (so integration nets
+            // ~0 and the attitude holds) and nudge tilt toward gravity.  Off the
+            // pad / while moving, neither runs — dead-reckon on the learned bias.
+            const bool quasi_static = !m_gps_velocity_enabled_ && IsStationary(imu, baro);
+            if (quasi_static)
+                m_attitude.updateGyroBiasAtRest(imu.gyro_rps, kStrapdownBiasAlpha);
+            m_attitude.propagate(imu.gyro_rps, dt_s, now);
+            if (quasi_static)
                 m_attitude.correctTiltFromAccel(imu.accel_selected_mps2, kStrapdownTiltGain);
         }
 
