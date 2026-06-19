@@ -5,7 +5,12 @@
 namespace RocketNav {
 
 void AttitudeEstimator::initializeFromRestAccel(const Vec3f& accel_mps2, uint32_t now_ms) {
-    m_q_bn           = Math::quatFromAccel(accel_mps2);
+    // quatFromAccel expects the gravity (nav-down) direction, but the IMU reports
+    // specific force (+1 g "up", away from earth) at rest — so negate to convert.
+    // Without this the body→nav attitude is inverted and the app renders the
+    // rocket pointing down.  (The EKF tolerates the raw sign because its
+    // error-state correction converges to the right attitude regardless of seed.)
+    m_q_bn           = Math::quatFromAccel(accel_mps2 * -1.0f);
     m_initialized    = true;
     m_last_update_ms = now_ms;
 }
@@ -32,10 +37,11 @@ void AttitudeEstimator::correctTiltFromAccel(const Vec3f& accel_mps2, float gain
     if (gain > 1.0f) gain = 1.0f;
 
     // quatFromAccel resolves roll/pitch from gravity (yaw left at 0), so blending
-    // toward it nudges tilt without asserting a heading.  Sign-align to the
-    // current quaternion first (q and −q are the same rotation) to take the short
-    // way around, then renormalize.
-    Quaternionf qa = Math::quatFromAccel(accel_mps2);
+    // toward it nudges tilt without asserting a heading.  Negate accel to feed the
+    // gravity (nav-down) direction quatFromAccel expects (see initializeFromRestAccel).
+    // Sign-align to the current quaternion first (q and −q are the same rotation)
+    // to take the short way around, then renormalize.
+    Quaternionf qa = Math::quatFromAccel(accel_mps2 * -1.0f);
     const float d = m_q_bn.w*qa.w + m_q_bn.x*qa.x + m_q_bn.y*qa.y + m_q_bn.z*qa.z;
     if (d < 0.0f) { qa.w = -qa.w; qa.x = -qa.x; qa.y = -qa.y; qa.z = -qa.z; }
 
