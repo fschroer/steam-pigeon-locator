@@ -128,7 +128,12 @@ void Communication::SendTelemetryData() {
 	msg.agl = baro_sample.altitude_m_agl;
 	// Raw NED velocity: GPS horizontal + raw-baro vertical (−d(AGL)/dt = +down).
 	msg.vel_ned_mps = Vec3f{ gps_sample.vel_n_mps, gps_sample.vel_e_mps, -baro_sample.velocity };
-	msg.q_bn = nav_.getStrapdownQuat();
+	// Orientation display stays on the EKF quaternion for now: the strapdown's
+	// body→nav sign/axis convention is not yet bench-validated (it rendered the
+	// rocket inverted/mirrored). The strapdown still runs for the FR-P13 tilt gate
+	// (OFF, fires nothing), where its convention will be validated before use.
+	// TODO(ADR-0005): switch back to nav_.getStrapdownQuat() once verified on hardware.
+	msg.q_bn = nav_.getFused().q_bn;
 	msg.flight_state = flight_.GetFlightState();
 
 	msg.packet_header.crc = ComputeMessageCrc(msg);
