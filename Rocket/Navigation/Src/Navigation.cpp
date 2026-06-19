@@ -388,7 +388,30 @@ bool Navigation::Update() {
             // pad / while moving, neither runs — dead-reckon on the learned bias.
             if (quasi_static)
                 m_attitude.updateGyroBiasAtRest(imu.gyro_rps, kStrapdownBiasAlpha);
-            m_attitude.propagate(imu.gyro_rps, dt_s, now);
+
+            // ── High-rate propagation (NFR-9) ─────────────────────────────────
+            // Drain the 480 Hz gyro FIFO and integrate each sample at the batch
+            // period, so the strapdown resolves the boost roll between 20 Hz
+            // loops instead of in one coarse step.  FIFO words are raw sensor
+            // frame → remap each before integrating.  Falls back to a single
+            // loop-rate step when the FIFO is empty/unconfigured, or during
+            // NAV_TEST replay (one injected sample per loop, no hardware FIFO).
+            bool propagated = false;
+#ifdef NAV_TEST
+            if (!m_test_active_) {
+#endif
+                Vec3f fifo_gyro[kStrapdownFifoDrainMax];
+                const uint16_t fn = m_imu.drainFifoGyro(fifo_gyro, kStrapdownFifoDrainMax);
+                const float dt_fifo = 1.0f / kImuFifoRateHz;
+                for (uint16_t i = 0; i < fn; ++i)
+                    m_attitude.propagate(remapVec(fifo_gyro[i]), dt_fifo, now);
+                propagated = (fn > 0);
+#ifdef NAV_TEST
+            }
+#endif
+            if (!propagated)
+                m_attitude.propagate(imu.gyro_rps, dt_s, now);
+
             if (quasi_static)
                 m_attitude.correctTiltFromAccel(imu.accel_selected_mps2, kStrapdownTiltGain);
         }

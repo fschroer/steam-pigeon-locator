@@ -42,6 +42,10 @@ bool ISM6HG256X::init(float sample_rate_hz, ImuAccelSource accel_source) {
         return false;
     }
 
+    // High-rate gyro FIFO (NFR-9).  Best-effort: a failure here must not brick
+    // the (working) 20 Hz output-register path, so it does not gate init success.
+    m_fifo_ok = configureFifo();
+
     m_status.initialized = true;
     m_status.health = SensorHealth::Ok;
     return true;
@@ -202,6 +206,56 @@ bool ISM6HG256X::readSample(ImuSample& out) {
     m_status.data_valid = true;
     m_status.health = SensorHealth::Ok;
     return true;
+}
+
+// ── High-rate gyro FIFO (NFR-9) ─────────────────────────────────────────────
+bool ISM6HG256X::configureFifo() {
+    // Batch only the gyro (the strapdown integrates rates; accel is read at the
+    // loop rate for the quasi-static tilt correction), then run the FIFO in
+    // continuous mode so the newest 480 Hz samples are always available to drain.
+    bool ok = true;
+    ok &= writeReg(FIFO_CTRL3, static_cast<uint8_t>((FIFO_BDR_GY_480 << 4) | FIFO_BDR_XL_OFF));
+    ok &= writeReg(FIFO_CTRL4, FIFO_MODE_CONTINUOUS);
+    return ok;
+}
+
+uint16_t ISM6HG256X::fifoUnreadCount() {
+    if (!m_fifo_ok) return 0;
+    uint8_t s1 = 0, s2 = 0;
+    if (!readReg(FIFO_STATUS1, s1)) return 0;
+    if (!readReg(FIFO_STATUS2, s2)) return 0;
+    // DIFF_FIFO = number of unread words; low byte in STATUS1, high bits in
+    // STATUS2[1:0].  (Upper STATUS2 bits are WTM/OVR/FULL flags — masked out.)
+    return static_cast<uint16_t>(((static_cast<uint16_t>(s2) & 0x03u) << 8) | s1);
+}
+
+uint16_t ISM6HG256X::drainFifoGyro(Vec3f* out, uint16_t max_samples) {
+    if (!m_fifo_ok || out == nullptr || max_samples == 0) return 0;
+
+    uint16_t words = fifoUnreadCount();
+    if (words == 0) return 0;
+    if (words > max_samples) words = max_samples;  // leave the remainder for next drain
+
+    uint16_t n = 0;
+    while (words > 0 && n < max_samples) {
+        uint8_t chunk = (words > kFifoChunkWords) ? kFifoChunkWords
+                                                  : static_cast<uint8_t>(words);
+        uint8_t buf[kFifoChunkWords * 7];
+        // Burst-read tag+data words: auto-increment past the tag continues to
+        // pull successive FIFO words from the data-out registers.
+        if (!readRegs(FIFO_DATA_OUT_TAG, buf, static_cast<uint16_t>(chunk * 7))) break;
+
+        for (uint8_t i = 0; i < chunk && n < max_samples; ++i) {
+            const uint8_t* w = &buf[i * 7];
+            if ((w[0] >> 3) != FIFO_TAG_GYRO) continue;   // skip any non-gyro word
+            const int16_t gx = static_cast<int16_t>((w[2] << 8) | w[1]);
+            const int16_t gy = static_cast<int16_t>((w[4] << 8) | w[3]);
+            const int16_t gz = static_cast<int16_t>((w[6] << 8) | w[5]);
+            out[n++] = convertGyroRawToRps(gx, gy, gz);
+        }
+        words -= chunk;
+    }
+    return n;
 }
 
 bool ISM6HG256X::recalibrateGyroAtRest(const Vec3f& gyro_sample_rps, float alpha) {

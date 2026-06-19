@@ -74,13 +74,16 @@ constexpr Note PowerOn[] = {
 };
 
 constexpr Note Arming[] = {
+		{ Tone::C8, 2, 1 },
 		{ Tone::Cs8, 2, 1 },
-		{ Tone::Rest, 1, 0 },
-		{ Tone::Cs8, 2, 1 },
-		{ Tone::Rest, 34, 0 },
+		{ Tone::Rest, 36, 0 },
 };
 
 constexpr Note Disarming[] = {
+		{ Tone::C8, 2, 1 },
+		{ Tone::Cs8, 2, 1 },
+		{ Tone::Rest, 1, 0 },
+		{ Tone::C8, 2, 1 },
 		{ Tone::Cs8, 2, 1 },
 };
 

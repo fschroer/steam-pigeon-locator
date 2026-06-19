@@ -181,6 +181,15 @@ private:
     // LPF gain for learning the strapdown gyro bias while stationary (≈1 s at 20 Hz).
     static constexpr float kStrapdownBiasAlpha = 0.05f;
 
+    // ── High-rate strapdown propagation (NFR-9) ───────────────────────────────
+    // The gyro FIFO is batched at this rate; each drained sample is integrated at
+    // dt = 1/kImuFifoRateHz, decoupled from the 20 Hz loop.  Keep in sync with the
+    // driver's FIFO_BDR_GY_480 configuration.
+    static constexpr float    kImuFifoRateHz          = 480.0f;
+    // Max gyro words drained per loop.  480 Hz × 50 ms = 24; 48 leaves jitter
+    // margin so the FIFO never backs up under loop-time excursions (NFR-3).
+    static constexpr uint16_t kStrapdownFifoDrainMax  = 48;
+
     NavConfig  m_cfg{};
     NavSolution m_solution{};
 
