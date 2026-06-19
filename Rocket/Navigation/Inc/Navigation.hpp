@@ -61,7 +61,7 @@ public:
     // Replaces the retired EKF for telemetry orientation and the FR-P13 air-start
     // tilt gate.  tiltFromVerticalRad() is the safety-relevant output.
     const AttitudeEstimator& attitude()  const { return m_attitude; }
-    Quaternionf getStrapdownQuat()        const { return m_strapdown_q_out_; }
+    Quaternionf getStrapdownQuat()        const { return m_attitude.quaternion(); }
     float       getTiltFromVerticalRad()  const { return m_attitude.tiltFromVerticalRad(); }
     bool        attitudeReady()           const { return m_attitude.initialized(); }
     uint32_t    attitudeLastUpdateMs()    const { return m_attitude.lastUpdateMs(); }
@@ -173,14 +173,6 @@ private:
     static constexpr float kStrapdownTiltGain = 0.02f;
     // LPF gain for learning the strapdown gyro bias while stationary (≈1 s at 20 Hz).
     static constexpr float kStrapdownBiasAlpha = 0.05f;
-
-    // One-time strapdown→EKF convention bootstrap (ADR-0005).  m_strapdown_q_out_
-    // is the convention-corrected strapdown quaternion sent as telemetry q_bn.
-    Quaternionf m_strapdown_q_out_{};
-    Quaternionf m_conv_offset_{};                  // frozen q_ekf ⊗ conj(q_strap)
-    bool        m_conv_offset_captured_ = false;
-    uint16_t    m_conv_settle_count_    = 0;
-    static constexpr uint16_t kConvSettleCycles = 40;   // ~2 s stationary at 20 Hz
 
     NavConfig  m_cfg{};
     NavSolution m_solution{};

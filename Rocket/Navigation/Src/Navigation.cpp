@@ -145,9 +145,6 @@ void Navigation::commitMountingFrame(const Vec3f& avg_raw_accel) {
     // e.g. inverted "pointing down" — orientation after arming.
     m_attitude.initializeFromRestAccel(imu.accel_selected_mps2, HAL_GetTick());
     m_attitude.updateGyroBiasAtRest(imu.gyro_rps, 1.0f);
-    // Re-capture the strapdown→EKF convention offset after this fresh seed.
-    m_conv_offset_captured_ = false;
-    m_conv_settle_count_    = 0;
 }
 
 bool Navigation::Init(const uint16_t output_rate_hz) {
@@ -395,31 +392,6 @@ bool Navigation::Update() {
             if (quasi_static)
                 m_attitude.correctTiltFromAccel(imu.accel_selected_mps2, kStrapdownTiltGain);
         }
-
-        // One-time convention bootstrap (ADR-0005): the strapdown seed convention
-        // does not match the EKF/app render convention (the strapdown rendered
-        // inverted).  Once both have settled while stationary, freeze the relative
-        // rotation qL = q_ekf ⊗ conj(q_strap) and left-apply it, so the corrected
-        // strapdown matches the (correct) EKF convention while still tracking on
-        // its own gyro.  Re-captured each arm (commitMountingFrame resets it).  If
-        // the difference is a fixed nav-frame rotation, the corrected output stays
-        // correct as the rocket rotates (verified by the bench rotation test); if
-        // it tracks wrong, the offset is not a fixed nav-frame rotation.
-        const Quaternionf qs = m_attitude.quaternion();
-        if (!m_conv_offset_captured_ && m_attitude.initialized()) {
-            if (quasi_static) {
-                if (++m_conv_settle_count_ >= kConvSettleCycles) {
-                    const Quaternionf qs_conj{ qs.w, -qs.x, -qs.y, -qs.z };
-                    m_conv_offset_          = Math::quatMultiply(m_solution.q_bn, qs_conj);
-                    m_conv_offset_captured_ = true;
-                }
-            } else {
-                m_conv_settle_count_ = 0;
-            }
-        }
-        m_strapdown_q_out_ = m_conv_offset_captured_
-                           ? Math::quatMultiply(m_conv_offset_, qs)
-                           : qs;
 
         if (m_solution.altitude_agl_m > m_max_altitude_agl_m) {
             m_max_altitude_agl_m    = m_solution.altitude_agl_m;
