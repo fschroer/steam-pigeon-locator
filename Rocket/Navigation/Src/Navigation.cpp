@@ -405,6 +405,16 @@ bool Navigation::Update() {
         cm_ekf_pitch_deg = m_solution.euler.pitch_rad * kRad2Deg;
         cm_ekf_yaw_deg   = m_solution.euler.yaw_rad   * kRad2Deg;
 
+        // Relative rotation strapdown↔EKF. Read while STATIONARY: whichever of L
+        // (nav-frame) or R (body-frame) is constant across attitudes is the fixed
+        // convention offset to hard-code (see CubeMonitorGlobals.hpp).
+        const Quaternionf qs = m_attitude.quaternion();
+        const Quaternionf qs_conj{ qs.w, -qs.x, -qs.y, -qs.z };
+        const Quaternionf qL = Math::quatMultiply(m_solution.q_bn, qs_conj);
+        const Quaternionf qR = Math::quatMultiply(qs_conj, m_solution.q_bn);
+        cm_qoff_L_w = qL.w; cm_qoff_L_x = qL.x; cm_qoff_L_y = qL.y; cm_qoff_L_z = qL.z;
+        cm_qoff_R_w = qR.w; cm_qoff_R_x = qR.x; cm_qoff_R_y = qR.y; cm_qoff_R_z = qR.z;
+
         if (m_solution.altitude_agl_m > m_max_altitude_agl_m) {
             m_max_altitude_agl_m    = m_solution.altitude_agl_m;
             m_last_increase_time_ms = m_solution.timestamp_ms;
