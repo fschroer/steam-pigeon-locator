@@ -393,6 +393,18 @@ bool Navigation::Update() {
                 m_attitude.correctTiltFromAccel(imu.accel_selected_mps2, kStrapdownTiltGain);
         }
 
+        // Convention-validation diagnostics: strapdown vs EKF orientation (deg),
+        // read live in CubeMonitor at known attitudes (ADR-0005 follow-up).
+        constexpr float kRad2Deg = 57.29577951f;
+        const Eulerf se = m_attitude.euler();
+        cm_strapdown_roll_deg  = se.roll_rad  * kRad2Deg;
+        cm_strapdown_pitch_deg = se.pitch_rad * kRad2Deg;
+        cm_strapdown_yaw_deg   = se.yaw_rad   * kRad2Deg;
+        cm_strapdown_tilt_deg  = m_attitude.tiltFromVerticalRad() * kRad2Deg;
+        cm_ekf_roll_deg  = m_solution.euler.roll_rad  * kRad2Deg;
+        cm_ekf_pitch_deg = m_solution.euler.pitch_rad * kRad2Deg;
+        cm_ekf_yaw_deg   = m_solution.euler.yaw_rad   * kRad2Deg;
+
         if (m_solution.altitude_agl_m > m_max_altitude_agl_m) {
             m_max_altitude_agl_m    = m_solution.altitude_agl_m;
             m_last_increase_time_ms = m_solution.timestamp_ms;
