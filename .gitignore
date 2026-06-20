@@ -2,3 +2,6 @@
 
 # Generated at build time by Scripts/GenVersion.sh (git-describe stamp)
 /Core/Inc/version.h
+
+# IDE scanner-discovery cache (machine-specific churn)
+/.settings/language.settings.xml
