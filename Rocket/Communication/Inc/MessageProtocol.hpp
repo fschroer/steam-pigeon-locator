@@ -20,7 +20,12 @@ constexpr uint16_t kCrc16Key = 0xFFFF;   // standard initial value
 // silent for kAckDeferMs, so the ACK is only sent once the locator's radio
 // is idle and listening.  kRetxTimeoutMs must exceed the full burst time +
 // deferral + ACK airtime (see Communication.hpp for the budget).
-static constexpr uint16_t kWindowSize = 4;
+//
+// Kept a whole multiple of kParityGroupSize so each burst contains complete
+// parity groups (window 8 = 2 groups).  Larger windows amortise the per-ACK
+// overhead (fewer ACK round-trips per transfer) at the cost of a longer burst,
+// which is why kRetxTimeoutMs is sized against it.
+static constexpr uint16_t kWindowSize = 8;
 static constexpr uint16_t kParityGroupSize = 4;
 
 // Message type for the packet header

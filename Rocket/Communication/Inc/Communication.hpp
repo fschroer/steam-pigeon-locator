@@ -169,14 +169,16 @@ private:
 	// in MessageProtocol.hpp and are intentionally not redefined here.
 
 	// Milliseconds before an unacknowledged sent packet is eligible for
-	// retransmission.  With burst-with-deferred-ACK the budget is:
-	//   burst TX  : kWindowSize × ~430 ms/packet  ≈ 1720 ms  (4 data pkts)
-	//   parity TX :                                ≈  430 ms  (1 parity pkt)
+	// retransmission.  With burst-with-deferred-ACK the budget is (kWindowSize 8,
+	// 2 parity groups per burst):
+	//   burst TX  : kWindowSize × ~430 ms/packet  ≈ 3440 ms  (8 data pkts)
+	//   parity TX : 2 × ~430 ms                    ≈  860 ms  (2 parity pkts)
 	//   ACK defer : kAckDeferMs in receiver        =  600 ms
 	//   ACK airtime (42-byte pkt at SF7)           ≈   50 ms
-	//   total                                      ≈ 2800 ms
-	// kRetxTimeoutMs must exceed this value.  4000 ms gives comfortable margin.
-	static constexpr uint32_t kRetxTimeoutMs = 4000;
+	//   total                                      ≈ 4950 ms
+	// kRetxTimeoutMs must exceed this value so packets still pending their
+	// cumulative ACK are not mistaken for lost mid-burst.  7000 ms gives margin.
+	static constexpr uint32_t kRetxTimeoutMs = 7000;
 
 	// Maximum number of packets in a single transfer.
 	// Sized to match the 256-bit ACK bitmap in FlightDataAck.
