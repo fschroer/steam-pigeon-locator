@@ -141,6 +141,13 @@ static FlightArchive::FlightSample MakeSample(uint32_t i)
     else if (i < 200)  s.flight_state = static_cast<uint8_t>(FlightStates::Noseover);
     else               s.flight_state = static_cast<uint8_t>(FlightStates::Landed);
 
+    // NFR-9 strapdown attitude (packed int16) — distinctive, in-range per sample.
+    s.tilt_cdeg   = static_cast<int16_t>(i % 18001u);              // 0..180.00°
+    s.quat_q15[0] = static_cast<int16_t>(32767 - static_cast<int>(i % 1000u));
+    s.quat_q15[1] = static_cast<int16_t>(static_cast<int>(i % 655u) * 50);
+    s.quat_q15[2] = static_cast<int16_t>(-static_cast<int>(i % 655u) * 50);
+    s.quat_q15[3] = static_cast<int16_t>(i % 32768u);
+
     return s;
 }
 
@@ -157,7 +164,12 @@ static void CheckSampleMatch(const FlightArchive::FlightSample& got,
            && vec3Eq(got.gyro,                      expected.gyro)
            && doubleEq(got.lat_rad,                 expected.lat_rad)
            && doubleEq(got.lon_rad,                 expected.lon_rad)
-           && (got.flight_state                == expected.flight_state);
+           && (got.flight_state                == expected.flight_state)
+           && (got.tilt_cdeg                   == expected.tilt_cdeg)
+           && (got.quat_q15[0] == expected.quat_q15[0])
+           && (got.quat_q15[1] == expected.quat_q15[1])
+           && (got.quat_q15[2] == expected.quat_q15[2])
+           && (got.quat_q15[3] == expected.quat_q15[3]);
 
     if (!ok) {
         printf("  FAIL  sample[%u] field mismatch\n", index);

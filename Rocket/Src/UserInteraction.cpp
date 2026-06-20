@@ -600,7 +600,13 @@ void UserInteraction::ExportData(uint16_t archive_position) {
 						static_cast<uint32_t>(sample_buffer[i].oc_start_us), ",",
 						static_cast<uint32_t>(sample_buffer[i].oc_end_us), ",",
 						static_cast<uint32_t>(sample_buffer[i].process_start_us), ",",
-						static_cast<uint32_t>(sample_buffer[i].process_dur_us), crlf_);
+						static_cast<uint32_t>(sample_buffer[i].process_dur_us), ",",
+						// NFR-9 strapdown attitude — decode packed int16 back to units.
+						Fmt(sample_buffer[i].tilt_cdeg / 100.0f, 0, 2), ",",       // tilt-from-vertical, deg
+						Fmt(sample_buffer[i].quat_q15[0] / 32767.0f, 0, 4), ",",   // q_w
+						Fmt(sample_buffer[i].quat_q15[1] / 32767.0f, 0, 4), ",",   // q_x
+						Fmt(sample_buffer[i].quat_q15[2] / 32767.0f, 0, 4), ",",   // q_y
+						Fmt(sample_buffer[i].quat_q15[3] / 32767.0f, 0, 4), crlf_);// q_z
 		    }
 		    start += got;
 		}

@@ -64,12 +64,24 @@ namespace FlightArchive
 		uint16_t oc_end_us;        // TIM2->CNT lower 16 bits at second OCCallback exit (offset 63, +2)
 		uint16_t process_start_us; // TIM2->CNT lower 16 bits at ProcessRocketEvents entry (offset 65, +2)
 		uint16_t process_dur_us;   // ProcessRocketEvents duration µs from previous cycle  (offset 67, +2)
-		uint8_t  _pad[3];          // pad to maintain struct size as multiple of 4          (offset 69, +3 = 72)
+		// ── NFR-9 strapdown attitude (ARCHIVE_VERSION 5) ─────────────────────────
+		// Packed int16 to fit the flash budget — full float (20 B) overflowed the
+		// 10-record archive region.  Decode in the app:
+		//   tilt_deg   = tilt_cdeg / 100.0          (tilt-from-launch-vertical, 0..180°)
+		//   q_{w,x,y,z}= quat_q15[i] / 32767.0      (Y-reflected strapdown quaternion)
+		int16_t  tilt_cdeg;        // tilt-from-vertical, 0.01°/LSB (0..18000)            (offset 69, +2)
+		int16_t  quat_q15[4];      // strapdown quaternion w,x,y,z, q × 32767             (offset 71, +8 = 79)
+		uint8_t  _pad[1];          // pad struct size to a multiple of 4                  (offset 79, +1 = 80)
 	};
 
 #pragma pack(pop)
 
     static_assert(IsSerializable<FlightSample>(), "ExampleFlightSample must be serializable.");
+    // Lock the on-flash layout: 80 B → 6 samples / 512 B chunk, and the 10-record
+    // archive region fits the 8.32 MB flash with ~200 KB headroom.  Growing this
+    // drops samples/chunk and can overflow the region (Archive::Init() would then
+    // fail and disable recording) — and changes the wire format the app parses.
+    static_assert(sizeof(FlightSample) == 80, "FlightSample layout changed — re-check flash capacity AND the app archive parser, and bump ARCHIVE_VERSION.");
 
     using ExampleEventStats = EventStatTraits<Statistic, 8u>;
 }

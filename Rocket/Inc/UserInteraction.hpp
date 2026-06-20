@@ -109,7 +109,7 @@ private:
   const char* data_erase_progress_text_ = "\r\nErasing all flight memory, please wait...\r\n\0";
   const char* data_erase_done_text_ = "\r\nAll flight memory erased.\r\n\0";
   const char* data_cancel_text_ = "\r\nCancelled.\r\n\0";
-  const char* export_header_text_ = "time_ms,raw_baro_agl_m,fused_agl_m,raw_baro_vel_mps,fused_vspeed_mps,accel_x_g,accel_y_g,accel_z_g,gyro_x_dps,gyro_y_dps,gyro_z_dps,lat_deg,lon_deg,flight_state,oc_start_us,oc_end_us,process_start_us,process_dur_us\0";
+  const char* export_header_text_ = "time_ms,raw_baro_agl_m,fused_agl_m,raw_baro_vel_mps,fused_vspeed_mps,accel_x_g,accel_y_g,accel_z_g,gyro_x_dps,gyro_y_dps,gyro_z_dps,lat_deg,lon_deg,flight_state,oc_start_us,oc_end_us,process_start_us,process_dur_us,tilt_deg,q_w,q_x,q_y,q_z\0";
 
   const char* test_menu_intro_ = "Rocket Locator Test Menu\r\n\r\n\0";
   const char* test_deploy1_text_ = "1) Test Deployment Channel 1\r\n\0";

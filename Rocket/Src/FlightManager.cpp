@@ -578,7 +578,8 @@ void FlightManager::UpdateFlightState() {
 
     if (flight_state_ >= FlightStates::Launched && flight_state_ < FlightStates::Landed) {
         BaroSample baro_raw = nav_.getRawBaro();
-        archive_.WriteData(flight_time_ms, nav_solution, baro_raw.altitude_m_agl, baro_raw.velocity, flight_state_, m_timing_diag_);
+        archive_.WriteData(flight_time_ms, nav_solution, baro_raw.altitude_m_agl, baro_raw.velocity, flight_state_, m_timing_diag_,
+                           nav_.getTiltFromVerticalRad(), nav_.getStrapdownQuat());
         flight_time_ms += 1000 / SAMPLES_PER_SECOND;
         // Force-close the flight once the archive record is full so the landing
         // timestamp is never larger than the recorded data span.

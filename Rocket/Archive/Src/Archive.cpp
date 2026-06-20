@@ -10,6 +10,24 @@ constexpr SystemFlashLayout layout = MakeSystemFlashLayout(8u * 1024u * 1024u, /
 32u * 1024u         // runtime metadata region
 		);
 
+// ── int16 packers for the NFR-9 strapdown attitude fields (ARCHIVE_VERSION 5) ──
+// Round-to-nearest with saturation; no <cmath> dependency.
+namespace {
+    int16_t PackQ15(float v) {                  // quaternion component, v ∈ [-1,1]
+        float s = v * 32767.0f;
+        s += (s >= 0.0f) ? 0.5f : -0.5f;
+        if (s >  32767.0f) s =  32767.0f;
+        if (s < -32768.0f) s = -32768.0f;
+        return static_cast<int16_t>(s);
+    }
+    int16_t PackTiltCdeg(float rad) {           // tilt-from-vertical, 0.01°/LSB, non-negative
+        float s = rad * (18000.0f / 3.14159265358979f) + 0.5f;
+        if (s >  32767.0f) s =  32767.0f;
+        if (s <      0.0f) s =      0.0f;
+        return static_cast<int16_t>(s);
+    }
+}
+
 FlightArchive::PersistentSettingsJournal::Config Archive::MakePersistentStore() {
 	FlightArchive::PersistentSettingsJournal::Config persistent_cfg { };
 	persistent_cfg.regionBaseAddress = layout.persistentSettingsBaseAddress;
@@ -170,7 +188,8 @@ bool Archive::SaveLocatorSettings(RocketPersistentSettings &locator_settings) {
 }
 
 bool Archive::WriteData(uint32_t flight_time_ms, const NavSolution &nav_solution, const float raw_baro_altitude_agl,
-		const float raw_baro_velocity, FlightStates flight_state, const TimingDiag &timing) {
+		const float raw_baro_velocity, FlightStates flight_state, const TimingDiag &timing,
+		float tilt_rad, const Quaternionf &strapdown_quat) {
 	FlightArchive::FlightSample s { };
 	s.timestamp_ms = flight_time_ms;
 	s.raw_baro_altitude_agl = raw_baro_altitude_agl;
@@ -186,6 +205,12 @@ bool Archive::WriteData(uint32_t flight_time_ms, const NavSolution &nav_solution
 	s.oc_end_us        = timing.oc_end_us;
 	s.process_start_us = timing.process_start_us;
 	s.process_dur_us   = timing.process_dur_us;
+	// NFR-9 strapdown attitude, packed int16 (ARCHIVE_VERSION 5).
+	s.tilt_cdeg   = PackTiltCdeg(tilt_rad);
+	s.quat_q15[0] = PackQ15(strapdown_quat.w);
+	s.quat_q15[1] = PackQ15(strapdown_quat.x);
+	s.quat_q15[2] = PackQ15(strapdown_quat.y);
+	s.quat_q15[3] = PackQ15(strapdown_quat.z);
 	return archive_.WriteFlightDataSample(record_id_, s);
 }
 

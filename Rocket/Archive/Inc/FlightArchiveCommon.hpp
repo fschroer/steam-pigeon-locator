@@ -7,7 +7,7 @@
 namespace FlightArchive
 {
     static constexpr uint32_t ARCHIVE_MAGIC      = 0x46524152u; // FRAR
-    static constexpr uint16_t ARCHIVE_VERSION    = 0x0004u;
+    static constexpr uint16_t ARCHIVE_VERSION    = 0x0005u; // v5: + int16 strapdown tilt & quaternion (NFR-9)
     static constexpr uint16_t INVALID_RECORD_ID  = 0xFFFFu;
 
     static constexpr uint16_t SAMPLES_PER_SEC    = 20u;

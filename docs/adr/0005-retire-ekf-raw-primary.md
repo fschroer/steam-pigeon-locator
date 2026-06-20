@@ -76,3 +76,5 @@ The NFR-9 high-rate strapdown (Decision 3) is **implemented and bench-confirmed 
 - **Stack discipline:** `Navigation::Update()` sits in the deepest periodic call chain on a 2 KB stack; the drain uses a small (12-word) batch buffer — a large local buffer overflows the stack. Verify `Update()`'s `.su` frame stays well under budget if this path changes.
 
 The strapdown rate, FIFO health (no overrun), and integration timebase are bench-verified; **what remains is behavioural verification** — that tilt-from-vertical tracks correctly through rotation and the FR-P13 gate reads as intended (read values in-app, not CubeMonitor). FR-P13 firing-output wiring remains deferred (master switch OFF).
+
+To feed that verification (and [#14](https://github.com/fschroer/steam-pigeon-locator/issues/14)/[#15](https://github.com/fschroer/steam-pigeon-locator/issues/15)), the strapdown **tilt and quaternion are now logged per sample** to the flight archive (packed int16; `ARCHIVE_VERSION` 5) and dumped via the UART CSV export. The LoRa flight-profile format to the app is unchanged (its codec packs only timestamp/accel/gyro), so this is locator-side only.
