@@ -66,6 +66,7 @@ void UART_Error_Callback(void);
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart);
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim);
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin);
+uint32_t Pps_GetTim2TicksPerSec(void);
 
 /* USER CODE END EFP */
 

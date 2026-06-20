@@ -27,6 +27,11 @@ public:
     // Number of unread words currently in the FIFO (gyro-only batching ⇒ words).
     uint16_t fifoUnreadCount();
 
+    // Discard all buffered FIFO words (bypass → continuous, the datasheet's FIFO
+    // reset).  Call when (re)seeding the strapdown so integration starts from the
+    // seed instead of replaying stale pre-seed rotation.  No-op if unconfigured.
+    void fifoFlush();
+
     // Drain up to max_samples gyro words from the FIFO into out[] as bias-
     // corrected body rates [rad/s], oldest first.  Returns the count written.
     // Leaves any remainder beyond max_samples for the next call.  Caller applies
@@ -92,28 +97,36 @@ private:
     static constexpr uint8_t FS_XL_HG           = 0b100;  // ±256 Hz
     static constexpr uint8_t LPF1_G_BW          = 0b000; // Gyroscope LPF1 + LPF2 bandwidth selection, dependent on ODR
     static constexpr uint8_t FS_G               = 0b101; // ±4000 dps
+    static constexpr uint8_t OP_MODE_G          = 0b000; // gyro high-performance mode
+    // Gyro ODR for the high-rate strapdown (NFR-9): 480 Hz, decoupled from the
+    // 20 Hz loop/output rate.  ODR_G = 1000b = 480 Hz (datasheet Table 57,
+    // confirmed by direct read), matching FIFO_BDR_GY_480.
+    static constexpr uint8_t ODR_G_480          = 0b1000; // gyro ODR = 480 Hz (Tbl 57)
 
     // ── FIFO block (NFR-9 high-rate gyro path) ───────────────────────────────
-    // ⚠ DATASHEET-CONFIRM PENDING: the addresses/encodings below follow the ST
-    // iNEMO (LSM6-family) FIFO interface the ISM6HG256X belongs to, but unlike
-    // the rest of this map (datasheet-confirmed, 9818ecc) the FIFO block has NOT
-    // yet been checked against the ISM6HG256X datasheet.  Confirm before flight.
-    // Config is best-effort and additive — if these are wrong the FIFO simply
-    // stays empty and the strapdown falls back to the 20 Hz output-register path.
+    // Datasheet-confirmed against ISM6HG256X DS15034 Rev 2 (Tables 39/40 BDR,
+    // 41/42 FIFO mode, 78/79/80/81 status, 231/232 tag).  Config is best-effort
+    // and additive — on any write failure the FIFO stays empty and the strapdown
+    // falls back to the 20 Hz output-register path.
     static constexpr uint8_t FIFO_CTRL3         = 0x09; // BDR_GY[7:4] | BDR_XL[3:0]
-    static constexpr uint8_t FIFO_CTRL4         = 0x0A; // FIFO_MODE[2:0]
+    static constexpr uint8_t FIFO_CTRL4         = 0x0A; // FIFO_MODE[2:0] in [2:0]
     static constexpr uint8_t FIFO_STATUS1       = 0x1B; // DIFF_FIFO[7:0]
-    static constexpr uint8_t FIFO_STATUS2       = 0x1C; // DIFF_FIFO[9:8] in [1:0]
-    static constexpr uint8_t FIFO_DATA_OUT_TAG  = 0x78; // tag byte, then X/Y/Z (6 B)
+    static constexpr uint8_t FIFO_STATUS2       = 0x1C; // DIFF_FIFO_8 in bit 0
+    static constexpr uint8_t FIFO_DATA_OUT_TAG  = 0x78; // tag byte, then X/Y/Z (6 B) to 0x7E
 
-    static constexpr uint8_t FIFO_BDR_GY_480    = 0b1000; // gyro batch data rate = 480 Hz
+    // BDR_GY = 1001b (= 960 Hz per Tbl 40), deliberately set ABOVE the gyro ODR
+    // (1000b = 480 Hz, Tbl 57).  EMPIRICAL: setting BDR == ODR (both 1000b/480)
+    // batched at only HALF rate — GPS/TIM2 measured 232 Hz; setting BDR one notch
+    // above (1001b) captured every 480 Hz sample (GPS-confirmed ~480 Hz, no
+    // duplication — ODR caps the stream).  The datasheet documents no BDR-vs-ODR
+    // rule for this; the cause of the BDR==ODR halving is unconfirmed (issue #14),
+    // so do NOT "simplify" this back to 1000b.  (The constant name reflects the
+    // achieved 480 Hz stream, not the Tbl-40 label of the code.)
+    static constexpr uint8_t FIFO_BDR_GY_480    = 0b1001; // → 480 Hz stream (BDR > ODR)
     static constexpr uint8_t FIFO_BDR_XL_OFF    = 0b0000; // accel not batched (strapdown is gyro-only)
-    static constexpr uint8_t FIFO_MODE_CONTINUOUS = 0b110; // continuous (stream) mode
-    static constexpr uint8_t FIFO_TAG_GYRO      = 0x01; // TAG_SENSOR for gyro (uncompressed)
-
-    // Words drained per SPI burst (7 B each: 1 tag + 6 data).  480 Hz over a
-    // 50 ms loop ≈ 24 words; 32 covers that with jitter margin in one burst.
-    static constexpr uint8_t kFifoChunkWords    = 32;
+    static constexpr uint8_t FIFO_MODE_BYPASS   = 0b000; // FIFO_MODE = 000b → bypass (empties FIFO)
+    static constexpr uint8_t FIFO_MODE_CONTINUOUS = 0b110; // FIFO_MODE = 110b → continuous (stream)
+    static constexpr uint8_t FIFO_TAG_GYRO      = 0x01;   // TAG_SENSOR = 0x01 → Gyroscope NC
 };
 
 }
