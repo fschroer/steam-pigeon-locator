@@ -186,9 +186,33 @@ private:
     // dt = 1/kImuFifoRateHz, decoupled from the 20 Hz loop.  Keep in sync with the
     // driver's FIFO_BDR_GY_480 configuration.
     static constexpr float    kImuFifoRateHz          = 480.0f;
-    // Max gyro words drained per loop.  480 Hz × 50 ms = 24; 48 leaves jitter
-    // margin so the FIFO never backs up under loop-time excursions (NFR-3).
-    static constexpr uint16_t kStrapdownFifoDrainMax  = 48;
+    // The FIFO is drained in small batches that are integrated immediately, so
+    // the per-call buffer stays tiny on the stack: Navigation::Update() sits in
+    // the deepest periodic call chain on a 2 KB stack, and a large (e.g. 48×
+    // Vec3f = 576 B) buffer overflows it.  Batch = 12 words = 144 B.  Update()
+    // loops the drain until the FIFO empties, so total drain capacity per loop
+    // (kStrapdownFifoBatch × kStrapdownFifoMaxBatches) stays well above the
+    // ~24 words/loop fill rate (480 Hz × 50 ms) with no large allocation.
+    static constexpr uint16_t kStrapdownFifoBatch     = 12;
+    // Safety cap on drain iterations per loop, bounding worst-case loop time
+    // (NFR-3) if a backlog ever forms; 48 × 12 = 576 words ≫ steady-state fill.
+    static constexpr uint8_t  kStrapdownFifoMaxBatches = 48;
+
+    // ── GPS-disciplined strapdown dt (NFR-9) ──────────────────────────────────
+    // Per-sample integration dt is derived from the GPS-PPS-disciplined TIM2 tick
+    // rate (Pps_GetTim2TicksPerSec) divided across the words actually drained,
+    // rather than a hardcoded 1/ODR.  This anchors the integration to GPS time —
+    // immune to the MSI clock inaccuracy, the IMU oscillator's ~3% tolerance, and
+    // HAL_GetTick (which proved unreliable).  Falls back to 1/kImuFifoRateHz
+    // before PPS lock.  The value lags one loop (rate is stable at ~480 Hz).
+    uint32_t m_strapdown_last_tim2   = 0;
+    float    m_strapdown_dt_per_word = 1.0f / kImuFifoRateHz;
+    // Sanity clamp on the measured dt (covers ~120–4000 Hz effective rate) so a
+    // post-halt interval or a stray word count can't inject a garbage dt.
+    static constexpr float kStrapdownDtMin = 1.0f / 4000.0f;
+    static constexpr float kStrapdownDtMax = 1.0f / 120.0f;
+    // EMA factor smoothing the per-loop measured dt (converges in ~10 loops, <0.1 s).
+    static constexpr float kStrapdownDtAlpha = 0.1f;
 
     NavConfig  m_cfg{};
     NavSolution m_solution{};

@@ -92,9 +92,14 @@ bool ISM6HG256X::configureOdrAndRanges(float sample_rate_hz, ImuAccelSource acce
       ok &= writeReg(REG_CTRL1_XL_HG, ctrl1_xl_hg); // 0b10011100  Enable high-g accelerometer, 480 Hz, +/-256 g
     }
 
-    // Enable gyroscope
+    // Enable gyroscope.  Run the gyro ODR at the high rate (480 Hz, NFR-9)
+    // independent of the 20 Hz loop/output rate that drives the accel ODR above,
+    // so the FIFO batches a true 480 Hz gyro stream for the strapdown.  Tying the
+    // gyro ODR to sample_rate_hz (clamped to 20) selected only 60 Hz, starving
+    // the FIFO of real samples.
 //    WriteReg(INT2_CTRL, 0x02); // 0b00000001 Enable data-ready interrupt on INT2 pin
-    ok &= writeReg(REG_CTRL2, op_mode_odr);
+    uint8_t op_mode_odr_g = static_cast<uint8_t>((OP_MODE_G << 4) | ODR_G_480);
+    ok &= writeReg(REG_CTRL2, op_mode_odr_g);
     uint8_t ctrl6 = static_cast<uint8_t>((LPF1_G_BW << 4) | (1 << 3) | FS_G);
     ok &= writeReg(REG_CTRL6, ctrl6);
 
@@ -224,9 +229,19 @@ uint16_t ISM6HG256X::fifoUnreadCount() {
     uint8_t s1 = 0, s2 = 0;
     if (!readReg(FIFO_STATUS1, s1)) return 0;
     if (!readReg(FIFO_STATUS2, s2)) return 0;
-    // DIFF_FIFO = number of unread words; low byte in STATUS1, high bits in
-    // STATUS2[1:0].  (Upper STATUS2 bits are WTM/OVR/FULL flags — masked out.)
-    return static_cast<uint16_t>(((static_cast<uint16_t>(s2) & 0x03u) << 8) | s1);
+    // DIFF_FIFO_[8:0] = number of unread words (datasheet Table 79/81): low 8
+    // bits in FIFO_STATUS1, the single high bit DIFF_FIFO_8 in FIFO_STATUS2 bit
+    // 0.  STATUS2[2:1] are reserved-0 and [7:3] are WTM/OVR/FULL/BDR/LATCHED
+    // flags — mask to bit 0 only.
+    return static_cast<uint16_t>(((static_cast<uint16_t>(s2) & 0x01u) << 8) | s1);
+}
+
+void ISM6HG256X::fifoFlush() {
+    if (!m_fifo_ok) return;
+    // Datasheet FIFO reset: switching to bypass empties the FIFO; restoring
+    // continuous mode restarts batching.  Leaves BDR (FIFO_CTRL3) untouched.
+    writeReg(FIFO_CTRL4, FIFO_MODE_BYPASS);
+    writeReg(FIFO_CTRL4, FIFO_MODE_CONTINUOUS);
 }
 
 uint16_t ISM6HG256X::drainFifoGyro(Vec3f* out, uint16_t max_samples) {
@@ -236,24 +251,20 @@ uint16_t ISM6HG256X::drainFifoGyro(Vec3f* out, uint16_t max_samples) {
     if (words == 0) return 0;
     if (words > max_samples) words = max_samples;  // leave the remainder for next drain
 
+    // Read one 7-byte FIFO word (1 tag + 6 data) per SPI transaction.  The
+    // datasheet only documents a single word across FIFO_DATA_OUT_TAG..Z_H
+    // (0x78–0x7E); reading past 0x7E in one transaction walks into regular
+    // registers rather than popping the next word, so each word gets its own
+    // read.  ~24 words/loop × 7 bytes is well within the 50 ms budget (NFR-3).
     uint16_t n = 0;
-    while (words > 0 && n < max_samples) {
-        uint8_t chunk = (words > kFifoChunkWords) ? kFifoChunkWords
-                                                  : static_cast<uint8_t>(words);
-        uint8_t buf[kFifoChunkWords * 7];
-        // Burst-read tag+data words: auto-increment past the tag continues to
-        // pull successive FIFO words from the data-out registers.
-        if (!readRegs(FIFO_DATA_OUT_TAG, buf, static_cast<uint16_t>(chunk * 7))) break;
-
-        for (uint8_t i = 0; i < chunk && n < max_samples; ++i) {
-            const uint8_t* w = &buf[i * 7];
-            if ((w[0] >> 3) != FIFO_TAG_GYRO) continue;   // skip any non-gyro word
-            const int16_t gx = static_cast<int16_t>((w[2] << 8) | w[1]);
-            const int16_t gy = static_cast<int16_t>((w[4] << 8) | w[3]);
-            const int16_t gz = static_cast<int16_t>((w[6] << 8) | w[5]);
-            out[n++] = convertGyroRawToRps(gx, gy, gz);
-        }
-        words -= chunk;
+    for (uint16_t i = 0; i < words && n < max_samples; ++i) {
+        uint8_t w[7];
+        if (!readRegs(FIFO_DATA_OUT_TAG, w, sizeof(w))) break;
+        if ((w[0] >> 3) != FIFO_TAG_GYRO) continue;   // skip any non-gyro word
+        const int16_t gx = static_cast<int16_t>((w[2] << 8) | w[1]);
+        const int16_t gy = static_cast<int16_t>((w[4] << 8) | w[3]);
+        const int16_t gz = static_cast<int16_t>((w[6] << 8) | w[5]);
+        out[n++] = convertGyroRawToRps(gx, gy, gz);
     }
     return n;
 }

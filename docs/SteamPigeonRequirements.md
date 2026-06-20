@@ -127,6 +127,7 @@ The original outline's ranked goals were captured as `FR-P1…FR-P12` with the I
 
 | Version | Date | Change |
 |---------|------|--------|
+| 2.1.1 | 2026-06-19 | No requirement text change. **NFR-9 strapdown implemented & bench-confirmed at ~480 Hz** (FIFO drain off the 20 Hz loop, GPS-disciplined dt); implementation notes appended to [ADR-0005](adr/0005-retire-ekf-raw-primary.md). FR-P13 firing output remains deferred. |
 | 2.1 | 2026-06-18 | Added **FR-P13** (air-start tilt-safety gate) at Pri 3; deferred **FR-P8/FR-P9** (EKF retired from the real-time path — [ADR-0005](adr/0005-retire-ekf-raw-primary.md)); **decoupled IDs from priority** (the `Pri` column is now authoritative; added a `Status` column); added **NFR-9** (high-rate strapdown attitude) and extended NFR-1 to FR-P13 (#13). |
 | 2.0 | 2026-06-16 | Restructured to markdown with IDs, functional/non-functional split, vetted-gate definition, and glossary (#6). Corrected the SPI/GPS bus statement (#3). |
 | 1.x | — | Original prose outline (`Steam Pigeon Requirements.docx`). |

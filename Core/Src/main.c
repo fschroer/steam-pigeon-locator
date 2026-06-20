@@ -78,7 +78,9 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
+// GPS-PPS-disciplined TIM2 tick rate (ticks per GPS second), for converting
+// free-running TIM2 deltas to real time.  Returns 0 until two PPS edges seen.
+uint32_t Pps_GetTim2TicksPerSec(void) { return elapsed; }
 /* USER CODE END 0 */
 
 /**

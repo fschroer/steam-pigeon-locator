@@ -2,6 +2,7 @@ extern "C" {
 #include <cmath>
 #include "gpio.h"
 #include "RgbLed.hpp"
+uint32_t Pps_GetTim2TicksPerSec(void);   // GPS-PPS-disciplined TIM2 ticks/sec (main.c)
 }
 
 #include <Math.hpp>
@@ -145,6 +146,9 @@ void Navigation::commitMountingFrame(const Vec3f& avg_raw_accel) {
     // e.g. inverted "pointing down" — orientation after arming.
     m_attitude.initializeFromRestAccel(imu.accel_selected_mps2, HAL_GetTick());
     m_attitude.updateGyroBiasAtRest(imu.gyro_rps, 1.0f);
+    // Flush the gyro FIFO so the first post-seed drain integrates only samples
+    // captured after this re-seed, not stale pre-calibration rotation (NFR-9).
+    m_imu.fifoFlush();
 }
 
 bool Navigation::Init(const uint16_t output_rate_hz) {
@@ -381,6 +385,9 @@ bool Navigation::Update() {
                 // Prime the bias to the current at-rest gyro so the net rate is
                 // ~0 from the first sample (no settling drift on the display).
                 m_attitude.updateGyroBiasAtRest(imu.gyro_rps, 1.0f);
+                // Flush the gyro FIFO so the first drain starts from this seed,
+                // not stale pre-seed rotation buffered in continuous mode (NFR-9).
+                m_imu.fifoFlush();
             }
         } else {
             // At rest the gyro reads ≈ pure bias: learn it (so integration nets
@@ -400,12 +407,42 @@ bool Navigation::Update() {
 #ifdef NAV_TEST
             if (!m_test_active_) {
 #endif
-                Vec3f fifo_gyro[kStrapdownFifoDrainMax];
-                const uint16_t fn = m_imu.drainFifoGyro(fifo_gyro, kStrapdownFifoDrainMax);
-                const float dt_fifo = 1.0f / kImuFifoRateHz;
-                for (uint16_t i = 0; i < fn; ++i)
-                    m_attitude.propagate(remapVec(fifo_gyro[i]), dt_fifo, now);
-                propagated = (fn > 0);
+                // Drain-and-integrate the 480 Hz gyro FIFO in small batches (a
+                // large per-call buffer overflowed the 2 KB stack in this deep
+                // call chain).  Loop until the FIFO empties (fn < batch) or the
+                // safety cap.  Each word integrates at a GPS-disciplined dt (see
+                // below).  FIFO words are raw sensor frame → remap first.
+                const uint32_t t2_start = TIM2->CNT;
+                const float    dt_fifo  = m_strapdown_dt_per_word;   // from last loop
+                uint16_t       words_drained = 0;
+                Vec3f batch[kStrapdownFifoBatch];
+                for (uint8_t b = 0; b < kStrapdownFifoMaxBatches; ++b) {
+                    const uint16_t fn = m_imu.drainFifoGyro(batch, kStrapdownFifoBatch);
+                    for (uint16_t i = 0; i < fn; ++i)
+                        m_attitude.propagate(remapVec(batch[i]), dt_fifo, now);
+                    words_drained += fn;
+                    if (fn > 0) propagated = true;
+                    if (fn < kStrapdownFifoBatch)
+                    	break;   // FIFO emptied
+                }
+                // Recompute dt_per_word for next loop: the GPS-PPS-disciplined
+                // TIM2 interval since the last drain, divided across the words
+                // actually drained this loop.  Anchors integration to GPS time
+                // (immune to MSI/IMU-oscillator/HAL_GetTick error); clamped so a
+                // post-halt interval can't inject garbage.  Holds 1/480 until PPS.
+                const uint32_t tps = Pps_GetTim2TicksPerSec();   // 0 until PPS lock
+                if (tps > 0 && words_drained > 0 && m_strapdown_last_tim2 != 0) {
+                    const uint32_t interval = t2_start - m_strapdown_last_tim2; // unsigned wrap OK
+                    float dt = (static_cast<float>(interval) / static_cast<float>(tps))
+                               / static_cast<float>(words_drained);
+                    if (dt < kStrapdownDtMin) dt = kStrapdownDtMin;
+                    if (dt > kStrapdownDtMax) dt = kStrapdownDtMax;
+                    // EMA-smooth: only ~3 words/drain, so a ±1-word swing is ±33%
+                    // on the raw dt — filter it before it reaches the integrator.
+                    m_strapdown_dt_per_word =
+                        (1.0f - kStrapdownDtAlpha) * m_strapdown_dt_per_word + kStrapdownDtAlpha * dt;
+                }
+                m_strapdown_last_tim2 = t2_start;
 #ifdef NAV_TEST
             }
 #endif
