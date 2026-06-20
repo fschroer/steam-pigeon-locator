@@ -307,8 +307,21 @@ void Communication::BeginTransfer(uint8_t record_id) {
 	// Query the exact sample count upfront so that total_samples_ and
 	// packet_count_ are correct on every wire packet from the first TX.
 	uint32_t sample_count = 0;
-	if (!archive_.GetFlightSampleCount(record_id, sample_count) || sample_count == 0)
-		return;  // record doesn't exist or is empty — silently abort
+	if (!archive_.GetFlightSampleCount(record_id, sample_count) || sample_count == 0) {
+		// Record doesn't exist or is empty.  Instead of silently reverting (which
+		// left the app waiting on a transfer that never arrives), advertise a
+		// zero-length transfer so the app can show "No flight data".  Stay in
+		// DataRequested and quiet — the user leaving the screen (DisarmRequest)
+		// is what resumes PreLaunchData, not a timeout.
+		if (++transfer_id_ == 0)
+			transfer_id_ = 1;
+		total_samples_ = 0;
+		packet_count_  = 0;
+		empty_marker_repeats_ = 3;  // send the marker a few times for reliability
+		complete_ = true;           // viewing/idle: the long safety-net timeout applies
+		flight_profile_active_ms_ = HAL_GetTick();
+		return;
+	}
 
 	total_samples_ = sample_count;
 	const size_t spp = FlightProfileCodec::MaxSamplesPerPacket();
@@ -521,8 +534,20 @@ void Communication::Process(DeviceState &device_state) {
 	if (pending_begin_transfer_) {
 		pending_begin_transfer_ = false;
 		BeginTransfer(pending_transfer_record_);
-		if (!transfer_active_ && device_state == DeviceState::DataRequested)
-			device_state = DeviceState::MetadataRequested;
+		// BeginTransfer advertises a zero-length marker for an empty/missing
+		// record.  If it failed for any other reason (e.g. an archive read
+		// error), fall back to the same marker so the app still shows
+		// "No flight data" instead of hanging on a loading chart.  Stay in
+		// DataRequested and quiet — the user leaving resumes PreLaunchData.
+		if (!transfer_active_ && !complete_ && device_state == DeviceState::DataRequested) {
+			if (++transfer_id_ == 0)
+				transfer_id_ = 1;
+			total_samples_ = 0;
+			packet_count_  = 0;
+			empty_marker_repeats_ = 3;
+			complete_ = true;
+			flight_profile_active_ms_ = HAL_GetTick();
+		}
 	}
 
 	// Send deferred VersionInfo response.  Must run before the transfer guard
@@ -538,6 +563,38 @@ void Communication::Process(DeviceState &device_state) {
 				std::min(sizeof(msg.locator_version), sizeof(GIT_VERSION)));
 		msg.packet_header.crc = ComputeMessageCrc(msg);
 		radio_->Send(reinterpret_cast<uint8_t*>(&msg), sizeof(msg));
+	}
+
+	// Send the zero-length "no data" marker for an empty/missing record.  Like
+	// VersionInfo this must run before the transfer guard below, since no real
+	// transfer is active.  A header-only frame (packet_count = 0) tells the app
+	// the record has no samples.
+	if (empty_marker_repeats_ > 0 && !radio_busy_
+			&& HAL_GetTick() - last_radio_tx_end_ms_ >= kMinRxWindowMs) {
+		FlightDataPacket marker { };
+		marker.packet_header.system_id = system_id;
+		marker.packet_header.msg_type  = MsgType::FlightData;
+		marker.packet_header.msg_count = next_msg_count_++;
+		marker.packet_header.crc       = 0;
+		marker.transfer_id   = transfer_id_;
+		marker.packet_index  = 0;
+		marker.packet_count  = 0;   // 0 ⇒ no data for this record
+		marker.total_samples = 0;
+		const size_t msg_size = offsetof(FlightDataPacket, payload);  // header only, no payload
+		marker.packet_header.crc = ComputeMessageCrcPartial(
+				reinterpret_cast<const uint8_t*>(&marker), msg_size);
+		radio_busy_ = true;
+		radio_->Send(reinterpret_cast<const uint8_t*>(&marker), msg_size);
+		--empty_marker_repeats_;
+	}
+
+	// The data burst only runs while the app is in the data-request state.  If
+	// the app navigated back to the metadata list (FlightMetadataRequest →
+	// MetadataRequested) or to the main screen (DisarmRequest → Disarmed), abort
+	// the in-flight transfer immediately rather than transmitting into the void.
+	if (device_state != DeviceState::DataRequested) {
+		transfer_active_ = false;
+		return;
 	}
 
 	if (!transfer_active_ || complete_)
@@ -633,22 +690,18 @@ ParseResult Communication::ParseLoraFrame(const uint8_t *data, std::size_t len, 
 }
 
 void Communication::CheckFlightProfileTimeout(DeviceState &device_state) {
+	// Safety net only — the app's DisarmRequest is the normal way back to
+	// Disarmed.  These timeouts exist so a lost DisarmRequest, an app crash, or
+	// a Bluetooth drop cannot leave the locator stuck (silent, channel-blocked)
+	// indefinitely.  The "complete" branch is deliberately long so it does not
+	// fire while the user is viewing a chart or the "No flight data" message;
+	// the empty-record path sets complete_ so it uses that long timeout too.
 	uint32_t timeout_ms;
-
 	if (device_state == DeviceState::MetadataRequested) {
-		// Waiting for the app to send a FlightDataRequest after receiving
-		// the metadata list.  Short timeout — if nothing comes, the app dropped.
 		timeout_ms = kMetadataIdleTimeoutMs;
-
 	} else if (complete_) {
-		// Transfer finished; user is viewing the chart.  Normal exit arrives
-		// as a DisarmRequest when the user leaves the screen.  This long timeout
-		// is only a safety net for app crash or Bluetooth loss after chart load.
 		timeout_ms = kDataCompleteTimeoutMs;
-
 	} else {
-		// Transfer in progress.  ACKs should arrive every few seconds; if none
-		// come for kDataActiveTimeoutMs the app has likely disconnected.
 		timeout_ms = kDataActiveTimeoutMs;
 	}
 

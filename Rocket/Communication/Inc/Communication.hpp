@@ -113,6 +113,7 @@ public:
 	void CheckFlightProfileTimeout(DeviceState &device_state);
 
 private:
+
 	DeviceUID            &deviceUID_;
 	FlightManager        &flight_;
 	RocketNav::Navigation &nav_;
@@ -124,6 +125,12 @@ private:
 	bool send_metadata_ = false;
 	uint32_t send_metadata_request_time_ = 0;
 	bool version_info_pending_ = false;
+	// Set by BeginTransfer when the requested record has no samples.  Process()
+	// then transmits a zero-length FlightData marker (packet_count = 0) a few
+	// times so the app can show "No flight data" instead of waiting on a
+	// transfer that never arrives.  The locator stays quiet (no PreLaunchData)
+	// until the user leaves the screen.
+	uint8_t empty_marker_repeats_ = 0;
 
 	// Deferred radio-ISR work — executed in Process() (main-loop context) so the
 	// flash access never preempts a navigation SPI2 transaction (flash and the
@@ -137,18 +144,22 @@ private:
 	uint32_t transfer_ready_ms_ = 0;
 
 	// Timestamp of the last meaningful flight-profile activity (ACK received,
-	// metadata sent, or transfer started / completed).  Used to detect an
-	// abandoned session and automatically revert to Disarmed so PreLaunchData
-	// resumes.  Three thresholds are applied depending on sub-state:
+	// metadata sent, or transfer started / completed).  The app drives the
+	// normal return to Disarmed with a DisarmRequest when the user leaves, but
+	// LoRa is lossy and that single message can be dropped — so these timeouts
+	// are an essential safety net that prevents the locator from getting stuck
+	// (silent, channel-blocked) when the app disconnects, crashes, or its
+	// DisarmRequest is lost.  Three thresholds apply depending on sub-state:
 	uint32_t flight_profile_active_ms_ = 0;
 
-	// MetadataRequested: app sent the request then dropped connection.
+	// MetadataRequested: app sent the request then went idle / dropped.
 	static constexpr uint32_t kMetadataIdleTimeoutMs  =  30'000u;  // 30 s
-	// DataRequested, transfer in progress: no ACK for this long → disconnected.
+	// DataRequested, transfer in progress: ACKs refresh the timer, so this only
+	// fires when the transfer stalls (app disconnected mid-load).
 	static constexpr uint32_t kDataActiveTimeoutMs    =  15'000u;  // 15 s
-	// DataRequested, transfer complete: user is viewing the chart.  The normal
-	// exit is a DisarmRequest when the user leaves the screen; this long timeout
-	// is only a safety net for app crash / BT loss after chart load.
+	// DataRequested, transfer complete OR empty (no data): the user is viewing
+	// the result.  Long, so the locator stays quiet while the chart / "No flight
+	// data" message is on screen; normal exit is the DisarmRequest on leaving.
 	static constexpr uint32_t kDataCompleteTimeoutMs  = 300'000u;  // 5 min
 
 	// -----------------------------------------------------------------------
