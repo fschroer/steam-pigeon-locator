@@ -70,7 +70,7 @@ The requirements outline defines a strict, ranked list of functional goals. This
 |---|---|---|
 | 1 | **Flight-critical events** — launch, noseover/apogee (drogue charge timing), descent altitude (main charge timing). (FR-P1) | `FlightManager` state machine, on raw baro (ADR-0003) |
 | 2 | **Post-landing location** — regularly updated lat/lon to find the rocket after it lands. (FR-P2) | GPS in telemetry + last-known position |
-| 3 | **Air-start (staged ignition) safety gate.** (FR-P13) | *Planned:* high-rate gyro strapdown tilt gate (NFR-9, ADR-0005) |
+| 3 | **Air-start (staged ignition) safety gate.** (FR-P13) | high-rate gyro strapdown tilt gate (NFR-9, ADR-0005) — *strapdown implemented & bench-confirmed at ~480 Hz; FR-P13 firing output still deferred (master switch OFF)* |
 | 4 | **Device configuration.** (FR-P3) | App settings screens, USB-C consoles, persistent settings |
 | 5 | **Data archival** — for troubleshooting, fusion tuning, flight-dynamics study, sensor evaluation, design improvement. (FR-P4) | `Archive` / `FlightArchive` → external flash |
 | 6 | **In-flight location** — regularly updated lat/lon during flight. (FR-P5) | Telemetry stream |
@@ -128,7 +128,9 @@ The firmware is organized as a composition root (`Factory`) that owns and wires 
 
 ### 3.3 Processing model
 
-- **Super-loop at 20 Hz.** `SAMPLES_PER_SECOND = 20` → a **50 ms** processing window. TIM17 raises a periodic flag; the main `while(1)` loop services it by calling `ProcessRocketEvents` once per window. A free-running 1 MHz TIM2 provides microsecond timing diagnostics (`TimingDiag`) captured every cycle.
+- **Super-loop at 20 Hz.** `SAMPLES_PER_SECOND = 20` → a **50 ms** processing window. TIM17 raises a periodic flag; the main `while(1)` loop services it by calling `ProcessRocketEvents` once per window. A free-running 1 MHz TIM2 provides microsecond timing diagnostics (`TimingDiag`) captured every cycle, and — GPS-PPS-disciplined via `elapsed`/`Pps_GetTim2TicksPerSec` — is the trusted timebase for the NFR-9 strapdown dt.
+- **The high-rate (NFR-9) gyro strapdown rides this same 20 Hz loop without a dedicated ISR:** the gyro is batched into the ISM6HG256X FIFO at 480 Hz and drained+integrated (~24 samples) each cycle, decoupled from the loop rate by the FIFO depth. See ADR-0005 implementation note.
+- **Timebase caveat:** `HAL_GetTick`/`HAL_Delay` are the RTC-based LoRaWAN TimerServer (overridden in `sys_app.c`; SysTick is *not* the tick source). Correct in production (~ms) but they freeze/jump under a debugger — use **TIM2** for any measurement while halted.
 - **Budget target ~25 ms of the 50 ms window**, leaving headroom for jitter and future work (per the requirements).
 - **Bus discipline:** *nothing* issues SPI from an ISR. The baro conversion ISR only enqueues transactions; `ServiceBus()` drains the queue in main-loop context every spin, so baro, IMU, flash, and console traffic can never overlap on the wire. This rule was introduced after a shared-bus collision between the baro ISR and flash logging produced non-physical altitude spikes and a false apogee.
 - **ISR policy:** interrupts exit as fast as possible and queue any blocking work (UART RX bytes, SPI transactions) for main-loop processing.
