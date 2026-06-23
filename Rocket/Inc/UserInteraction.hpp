@@ -83,6 +83,7 @@ private:
   const char* drogue_backup_text_ = "Drogue Backup \0";
   const char* main_primary_text_ = "Main Primary  \0";
   const char* main_backup_text_ = "Main Backup   \0";
+  const char* unused_text_ = "Unused        \0";
   const char* drogue_primary_deploy_delay_text_ = "4) Drogue Primary Deploy Delay (s):\t\0";
   const char* drogue_backup_deploy_delay_text_ = "5) Drogue Backup Deploy Delay (s):\t\0";
   const char* main_primary_deploy_altitude_text_ = "6) Main Primary Deploy Altitude (m):\t\0";

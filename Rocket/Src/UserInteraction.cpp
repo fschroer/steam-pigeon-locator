@@ -455,6 +455,9 @@ const char* UserInteraction::DeployModeString(DeployMode deploy_mode_value) {
 	case DeployMode::MainBackup:
 		return main_backup_text_;
 		break;
+	case DeployMode::Unused:
+		return unused_text_;
+		break;
 	default:
 		break;
 	}
@@ -475,7 +478,7 @@ void UserInteraction::AdjustDeploymentChannelMode(uint8_t uart_char, DeployMode 
 	case 91: // [ = decrease value
 		switch (*deploy_mode) {
 		case DeployMode::DroguePrimary:
-			*deploy_mode = DeployMode::MainBackup;
+			*deploy_mode = DeployMode::Unused;
 			break;
 		case DeployMode::DrogueBackup:
 			*deploy_mode = DeployMode::DroguePrimary;
@@ -485,6 +488,9 @@ void UserInteraction::AdjustDeploymentChannelMode(uint8_t uart_char, DeployMode 
 			break;
 		case DeployMode::MainBackup:
 			*deploy_mode = DeployMode::MainPrimary;
+			break;
+		case DeployMode::Unused:
+			*deploy_mode = DeployMode::MainBackup;
 			break;
 		default:
 			break;
@@ -504,6 +510,9 @@ void UserInteraction::AdjustDeploymentChannelMode(uint8_t uart_char, DeployMode 
 			*deploy_mode = DeployMode::MainBackup;
 			break;
 		case DeployMode::MainBackup:
+			*deploy_mode = DeployMode::Unused;
+			break;
+		case DeployMode::Unused:
 			*deploy_mode = DeployMode::DroguePrimary;
 			break;
 		default:
