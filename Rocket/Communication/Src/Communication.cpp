@@ -526,6 +526,10 @@ void Communication::Process(DeviceState &device_state) {
 	if (pending_cfg_save_) {
 		pending_cfg_save_ = false;
 		archive_.SaveLocatorSettings(pending_cfg_settings_);
+		// Apply the (possibly new) LoRa channel to the radio at runtime.  The
+		// request arrived on the old channel; the next PreLaunchData goes out on
+		// the new one.  Idempotent when the channel is unchanged.
+		SetChannel(pending_cfg_settings_.lora_channel);
 	}
 
 	// Deferred transfer setup (queued by FlightDataRequest in the radio ISR).
