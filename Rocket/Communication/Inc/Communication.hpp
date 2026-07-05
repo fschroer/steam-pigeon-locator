@@ -326,6 +326,23 @@ private:
 		return crc;
 	}
 
+	// Password-seeded authentication tag for PreLaunchData.  Independent of the
+	// packet_header.crc (which stays 0xFFFF-seeded so the receiver can validate
+	// and re-wrap the frame without knowing the password).  Computed over the
+	// whole PreLaunchData struct with packet_header.crc AND auth_tag zeroed, using
+	// two CRC-16 passes seeded from the low/high halves of the password key.  The
+	// app reproduces this byte-for-byte over the received base region (see
+	// LocatorAuth.authTag).  key == 0 means "open" (no password set).
+	inline uint32_t ComputePasswordAuthTag(const PreLaunchData &msg, uint32_t key) {
+		PreLaunchData tmp = msg;
+		tmp.packet_header.crc = 0;
+		tmp.auth_tag = 0;
+		const uint8_t *bytes = reinterpret_cast<const uint8_t*>(&tmp);
+		const uint16_t lo = Crc16Continue(static_cast<uint16_t>(key & 0xFFFFu), bytes, sizeof(PreLaunchData));
+		const uint16_t hi = Crc16Continue(static_cast<uint16_t>(key >> 16), bytes, sizeof(PreLaunchData));
+		return (static_cast<uint32_t>(hi) << 16) | lo;
+	}
+
 	inline bool ValidateCRC(const uint8_t *data, std::size_t len) {
 		if (len < sizeof(PacketHeader))
 			return false;

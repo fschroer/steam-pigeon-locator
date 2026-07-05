@@ -147,6 +147,11 @@ void UserInteraction::ProcessChar(uint8_t uart_char, DeviceState &device_state) 
 			user_interaction_state_ = UserInteractionState::EditDeviceName;
 			uart_line_len = MakeLine(uart_line_, text_edit_guidance_text_);
 			break;
+		case 'p': // p = Edit password (stored locally; never sent over the air)
+		case 'P':
+			user_interaction_state_ = UserInteractionState::EditPassword;
+			uart_line_len = MakeLine(uart_line_, password_edit_guidance_text_);
+			break;
 		}
 		HAL_UART_Transmit(&huart2_, (uint8_t*) uart_line_, uart_line_len, uart_timeout);
 		break;
@@ -179,6 +184,9 @@ void UserInteraction::ProcessChar(uint8_t uart_char, DeviceState &device_state) 
 		break;
 	case UserInteractionState::EditDeviceName:
 		AdjustConfigTextSetting(uart_char, device_name_);
+		break;
+	case UserInteractionState::EditPassword:
+		AdjustPasswordSetting(uart_char);
 		break;
 	case UserInteractionState::DataHome:
 		if (erase_all_pending_) {
@@ -401,7 +409,10 @@ void UserInteraction::DisplayConfigSettingsMenu() {
 	HAL_UART_Transmit(&huart2_, (uint8_t*) uart_line_, uart_line_len, uart_timeout);
 	uart_line_len = MakeLine(uart_line_, lora_channel_text_, ToStr(lora_channel_, false), crlf_);
 	HAL_UART_Transmit(&huart2_, (uint8_t*) uart_line_, uart_line_len, uart_timeout);
-	uart_line_len = MakeLine(uart_line_, device_name_text_, device_name_);
+	uart_line_len = MakeLine(uart_line_, device_name_text_, device_name_, crlf_);
+	HAL_UART_Transmit(&huart2_, (uint8_t*) uart_line_, uart_line_len, uart_timeout);
+	uart_line_len = MakeLine(uart_line_, password_text_,
+			archive_.GetPassword()[0] != 0 ? archive_.GetPassword() : password_unset_text_);
 	HAL_UART_Transmit(&huart2_, (uint8_t*) uart_line_, uart_line_len, uart_timeout);
 	uart_line_len = MakeLine(uart_line_, crlf_, crlf_);
 	HAL_UART_Transmit(&huart2_, (uint8_t*) uart_line_, uart_line_len, uart_timeout);
@@ -571,6 +582,32 @@ void UserInteraction::AdjustConfigTextSetting(uint8_t uart_char, char *config_mo
 		user_input_[--char_pos] = 0;
 	} else if (uart_char >= ' ' && uart_char <= '~' && char_pos < device_name_length - 1) {
 		HAL_UART_Transmit(&huart2_, &uart_char, 1, uart_timeout);
+		user_input_[char_pos++] = uart_char;
+	}
+}
+
+// Write-only password entry.  Echoes '*' for each character and never stores or
+// displays the plaintext: on Enter it derives the FNV-1a key and persists only
+// that (0 when blank, i.e. "open").  Stored via Archive in the locator-only
+// runtime journal, so the password is never transmitted over the air.
+void UserInteraction::AdjustPasswordSetting(uint8_t uart_char) {
+	static uint16_t char_pos = 0;
+	const char* masked = "*\0";
+	if (uart_char == 13 || uart_char == 27) {
+		if (uart_char == 13) {
+			user_input_[char_pos] = 0;
+			archive_.SetPassword(user_input_);
+		}
+		char_pos = 0;
+		for (uint8_t i = 0; i <= USER_INPUT_MAX_LENGTH; i++)
+			user_input_[i] = 0;
+		user_interaction_state_ = UserInteractionState::ConfigHome;
+		DisplayConfigSettingsMenu();
+	} else if (uart_char == 8 && char_pos > 0) {
+		HAL_UART_Transmit(&huart2_, (uint8_t*) bs_, 3, uart_timeout);
+		user_input_[--char_pos] = 0;
+	} else if (uart_char >= ' ' && uart_char <= '~' && char_pos < USER_INPUT_MAX_LENGTH) {
+		HAL_UART_Transmit(&huart2_, (uint8_t*) masked, 1, uart_timeout);
 		user_input_[char_pos++] = uart_char;
 	}
 }

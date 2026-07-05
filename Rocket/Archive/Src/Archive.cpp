@@ -187,9 +187,15 @@ bool Archive::SaveLocatorSettings(RocketPersistentSettings &locator_settings) {
 	return persistentStore_.SaveIfChanged(locator_settings, settings_saved_);
 }
 
-bool Archive::WriteData(uint32_t flight_time_ms, const NavSolution &nav_solution, const float raw_baro_altitude_agl,
-		const float raw_baro_velocity, FlightStates flight_state, const TimingDiag &timing,
-		float tilt_rad, const Quaternionf &strapdown_quat) {
+bool Archive::SetPassword(const char* password) {
+	std::strncpy(runtime_.password, password ? password : "", sizeof(runtime_.password) - 1);
+	runtime_.password[sizeof(runtime_.password) - 1] = '\0';
+	return runtimeStore_.SaveIfChanged(runtime_, runtime_saved_);
+}
+
+FlightArchive::FlightSample Archive::BuildSample(uint32_t flight_time_ms, const NavSolution &nav_solution,
+		const float raw_baro_altitude_agl, const float raw_baro_velocity, FlightStates flight_state,
+		const TimingDiag &timing, float tilt_rad, const Quaternionf &strapdown_quat) {
 	FlightArchive::FlightSample s { };
 	s.timestamp_ms = flight_time_ms;
 	s.raw_baro_altitude_agl = raw_baro_altitude_agl;
@@ -211,6 +217,14 @@ bool Archive::WriteData(uint32_t flight_time_ms, const NavSolution &nav_solution
 	s.quat_q15[1] = PackQ15(strapdown_quat.x);
 	s.quat_q15[2] = PackQ15(strapdown_quat.y);
 	s.quat_q15[3] = PackQ15(strapdown_quat.z);
+	return s;
+}
+
+bool Archive::WriteData(uint32_t flight_time_ms, const NavSolution &nav_solution, const float raw_baro_altitude_agl,
+		const float raw_baro_velocity, FlightStates flight_state, const TimingDiag &timing,
+		float tilt_rad, const Quaternionf &strapdown_quat) {
+	const FlightArchive::FlightSample s = BuildSample(flight_time_ms, nav_solution, raw_baro_altitude_agl,
+			raw_baro_velocity, flight_state, timing, tilt_rad, strapdown_quat);
 	return archive_.WriteFlightDataSample(record_id_, s);
 }
 

@@ -44,6 +44,12 @@ struct RocketRuntimeMetadata
     uint32_t boot_count = 0;
     uint32_t last_flight_sequence = 0;
     uint32_t last_closed_record_id = 0;
+    // Connection password (plaintext; empty = open/no password).  Stored plaintext
+    // so it can be shown on the UART console; the auth_tag key is derived on use
+    // (PasswordKdf::DeriveKey).  Locator-only: NOT in RocketPersistentSettings, so
+    // it is never carried over the air by LocatorCfgChgRequest.  Sized for the
+    // 15-char UART input limit + null terminator.
+    char password[16] = {0};
 };
 
 #pragma pack(pop)

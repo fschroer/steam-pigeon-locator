@@ -95,6 +95,16 @@ void Communication::SendPreLaunchData() {
 	std::memcpy(msg.device_name, rocket_settings.device_name, device_name_length);
 	msg.battery_voltage_mvolt = power_.readBatteryMillivolts();
 
+	// Cleartext identity (app looks the locator up by this) and the password-seeded
+	// auth_tag the app verifies to "recognise" this locator.  The auth_tag is
+	// computed with auth_tag zeroed, then the packet CRC is taken over the final
+	// bytes (including the now-populated auth_tag) so link integrity still covers
+	// the whole frame.
+	msg.locator_id = deviceUID_.getUID();
+	msg.auth_tag = 0;
+	msg.auth_tag = ComputePasswordAuthTag(msg, archive_.GetPasswordKey());
+
+	msg.packet_header.crc = 0;
 	msg.packet_header.crc = ComputeMessageCrc(msg);
 	RgbLed(RgbColor::Blue); // Blink LoRa transmit LED for visual validation
 	radio_->Send(reinterpret_cast<uint8_t*>(&msg), sizeof(PreLaunchData));
@@ -202,6 +212,12 @@ void Communication::OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
 		switch (parsed.type) {
 
 		case MsgType::LocatorCfgChgRequest: {
+			// Only accept configuration changes while Disarmed.  This keeps config
+			// (notably a LoRa channel change) from disrupting an armed/in-flight
+			// locator, and matches the app, which only connects/configures while the
+			// locator is broadcasting PreLaunchData (the Disarmed state).
+			if (device_state != DeviceState::Disarmed)
+				break;
 			// Defer the settings flash write to Process() (main loop).  Doing it
 			// here in the radio ISR could preempt a navigation SPI2 transaction
 			// and corrupt both (flash and IMU/baro share SPI2).

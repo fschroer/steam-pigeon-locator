@@ -11,6 +11,7 @@ extern "C" {
 #include "Communication.hpp"
 #include "Archive.hpp"
 #include "Deployment.hpp"
+#include "PasswordKdf.hpp"
 
 #define UART_LINE_MAX_LENGTH 255
 #define USER_INPUT_MAX_LENGTH 15
@@ -34,6 +35,7 @@ enum UserInteractionState
   EditMainBackupDeployAltitude,
   EditLoraChannel,
   EditDeviceName,
+  EditPassword,
   DataHome,
   TestHome,
   TestDeploy1,
@@ -90,6 +92,10 @@ private:
   const char* main_backup_deploy_altitude_text_ = "7) Main Backup Deploy Altitude (m):\t\0";
   const char* lora_channel_text_ = "8) Lora Channel (0-63):\t\t\t\0";
   const char* device_name_text_ = "9) Device Name:\t\t\t\t\0";
+  const char* password_text_ = "p) Password:\t\t\t\t\0";
+  const char* password_set_text_ = "(set)\0";
+  const char* password_unset_text_ = "(not set)\0";
+  const char* password_edit_guidance_text_ = "Type new password (blank clears). Enter to save, Esc to cancel.\r\n\0";
   const char* num_edit_guidance_text_ = "[ = down, ] = up. Hit Enter to update, Esc to cancel.\r\n\0";
   const char* text_edit_guidance_text_ = "Type text. Hit Enter to update, Esc to cancel.\r\n\0";
   const char* deploy_mode_edit_text_ = "Edit Deploy Mode\r\n\0";
@@ -184,6 +190,7 @@ private:
   void AdjustDeploymentChannelMode(uint8_t uart_char, DeployMode *deploy_mode);
   void AdjustConfigNumericSetting(uint8_t uart_char, int *config_mode_setting, int max_setting_value, bool tenths);
   void AdjustConfigTextSetting(uint8_t uart_char, char *config_mode_setting);
+  void AdjustPasswordSetting(uint8_t uart_char);
   void DisplayDataMenu();
   void DisplayTestMenu();
   void ExportData(uint16_t archive_position);

@@ -155,9 +155,10 @@ States (`FlightStates`): `WaitingLaunch → Launched → Burnout → Noseover �
 ### 3.5 Communication protocol
 
 - **Two physical links:** LoRa (locator ⇄ receiver) and BLE (receiver ⇄ app). The receiver is a transparent relay that also injects its own channel, name, battery, RSSI, and version.
-- **Framing:** 6-byte `PacketHeader` (`system_id` 0x44, `MsgType`, `msg_count`, CRC-16/IBM with a secret seed). Max LoRa payload 255 bytes (radio length register is 8-bit).
+- **Framing:** 6-byte `PacketHeader` (`system_id` 0x44, `MsgType`, `msg_count`, CRC-16/IBM with a **fixed** seed `0xFFFF`). The CRC is an integrity check, not a secret — the receiver validates and re-computes it and cannot hold per-locator secrets, which is why connection authorization (below) uses a separate field. Max LoRa payload 255 bytes (radio length register is 8-bit).
 - **Message types** (`MsgType`): startup, locator/receiver config-change requests, arm/disarm, prelaunch data (unarmed), telemetry data (armed), flight-metadata request/response, flight-data request/response + parity + ACK, deployment-test request/countdown, receiver-info request/response *(receiver-only, IDs 15–16)*, version request/info.
-- **Telemetry split:** `PreLaunchData` (rich, sent while disarmed — includes raw + processed GPS, deploy config, battery) vs `TelemetryData` (compact, sent while armed — fused NED velocity, body-to-NED quaternion, flight state, deployment stats).
+- **Telemetry split:** `PreLaunchData` (rich, sent while disarmed — includes raw + processed GPS, deploy config, battery, plus the locator ID + password `auth_tag` for connection authorization) vs `TelemetryData` (compact, sent while armed — fused NED velocity, body-to-NED quaternion, flight state, deployment stats; kept minimal for range, so it carries **no** ID/auth_tag).
+- **Connection authorization (FR-P14, [ADR-0006](adr/0006-locator-connect-password.md)):** `PreLaunchData` carries a cleartext `locator_id` (from the MCU UID) and a password-seeded `auth_tag` (two keyed CRC-16 passes over the base struct with `crc`/`auth_tag` zeroed; key = FNV-1a of the password, `0` = open). The receiver forwards both untouched. The app identifies the locator by `locator_id`, verifies `auth_tag` with the stored/entered password, and only **recognises** (processes for control, enables commands) locators it is authorized for — challenging for a password on first contact with an unknown one and warning about conflicting traffic. The password is set **and viewed** only over the locator's USB-C console (stored plaintext in the locator-only runtime journal, never in the over-the-air settings). The app challenges for it on first contact with an unknown locator (on startup or a channel change) and warns about conflicting traffic. Enforcement is app-side (soft gate); locator config is additionally accepted only while Disarmed.
 - **Flight-data transfer:** archived flights are downloaded as a windowed burst (`kWindowSize = 4`) with a parity packet per group (`kParityGroupSize = 4`) for single-packet loss recovery, plus a deferred cumulative-ACK bitmap so the ACK is sent only when the locator's radio is idle. Sample data is **delta-compressed** (48-byte base header + 24-byte per-sample deltas) to fit many samples per packet.
 
 ### 3.6 Receiver
@@ -179,7 +180,7 @@ Android / Kotlin / Jetpack Compose, organized around a `RocketViewModel` and a s
 - Full flight archival to external flash with discrete event timestamps and per-flight metadata; downloadable over LoRa or USB-C.
 - Audio cues for power-on, arm/disarm, and recovery.
 - LoRa telemetry (prelaunch + in-flight), remotely commanded arm/disarm and deployment test.
-- USB-C configuration and data export.
+- USB-C configuration and data export, including a USB-C-only connection password that authenticates the locator's broadcasts (FR-P14).
 
 ### 4.2 Receiver
 - Transparent LoRa↔BLE relay with message-level forwarding.
@@ -194,6 +195,7 @@ Android / Kotlin / Jetpack Compose, organized around a `RocketViewModel` and a s
 - Locator and receiver configuration.
 - Archived-flight download, graphical flight profiles, and path export.
 - Remote deployment-charge testing.
+- Connection authorization: password challenge on first contact with an unknown locator, a remembered store of authorized locators, and a conflicting-traffic warning (FR-P14).
 
 ---
 

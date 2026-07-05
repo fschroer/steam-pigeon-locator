@@ -2,13 +2,19 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## Connect-gating / password — IMPLEMENTED & BENCH-TESTED (2026-07-04)
+Per-locator password gates the app's ability to "connect" (recognise telemetry for control + send commands). Design & rationale: **[ADR-0006](adr/0006-locator-connect-password.md)**; requirement **FR-P14** (Pri 7) + FR-L6/FR-A8. Mechanism: `PreLaunchData` gained a cleartext `locator_id` (MCU UID) + a password-seeded `auth_tag` (two keyed CRC-16 passes; key = FNV-1a of the password, `0` = open). `packet_header.crc` stays `0xFFFF` (receiver is a password-agnostic relay — it forwards `auth_tag` untouched). Password is UART-only, stored in the locator-only runtime journal (**never** in `RocketPersistentSettings`, the over-the-air payload); config now accepted only while Disarmed.
+- **Wire change is `PreLaunchData` only** (sizeof 107→115; `TelemetryData` unchanged for range). Two `MessageProtocol.hpp` copies (locator + receiver) edited in lockstep — size `static_assert`s + the app's `WireLayoutTest` pin it.
+- **App:** `LocatorAuth` (FNV-1a + keyed CRC-16, unit-tested against canonical vectors), a `KnownLocator` Proto-DataStore store, recognition/gating in `RocketViewModel`, and a channel-change password dialog + conflict warning in `ReceiverSettingsScreen`. Enforcement is an **app-side soft gate** (accepted; see ADR-0006).
+- **Build:** both firmwares link clean; app compiles + unit tests pass. **Bench-tested on hardware (2026-07-04):** UART password set/view, passive startup prompt, channel-change challenge with accept/reject + retry and revert-on-cancel, recognition/persistence, and the display/command gating all work. Open locators (no password set) still connect with no prompt (backward compatible). Re-confirm opportunistically: two-locator conflict warning and armed-state config rejection.
+
 ## Orientation convention — RESOLVED (`8f61a1e`, bench-verified 2026-06-19)
 The strapdown drives the orientation display correctly (pitch/roll/yaw track the locator). Two-part fix: negate accel into `quatFromAccel` (pitch) **+** Y-reflect `q → (w,−x,y,−z)` in `Navigation::getStrapdownQuat` (roll/yaw handedness; leaves tilt unchanged, so the FR-P13 tilt is unaffected).
 - **Hard-won lessons — don't relitigate:** the **EKF `q_bn` was itself rendering wrong** (never the ground truth — a false premise that cost most of the convention chase); and **do NOT use CubeMonitor for orientation diagnostics** (acquiring many vars perturbs/stops the LoRa TX — read values in the app). Full saga in memory `[[ekf-role-reconsideration]]`.
 
 ## Where things are
-- **Canonical reference:** [SteamPigeon_SystemSummary.md](SteamPigeon_SystemSummary.md) (+ Appendix A tracker). **Requirements v2.1:** [SteamPigeonRequirements.md](SteamPigeonRequirements.md) — air starts (**FR-P13**) at Pri 3; **FR-P8/P9 deferred**; IDs decoupled from priority; **NFR-9** (high-rate strapdown).
-- **Decisions:** [docs/adr/](adr/) — 0002 (execution model, Accepted), 0003 (P1 deploy = raw baro, Accepted; amended 06-18), 0004 (fusion-vetting, Proposed), **0005 (EKF retired from real-time path → raw-primary; Accepted)**, 0001 (superseded).
+- **Canonical reference:** [SteamPigeon_SystemSummary.md](SteamPigeon_SystemSummary.md) (+ Appendix A tracker). **Requirements v2.2:** [SteamPigeonRequirements.md](SteamPigeonRequirements.md) — air starts (**FR-P13**) at Pri 3; **connection authorization (FR-P14)** at Pri 7; **FR-P8/P9 deferred**; IDs decoupled from priority; **NFR-9** (high-rate strapdown).
+- **Decisions:** [docs/adr/](adr/) — 0002 (execution model, Accepted), 0003 (P1 deploy = raw baro, Accepted; amended 06-18), 0004 (fusion-vetting, Proposed), **0005 (EKF retired from real-time path → raw-primary; Accepted)**, **0006 (locator connect-gating / password; Accepted)**, 0001 (superseded).
 - **Workflow:** GitHub issues = decision log; ADRs = durable rationale. `gh` authenticated (`fschroer`); `.claude/settings.local.json` allows `gh issue close/edit/comment` + `git push`.
 
 ## Git state

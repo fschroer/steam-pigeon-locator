@@ -1,7 +1,7 @@
 # Steam Pigeon — Requirements
 
-- **Version:** 2.1
-- **Date:** 2026-06-18
+- **Version:** 2.2
+- **Date:** 2026-07-04
 - **Supersedes:** the prose outline in `Steam Pigeon Requirements.docx` (this markdown is now the maintained source).
 - **Status key:** each requirement carries a stable ID (`FR-*` functional, `NFR-*` non-functional, `HW-*` hardware). **IDs are append-only, opaque labels — never renumbered.** The historical `FR-P#` numbers embed the priority a requirement was *created* at; as of v2.1 that coupling is retired — the **`Pri` column is the authoritative ranking** (it changes when priorities are reordered) and the **`Status` column** is *Active*, *Deferred*, or *Withdrawn*. A new requirement takes the next free ID regardless of its priority (e.g. `FR-P13` enters at Pri 3).
 
@@ -17,7 +17,7 @@ Steam Pigeon is a flight-tracking and recovery system for medium- to high-power 
 
 ## 2. Functional Requirements (priority-ranked)
 
-The original outline's ranked goals were captured as `FR-P1…FR-P12` with the ID number matching priority. As of v2.1 that coupling is retired (see status key): the **`Pri` column is the contract** for resolving trade-offs (P1 highest), IDs are stable labels, and the table is sorted by `Pri` with *Deferred* items last. `FR-P13` (air starts) was inserted at Pri 3.
+The original outline's ranked goals were captured as `FR-P1…FR-P12` with the ID number matching priority. As of v2.1 that coupling is retired (see status key): the **`Pri` column is the contract** for resolving trade-offs (P1 highest), IDs are stable labels, and the table is sorted by `Pri` with *Deferred* items last. `FR-P13` (air starts) was inserted at Pri 3; `FR-P14` (connection authorization) at Pri 7.
 
 | ID | Pri | Status | Requirement |
 |----|-----|--------|-------------|
@@ -27,11 +27,12 @@ The original outline's ranked goals were captured as `FR-P1…FR-P12` with the I
 | **FR-P3** | 4 | Active | Provide device configuration for the locator and receiver. |
 | **FR-P4** | 5 | Active | Archive relevant flight data for troubleshooting, fusion-model tuning, flight-dynamics study, sensor evaluation, and design improvement. |
 | **FR-P5** | 6 | Active | Provide regularly updated latitude/longitude **during flight**. |
-| **FR-P6** | 7 | Active | Produce locator sound for power-on, arming/disarming, and as a post-landing location aid. |
-| **FR-P7** | 8 | Active | Report G-forces on the rocket during flight. |
-| **FR-P10** | 9 | Active | Report rocket rotation during flight. |
-| **FR-P11** | 10 | Active | Capture general-interest flight data: motor burnout, deployment-channel continuity before and after deployment, and physical parachute-deployment sensing. |
-| **FR-P12** | 11 | Active | App text-to-speech for locator status, so the user need not look at the screen. |
+| **FR-P14** | 7 | Active | **Connection authorization.** Gate a user's ability to "connect" to a locator (recognise its telemetry for control and send it commands) behind a per-locator password. The locator is identified by a reasonably-unique ID derived from its MCU UID; the app remembers locators it has been authorized for and challenges for a password only on first contact with an unknown one. Also detect and warn about conflicting traffic (an unrecognised locator) on the current channel. Rationale and mechanism in [ADR-0006](adr/0006-locator-connect-password.md). |
+| **FR-P6** | 8 | Active | Produce locator sound for power-on, arming/disarming, and as a post-landing location aid. |
+| **FR-P7** | 9 | Active | Report G-forces on the rocket during flight. |
+| **FR-P10** | 10 | Active | Report rocket rotation during flight. |
+| **FR-P11** | 11 | Active | Capture general-interest flight data: motor burnout, deployment-channel continuity before and after deployment, and physical parachute-deployment sensing. |
+| **FR-P12** | 12 | Active | App text-to-speech for locator status, so the user need not look at the screen. |
 | **FR-P8** | — | **Deferred** | Provide fused 3D location. *(Deferred 2026-06-18 per [ADR-0005](adr/0005-retire-ekf-raw-primary.md): the EKF is retired from the real-time path and has no live requirement; raw GPS serves FR-P2/FR-P5.)* |
 | **FR-P9** | — | **Deferred** | Provide fused 3D orientation. *(Deferred 2026-06-18 per [ADR-0005](adr/0005-retire-ekf-raw-primary.md): the safety-critical orientation use is now FR-P13 via a high-rate gyro strapdown (NFR-9); the EKF "display" attitude is retired from the real-time path.)* |
 
@@ -43,6 +44,7 @@ The original outline's ranked goals were captured as `FR-P1…FR-P12` with the I
 - FR-L3 — Sense deployment-channel continuity before and after firing.
 - FR-L4 — Archive flight data to external flash for later download.
 - FR-L5 — Support configuration and archived-data download over USB-C.
+- FR-L6 — Broadcast a reasonably-unique locator ID and authenticate its broadcasts with a connection password that can be set **only** over USB-C (never over the air) (FR-P14, [ADR-0006](adr/0006-locator-connect-password.md)).
 
 **Receiver**
 - FR-R1 — Relay messages between the locator and the app.
@@ -58,6 +60,7 @@ The original outline's ranked goals were captured as `FR-P1…FR-P12` with the I
 - FR-A5 — Provide a heads-up view: rocket orientation, key telemetry in graphical form, and an aid to locating the rocket in the sky during flight.
 - FR-A6 — Display archived flight information graphically.
 - FR-A7 — Provide a means to remotely test deployment charges.
+- FR-A8 — Recognise only authorized locators: challenge for a password on first contact with an unknown locator, remember authorized locators, and warn about conflicting traffic on the current channel (FR-P14, [ADR-0006](adr/0006-locator-connect-password.md)).
 
 ---
 
@@ -120,6 +123,8 @@ The original outline's ranked goals were captured as `FR-P1…FR-P12` with the I
 | **Air start / staging** | Igniting a second-stage or sustainer motor in flight, after the booster. Requires a safety gate (FR-P13) so the motor lights only when the rocket is pointed safely. |
 | **Strapdown / high-rate attitude** | Body-frame orientation obtained by integrating the gyro at a high rate (NFR-9), as opposed to an estimator running at the 20 Hz loop rate. |
 | **Tilt-from-vertical** | The angle between the rocket's thrust axis and launch-vertical (up) — the quantity FR-P13 gates on. Distinct from compass heading, which a 6-axis IMU cannot observe at rest. |
+| **Locator ID** | A reasonably-unique identifier for a locator, derived from its STM32 MCU UID, broadcast in the clear so the app can identify (but not yet authenticate) which locator it is hearing (FR-P14). |
+| **Connection authorization** | The app's gate on which locators it will recognise and command, enforced by a per-locator password. A password-seeded checksum (`auth_tag`) on the locator's PreLaunchData broadcast lets the app verify it holds the correct password without a round-trip; an "open" locator has no password set. (FR-P14 / [ADR-0006](adr/0006-locator-connect-password.md).) |
 
 ---
 
@@ -127,6 +132,7 @@ The original outline's ranked goals were captured as `FR-P1…FR-P12` with the I
 
 | Version | Date | Change |
 |---------|------|--------|
+| 2.2 | 2026-07-04 | Added **FR-P14** (connection authorization) at Pri 7, renumbering FR-P6…FR-P12 down to 8…12; added component reqs **FR-L6** (locator broadcasts an ID + authenticates via a USB-C-only password) and **FR-A8** (app recognises only authorized locators, challenges unknowns, warns on conflicting traffic); glossary terms *Locator ID* and *Connection authorization*. Mechanism in [ADR-0006](adr/0006-locator-connect-password.md). |
 | 2.1.1 | 2026-06-19 | No requirement text change. **NFR-9 strapdown implemented & bench-confirmed at ~480 Hz** (FIFO drain off the 20 Hz loop, GPS-disciplined dt); implementation notes appended to [ADR-0005](adr/0005-retire-ekf-raw-primary.md). FR-P13 firing output remains deferred. |
 | 2.1 | 2026-06-18 | Added **FR-P13** (air-start tilt-safety gate) at Pri 3; deferred **FR-P8/FR-P9** (EKF retired from the real-time path — [ADR-0005](adr/0005-retire-ekf-raw-primary.md)); **decoupled IDs from priority** (the `Pri` column is now authoritative; added a `Status` column); added **NFR-9** (high-rate strapdown attitude) and extended NFR-1 to FR-P13 (#13). |
 | 2.0 | 2026-06-16 | Restructured to markdown with IDs, functional/non-functional split, vetted-gate definition, and glossary (#6). Corrected the SPI/GPS bus statement (#3). |

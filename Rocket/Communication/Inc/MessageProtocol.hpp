@@ -101,6 +101,8 @@ struct PreLaunchData {
 	uint16_t main_backup_deploy_altitude;
 	char device_name[device_name_length];
 	uint16_t battery_voltage_mvolt;
+	uint32_t locator_id;   // cleartext STM MPU UID (== DeviceUID::getUID()); app identifies the locator by this
+	uint32_t auth_tag;     // password-seeded checksum (see Communication::ComputePasswordAuthTag); 0 while computing
 };
 
 struct TelemetryData {
@@ -201,7 +203,7 @@ static_assert(sizeof(PacketHeader)                   ==   6, "PacketHeader size 
 static_assert(kPayloadSize                           == 239, "FlightData payload size changed");
 static_assert(sizeof(StartupMessage)                 ==  74, "StartupMessage size changed");
 static_assert(sizeof(VersionInfoMessage)             ==  70, "VersionInfoMessage size changed");
-static_assert(sizeof(PreLaunchData)                  == 107, "PreLaunchData size changed (app payload 101)");
+static_assert(sizeof(PreLaunchData)                  == 115, "PreLaunchData size changed (app payload 109 = 101 + locator_id 4 + auth_tag 4)");
 static_assert(sizeof(TelemetryData)                  ==  68, "TelemetryData size changed (app payload 62 + rssi 2 = 64)");
 static_assert(sizeof(FlightMetadataRecord)           ==  10, "FlightMetadataRecord size changed");
 static_assert(sizeof(FlightMetadata)                 == 106, "FlightMetadata size changed (app payload 100)");
