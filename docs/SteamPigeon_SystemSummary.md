@@ -1,6 +1,6 @@
 # Steam Pigeon — System Summary
 
-> **Status:** Draft summary, compiled 2026-06-15.
+> **Status:** Draft summary, compiled 2026-06-15; last updated 2026-07-05 (locator LoRa channel settable from the app, receiver follows; pre-launch archival + monotonic clock, watchdog/fault-log, faster USB-C export).
 > **Scope:** Consolidates the *Steam Pigeon Requirements* outline with the current state of the three implementation repos.
 > **Sources:**
 > - Requirements: [docs/SteamPigeonRequirements.md](SteamPigeonRequirements.md) (maintained source as of v2.0; originally `G:\My Drive\Rocketry\Reference\Steam Pigeon Requirements.docx`)
@@ -43,6 +43,9 @@ The gaps catalogued in **Appendix A** are tracked as GitHub issues in [`fschroer
 
 **Unmilestoned** — standalone housekeeping.
 - [x] [#7 — Audit and remove residual/legacy definitions (MsgState, unused flight flags)](https://github.com/fschroer/steam-pigeon-locator/issues/7) — resolved 2026-06-16: `MsgState` and the unused `burnout_detected_`/`drogue_deployed_`/`main_deployed_` flags removed
+- [ ] [#16 — Radio RX: verify removed CRC-mismatch discard doesn't admit corrupt frames](https://github.com/fschroer/steam-pigeon-locator/issues/16) — *bench validation of the 2026-07-04 `radio_driver.c` change*
+- [ ] [#17 — Validate IWDG watchdog timeout + `.noinit` fault-log persistence (NFR-10)](https://github.com/fschroer/steam-pigeon-locator/issues/17) — *bench validation of [ADR-0008](adr/0008-watchdog-fault-log.md)*
+- [ ] [#20 — Validate locator channel-change recovery path (forced miss → receiver revert + retry)](https://github.com/fschroer/steam-pigeon-locator/issues/20) — *bench validation of [ADR-0011](adr/0011-locator-lora-channel-from-app.md) invariant 4 (happy path already bench-tested)*
 
 ---
 
@@ -120,15 +123,17 @@ The firmware is organized as a composition root (`Factory`) that owns and wires 
 - **`Navigation`** (`RocketNav`) — owns the three sensors (`ISM6HG256X`, `MS5611`, `SAMM10Q`) and the `InsEkf15` EKF. Produces both a fused `NavSolution` and raw per-sensor samples. Handles on-pad calibration (ZUPT, gyro-bias freeze, AGL zeroing), cardinal-axis mounting detection on each arm, GPS rate-limiting, and per-phase EKF tuning (`setPhase`).
 - **`FlightManager`** — the flight state machine. Owns *all* event detection (launch, burnout, apogee/noseover, deployment, landing) and the deployment scheduler. Writes per-sample data and discrete events to the archive.
 - **`Communication`** — LoRa message framing, CRC, and the windowed/parity flight-data transfer protocol.
-- **`Archive` / `FlightArchive`** — flight-data logging to external flash, event statistics, metadata records, and the settings journal.
+- **`Archive` / `FlightArchive`** — flight-data logging to external flash, event statistics, metadata records, and the settings journal. Records include ~2 s of pre-launch data via a RAM ring in `FlightManager`, drained into flash throttled to ≤ 1 flash chunk per cycle so launch never overruns the 50 ms budget ([ADR-0007](adr/0007-prelaunch-ring-monotonic-clock.md)).
 - **`Deployment`** — low-level channel firing, continuity sensing, and the remote deployment-test sequence.
-- **`UserInteraction`** — USB-C console for configuration and data export.
+- **`UserInteraction`** — USB-C console for configuration and data export (UART2 at **921600 baud** for fast CSV archive export).
 - **`PowerManagement`** — battery-voltage ADC read.
-- **Common** — `Types.hpp` (the shared data model), buzzer, RGB LED, static strings, formatting, device UID, fault log.
+- **`FaultLog`** (`Diag`) — persistent crash/hang diagnostics. Captures the Cortex-M exception frame + fault-status registers on a fault, the last checkpoint tag + uptime on a watchdog hang, and reset cause + boot count on a normal boot, into a `.noinit` RAM record that survives reset (NFR-10, [ADR-0008](adr/0008-watchdog-fault-log.md)). Kicks the IWDG once per loop.
+- **Common** — `Types.hpp` (the shared data model), buzzer, RGB LED, static strings, formatting, device UID.
 
 ### 3.3 Processing model
 
-- **Super-loop at 20 Hz.** `SAMPLES_PER_SECOND = 20` → a **50 ms** processing window. TIM17 raises a periodic flag; the main `while(1)` loop services it by calling `ProcessRocketEvents` once per window. A free-running 1 MHz TIM2 provides microsecond timing diagnostics (`TimingDiag`) captured every cycle, and — GPS-PPS-disciplined via `elapsed`/`Pps_GetTim2TicksPerSec` — is the trusted timebase for the NFR-9 strapdown dt.
+- **Super-loop at 20 Hz.** `SAMPLES_PER_SECOND = 20` → a **50 ms** processing window. TIM17 raises a periodic flag; the main `while(1)` loop services it by calling `ProcessRocketEvents` once per window. A free-running 1 MHz TIM2 provides microsecond timing diagnostics (`TimingDiag`) captured every cycle, and — GPS-PPS-disciplined via `elapsed`/`Pps_GetTim2TicksPerSec` — is the trusted timebase for the NFR-9 strapdown dt **and the archive's monotonic flight clock** (`AdvanceMonotonicMs`, [ADR-0007](adr/0007-prelaunch-ring-monotonic-clock.md)): archived timestamps are true GPS-anchored elapsed time, not a 50 ms-per-cycle counter.
+- **Watchdog (NFR-10):** the hardware IWDG is refreshed once per cycle from main-loop context (`FaultLog_KickWatchdog`, recording a checkpoint tag); a stalled loop resets the MCU and the tag/uptime survive in `.noinit` RAM for post-mortem. See [ADR-0008](adr/0008-watchdog-fault-log.md).
 - **The high-rate (NFR-9) gyro strapdown rides this same 20 Hz loop without a dedicated ISR:** the gyro is batched into the ISM6HG256X FIFO at 480 Hz and drained+integrated (~24 samples) each cycle, decoupled from the loop rate by the FIFO depth. See ADR-0005 implementation note.
 - **Timebase caveat:** `HAL_GetTick`/`HAL_Delay` are the RTC-based LoRaWAN TimerServer (overridden in `sys_app.c`; SysTick is *not* the tick source). Correct in production (~ms) but they freeze/jump under a debugger — use **TIM2** for any measurement while halted.
 - **Budget target ~25 ms of the 50 ms window**, leaving headroom for jitter and future work (per the requirements).
@@ -159,11 +164,15 @@ States (`FlightStates`): `WaitingLaunch → Launched → Burnout → Noseover �
 - **Message types** (`MsgType`): startup, locator/receiver config-change requests, arm/disarm, prelaunch data (unarmed), telemetry data (armed), flight-metadata request/response, flight-data request/response + parity + ACK, deployment-test request/countdown, receiver-info request/response *(receiver-only, IDs 15–16)*, version request/info.
 - **Telemetry split:** `PreLaunchData` (rich, sent while disarmed — includes raw + processed GPS, deploy config, battery, plus the locator ID + password `auth_tag` for connection authorization) vs `TelemetryData` (compact, sent while armed — fused NED velocity, body-to-NED quaternion, flight state, deployment stats; kept minimal for range, so it carries **no** ID/auth_tag).
 - **Connection authorization (FR-P14, [ADR-0006](adr/0006-locator-connect-password.md)):** `PreLaunchData` carries a cleartext `locator_id` (from the MCU UID) and a password-seeded `auth_tag` (two keyed CRC-16 passes over the base struct with `crc`/`auth_tag` zeroed; key = FNV-1a of the password, `0` = open). The receiver forwards both untouched. The app identifies the locator by `locator_id`, verifies `auth_tag` with the stored/entered password, and only **recognises** (processes for control, enables commands) locators it is authorized for — challenging for a password on first contact with an unknown one and warning about conflicting traffic. The password is set **and viewed** only over the locator's USB-C console (stored plaintext in the locator-only runtime journal, never in the over-the-air settings). The app challenges for it on first contact with an unknown locator (on startup or a channel change) and warns about conflicting traffic. Enforcement is app-side (soft gate); locator config is additionally accepted only while Disarmed.
-- **Flight-data transfer:** archived flights are downloaded as a windowed burst (`kWindowSize = 4`) with a parity packet per group (`kParityGroupSize = 4`) for single-packet loss recovery, plus a deferred cumulative-ACK bitmap so the ACK is sent only when the locator's radio is idle. Sample data is **delta-compressed** (48-byte base header + 24-byte per-sample deltas) to fit many samples per packet.
+- **Flight-data transfer ([ADR-0009](adr/0009-flight-data-transfer-reliability.md)):** archived flights are downloaded as a windowed burst (`kWindowSize = 8`, a whole multiple of `kParityGroupSize = 4`) with a parity packet per group for single-packet loss recovery, plus a deferred cumulative-ACK bitmap so the ACK is sent only when the locator's radio is idle. `kRetxTimeoutMs` (7000 ms) is sized to exceed the full burst so packets awaiting their deferred ACK aren't retransmitted mid-burst. Sample data is **delta-compressed** (48-byte base header + 24-byte per-sample deltas) to fit many samples per packet. Each `FlightData`/`FlightDataParity` frame is delimited on the wire by its **exact length derived from the header** (not by buffer size), so bursted or BLE-fragmented packets each pass the per-frame CRC-16 individually. `packet_count == 0` is a reserved header-only **"no data" marker** for an empty record. The locator returns to normal PreLaunchData transmission on the app's `DisarmRequest` (leaving the screen); short idle/active timeouts remain only as a disconnect safety net.
 
 ### 3.6 Receiver
 
 Same STM32WL5 MCU. On boot it configures an external BLE module over UART using an AT-command sequence (command mode → enable BLE broadcast → set name from settings → set BLE address derived from the chip UID → reset). It relays LoRa↔BLE traffic, answers receiver-info and version requests, shows charge/BLE/comms status on an RGB LED, and offers its own USB-C configuration console (`UserInteraction`) and persistent settings (channel, device name). It uses a smaller data flash (MX25L4006E) for its settings journal.
+
+Forwarding app→locator commands is timing-aware (half-duplex collision avoidance): while the locator transmits periodically (PreLaunchData/Telemetry) the receiver forwards only in a safe window just after a received periodic message; once the locator is in **flight-profile mode** (a `FlightMetadata` or `FlightData` frame seen ⇒ locator quiet and listening) it forwards immediately, and during a data burst it defers the app's `FlightDataAck` until the burst goes silent ([ADR-0009](adr/0009-flight-data-transfer-reliability.md)).
+
+**Following a locator channel change ([ADR-0011](adr/0011-locator-lora-channel-from-app.md)):** when the app changes the *locator's* LoRa channel (from Locator Settings), the receiver forwards the `LocatorCfgChgRequest` to the locator on the **old** channel and then, once that transmit has completed, switches its own channel to match so the link is preserved. The switch is deferred to main-loop context after `OnRadioTxDone` — changing RF frequency between `Send()` and TxDone would corrupt the very forward the locator needs. This is distinct from a receiver-only `ReceiverCfgChgRequest` (Receiver Settings), which retargets the receiver to a *different* locator already on another channel.
 
 ### 3.7 App
 
@@ -177,22 +186,25 @@ Android / Kotlin / Jetpack Compose, organized around a `RocketViewModel` and a s
 - Autonomous flight detection and four-channel recovery deployment with primary/backup roles and per-channel continuity verification.
 - On-pad calibration: zero-velocity update, gyro-bias estimation and freeze at ignition, AGL zeroing, and cardinal-axis mounting detection re-run on every arm.
 - 15-state INS EKF with per-flight-phase Q/R tuning; optional baro dynamic-pressure ("pitot") correction.
-- Full flight archival to external flash with discrete event timestamps and per-flight metadata; downloadable over LoRa or USB-C.
+- Full flight archival to external flash with discrete event timestamps and per-flight metadata; downloadable over LoRa or USB-C. Records prepend ~2 s of pre-launch data and are timestamped on a GPS-disciplined real-time clock (record starts at ~0 ms, launch at ~2000 ms — [ADR-0007](adr/0007-prelaunch-ring-monotonic-clock.md)).
+- Robust archive lifecycle ([ADR-0010](adr/0010-archive-flash-robustness.md)): the flash is reset to a known state at every boot (so archived data survives a debugger/flash/watchdog reset without a power cycle); a flight that never landed is still recoverable (chunk-scan without a close trailer); an arm→disarm-before-launch→re-arm reuses the same record (durable across reboot) instead of consuming a slot; and USB-C data-menu commands reclaim empty "ghost" records or fully erase the archive for a structure change.
+- Automatic hang recovery (IWDG watchdog) with persistent crash/hang diagnostics preserved across reset (NFR-10, [ADR-0008](adr/0008-watchdog-fault-log.md)).
 - Audio cues for power-on, arm/disarm, and recovery.
 - LoRa telemetry (prelaunch + in-flight), remotely commanded arm/disarm and deployment test.
-- USB-C configuration and data export, including a USB-C-only connection password that authenticates the locator's broadcasts (FR-P14).
+- USB-C configuration and data export at 921600 baud, including a USB-C-only connection password that authenticates the locator's broadcasts (FR-P14).
 
 ### 4.2 Receiver
 - Transparent LoRa↔BLE relay with message-level forwarding.
 - Injects receiver channel, name, battery, RSSI, and firmware version.
 - Status LEDs for charging, BLE connectivity, and communication.
 - USB-C configuration; persistent channel/name settings.
+- Automatically follows the locator's channel when the app changes it, so the link is preserved without manual receiver reconfiguration ([ADR-0011](adr/0011-locator-lora-channel-from-app.md)).
 
 ### 4.3 App
 - Live telemetry and flight-state display.
 - Rocket location relative to the phone (map + heads-up "point at the sky" view).
 - Spoken status callouts (TTS) so the user can keep eyes on the rocket.
-- Locator and receiver configuration.
+- Locator and receiver configuration, including two LoRa-channel controls with distinct purposes ([ADR-0011](adr/0011-locator-lora-channel-from-app.md)): *Locator Settings → channel* moves a locator to a new channel (the receiver auto-follows), while *Receiver Settings → channel* retargets the receiver to a different locator already on another channel. A failed locator channel change is recovered by reverting the receiver to the old channel and retrying.
 - Archived-flight download, graphical flight profiles, and path export.
 - Remote deployment-charge testing.
 - Connection authorization: password challenge on first contact with an unknown locator, a remembered store of authorized locators, and a conflicting-traffic warning (FR-P14).
@@ -202,13 +214,18 @@ Android / Kotlin / Jetpack Compose, organized around a `RocketViewModel` and a s
 ## 5. Operational Notes
 
 - **Real-time budget is hard, not soft.** Every code path must complete within the 50 ms window; the design target is ~25 ms. `TimingDiag` instrumentation is archived each cycle — watch `process_dur_us` as features are added.
-- **The shared SPI2 bus is a known hazard.** Baro + IMU + flash share it. The ISR-enqueue / main-loop-drain rule in `SpiBus` exists specifically because a violation caused a false apogee and premature deployment. Any new SPI user must obey it.
+- **The shared SPI2 bus is a known hazard.** Baro + IMU + flash share it. The ISR-enqueue / main-loop-drain rule in `SpiBus` exists specifically because a violation caused a false apogee and premature deployment. Any new SPI user must obey it — including the **flash**: the UART2 console and LoRa-RX paths were later found doing flash I/O in ISR context (corrupting concurrent IMU/baro reads) and moved to main-loop context ([ADR-0010](adr/0010-archive-flash-robustness.md)). Never touch the flash from an ISR.
 - **Software baro filtering is mandatory.** The MS5611 has no hardware spike rejection; spurious values must be filtered in software, and D1/D2 conversion sequencing must keep a valid pressure available every window.
 - **Raw vs. fused is a policy, not an implementation detail.** The requirements mandate raw baro/GPS for Priorities 1–2 (and the high-rate gyro strapdown for the Priority-3 air-start gate) over unvetted fusion. As of PR #9 (2026-06-18) the deployment path is fully on raw baro — apogee, main-deploy altitude, and deployment velocity all flow through `SelectDeploymentSource()` — and the EKF is being retired from the real-time path (ADR-0005). Treat the raw-vs-fused boundary as a deliberate, tracked policy, not something to "fix" ad hoc.
 - **The wire format is defined in two places.** `MessageProtocol.hpp` (C++ packed structs) and the Kotlin side (`RocketState.kt` + `FlightDataRepository.kt` manual byte offsets) must be hand-synchronized. There is no shared schema or generator. This is the highest-probability source of future "conflicting patches."
 - **Arming triggers re-calibration.** Mounting detection and EKF re-init happen on each arm; arming the rocket in a non-final orientation and then re-orienting it will invalidate the calibration.
-- **Flights are capped at 8 minutes** of recorded data; the state machine force-closes to `Landed` at that limit so timestamps never exceed the recorded span.
+- **Flights are capped at 8 minutes** of recorded data; the state machine force-closes to `Landed` at that limit (measured on the GPS-disciplined flight clock) so timestamps never exceed the recorded span.
+- **Archived time is real time, and records lead launch by ~2 s.** Timestamps come from a GPS-PPS-disciplined monotonic clock rebased to a launch epoch, not a per-cycle counter ([ADR-0007](adr/0007-prelaunch-ring-monotonic-clock.md)). Any archive consumer that assumed "sample 0 = launch = t0" must expect the record to start ~2 s before launch and launch to land at ~2000 ms. `FlightSample` layout is unchanged, so `ARCHIVE_VERSION` stays 5.
+- **A CubeMX/linker regeneration can silently break the fault log.** The persistent `FaultRecord` lives in a hand-added `.noinit` section in `STM32WL5MOCHX_FLASH.ld`; if that section is lost, crash/hang diagnostics stop surviving reset (NFR-10, [ADR-0008](adr/0008-watchdog-fault-log.md)). The IWDG timeout must also stay above the worst-case cycle time so a slow-but-valid cycle can't false-trip a reset.
+- **The external flash needs a reset it can't get from an MCU reset.** A debugger/flash or watchdog reset restarts the MCU but not the SPI flash, which can be left unreadable until a power cycle; the firmware issues a software reset at boot to restore it ([ADR-0010](adr/0010-archive-flash-robustness.md)). If archived data ever "disappears" after flashing but returns after a power cycle, that reset (or the `CSB_MEM` pull-up) is the thing to check — the data is not lost.
+- **Changing the record structure requires erasing the archive.** The record geometry is derived from `sizeof(FlightSample)` and the stat set; a layout change makes old records unreadable and their headers stale at shifted offsets. Export any wanted flights first, then use the data-menu full erase (`e`) to reset the archive region ([ADR-0010](adr/0010-archive-flash-robustness.md)). This is also why `ARCHIVE_VERSION` must be bumped on any layout change.
 - **One charge fires at a time.** Overlapping deployment commands are queued, not fired simultaneously — relevant when reasoning about current draw and near-simultaneous primary/backup events.
+- **Never change the receiver's RF frequency mid-transmit.** When the receiver follows a locator channel change ([ADR-0011](adr/0011-locator-lora-channel-from-app.md)), the `SetChannel` must be deferred until the forwarded command has finished transmitting (after `OnRadioTxDone`) — `radio_->Send()` only *starts* the TX. Switching between `Send()` and TxDone corrupts the forward, so the locator never moves while the receiver does (a bench-observed failure). The locator↔receiver channel pair must stay in sync; the app's confirm/recovery logic is the safety net if it drifts.
 
 ---
 

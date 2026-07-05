@@ -21,3 +21,8 @@ Write an ADR for a decision that is costly to reverse, or that future work must 
 | [0004](0004-fusion-vetting-method.md) | Fusion-vetting method: validate against an independent reference | Proposed |
 | [0005](0005-retire-ekf-raw-primary.md) | Retire the EKF from the real-time path — raw-primary navigation | Accepted |
 | [0006](0006-locator-connect-password.md) | Locator connect-gating via a password-seeded broadcast authenticator | Accepted |
+| [0007](0007-prelaunch-ring-monotonic-clock.md) | Pre-launch ring buffer + GPS-disciplined monotonic flight clock | Accepted |
+| [0008](0008-watchdog-fault-log.md) | Independent watchdog + persistent fault/hang diagnostics | Accepted |
+| [0009](0009-flight-data-transfer-reliability.md) | Reliable flight-data transfer: header-exact framing, no-data marker, forwarding/lifecycle rules | Accepted |
+| [0010](0010-archive-flash-robustness.md) | Archive record lifecycle & external-flash robustness (boot reset, ISR-free flash I/O, trailer-less recovery, re-arm reuse) | Accepted |
+| [0011](0011-locator-lora-channel-from-app.md) | Change the locator LoRa channel from the app — receiver follows after forwarding | Accepted |

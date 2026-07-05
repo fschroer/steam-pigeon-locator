@@ -1,7 +1,7 @@
 # Steam Pigeon — Requirements
 
-- **Version:** 2.2
-- **Date:** 2026-07-04
+- **Version:** 2.3.3
+- **Date:** 2026-07-05
 - **Supersedes:** the prose outline in `Steam Pigeon Requirements.docx` (this markdown is now the maintained source).
 - **Status key:** each requirement carries a stable ID (`FR-*` functional, `NFR-*` non-functional, `HW-*` hardware). **IDs are append-only, opaque labels — never renumbered.** The historical `FR-P#` numbers embed the priority a requirement was *created* at; as of v2.1 that coupling is retired — the **`Pri` column is the authoritative ranking** (it changes when priorities are reordered) and the **`Status` column** is *Active*, *Deferred*, or *Withdrawn*. A new requirement takes the next free ID regardless of its priority (e.g. `FR-P13` enters at Pri 3).
 
@@ -42,8 +42,8 @@ The original outline's ranked goals were captured as `FR-P1…FR-P12` with the I
 - FR-L1 — Collect data from the barometric, inertial, and GPS sensors (§HW).
 - FR-L2 — Fire deployment charges on four independently configurable channels, each assignable to drogue-primary, drogue-backup, main-primary, or main-backup.
 - FR-L3 — Sense deployment-channel continuity before and after firing.
-- FR-L4 — Archive flight data to external flash for later download.
-- FR-L5 — Support configuration and archived-data download over USB-C.
+- FR-L4 — Archive flight data to external flash for later download, including the ~2 s of pre-launch data leading up to launch, timestamped on a GPS-disciplined real-time clock ([ADR-0007](adr/0007-prelaunch-ring-monotonic-clock.md)). Archived data must survive an MCU-only reset (debugger/flash/watchdog) and a flight's committed samples must remain recoverable even if the flight was not cleanly closed (power lost / landing not detected) ([ADR-0010](adr/0010-archive-flash-robustness.md)).
+- FR-L5 — Support configuration and archived-data download over USB-C, plus archive-maintenance commands: reclaim empty/unused records and fully erase the archive (e.g. after a record-structure change) ([ADR-0010](adr/0010-archive-flash-robustness.md)).
 - FR-L6 — Broadcast a reasonably-unique locator ID and authenticate its broadcasts with a connection password that can be set **only** over USB-C (never over the air) (FR-P14, [ADR-0006](adr/0006-locator-connect-password.md)).
 
 **Receiver**
@@ -51,14 +51,15 @@ The original outline's ranked goals were captured as `FR-P1…FR-P12` with the I
 - FR-R2 — Provide receiver-specific information and status to the app.
 - FR-R3 — Indicate charging, BLE connectivity, and communication status via LEDs.
 - FR-R4 — Support configuration over USB-C.
+- FR-R5 — Follow the locator's LoRa channel when relaying a locator channel change, switching only after the forwarded command has finished transmitting, so the locator↔receiver link is preserved without manual reconfiguration ([ADR-0011](adr/0011-locator-lora-channel-from-app.md)).
 
 **App**
 - FR-A1 — Display pre-flight and in-flight telemetry.
 - FR-A2 — Display rocket location relative to the user's phone.
 - FR-A3 — Speak important locator status (FR-P12).
-- FR-A4 — Allow the user to update locator and receiver configuration.
+- FR-A4 — Allow the user to update locator and receiver configuration. This includes the LoRa channel via two distinct controls ([ADR-0011](adr/0011-locator-lora-channel-from-app.md)): changing a *locator's* channel (the receiver follows automatically to keep the link) and changing the *receiver's* channel independently (to switch to a different locator already on another channel). A failed locator channel change reverts the receiver to the prior channel and retries.
 - FR-A5 — Provide a heads-up view: rocket orientation, key telemetry in graphical form, and an aid to locating the rocket in the sky during flight.
-- FR-A6 — Display archived flight information graphically.
+- FR-A6 — Display archived flight information graphically (downloaded over LoRa via the reliable windowed/parity transfer — [ADR-0009](adr/0009-flight-data-transfer-reliability.md)).
 - FR-A7 — Provide a means to remotely test deployment charges.
 - FR-A8 — Recognise only authorized locators: challenge for a password on first contact with an unknown locator, remember authorized locators, and warn about conflicting traffic on the current channel (FR-P14, [ADR-0006](adr/0006-locator-connect-password.md)).
 
@@ -102,6 +103,7 @@ The original outline's ranked goals were captured as `FR-P1…FR-P12` with the I
 | **NFR-7 (baro timing)** | The MS5611 requires careful sequencing of its D1 and D2 conversions; the locator must guarantee a valid pressure value is available in every 50 ms window. |
 | **NFR-8 (continuity safety)** | Deployment-channel continuity sensing must not energize a charge. |
 | **NFR-9 (high-rate attitude)** | Orientation used for safety-critical gating (FR-P13) must be produced by a **high-rate strapdown gyro integrator** (target ≥ 480 Hz, decoupled from the 20 Hz loop of NFR-3 and respecting NFR-4 ISR discipline), seeded from the known on-pad vertical attitude; it must not depend on unvetted fusion (NFR-1). The gyro full-scale range must exceed the maximum expected body rate (flight rates reach ~768 dps; the ISM6HG256X is configured at ±4000 dps). Because ballistic coast provides no gravity reference, the estimator dead-reckons through coast and its confidence degrades with elapsed time since the last attitude fix. |
+| **NFR-10 (reliability / fault recovery)** | The locator must automatically recover from a firmware hang and preserve enough state across an unexpected reset to diagnose it. A hardware **independent watchdog (IWDG)**, refreshed once per super-loop cycle from main-loop context (respecting NFR-4), resets the MCU if the loop stalls; a persistent **fault/hang record** — CPU exception frame + fault-status registers on a fault, last checkpoint tag + uptime on a watchdog hang, reset cause + boot count on a normal boot — survives the reset in non-initialized (`.noinit`) RAM for later readout. Mechanism in [ADR-0008](adr/0008-watchdog-fault-log.md). |
 
 ---
 
@@ -132,6 +134,10 @@ The original outline's ranked goals were captured as `FR-P1…FR-P12` with the I
 
 | Version | Date | Change |
 |---------|------|--------|
+| 2.3.3 | 2026-07-05 | Added **FR-R5** (receiver follows the locator's channel when relaying a locator channel change, switching only after the forward transmits) and extended **FR-A4** (two LoRa-channel controls: move a locator vs. retarget the receiver; failed-change recovery). Supports **FR-P3**. No priority changes; no wire-format change. Rationale in [ADR-0011](adr/0011-locator-lora-channel-from-app.md); recovery-path bench validation **[#20](https://github.com/fschroer/steam-pigeon-locator/issues/20)**. |
+| 2.3.2 | 2026-07-05 | Extended **FR-L4** (archived data survives an MCU-only reset; an unclosed flight's committed samples remain recoverable) and **FR-L5** (archive-maintenance commands: reclaim empty records / full erase). Enforces **NFR-4**/**NFR-5** (moved console + LoRa-RX flash I/O out of ISR context). Rationale in [ADR-0010](adr/0010-archive-flash-robustness.md); bench validation **[#19](https://github.com/fschroer/steam-pigeon-locator/issues/19)**. |
+| 2.3.1 | 2026-07-04 | No requirement text change. Flight-data OTA transfer made reliable across locator/receiver/app (header-exact framing, "no data" marker, app-driven lifecycle, receiver flight-profile-mode forwarding, burst window 4→8); rationale in [ADR-0009](adr/0009-flight-data-transfer-reliability.md). Supports **FR-A6** / **FR-L4**. |
+| 2.3 | 2026-07-04 | Added **NFR-10** (reliability / fault recovery: IWDG watchdog + persistent `.noinit` fault-log — [ADR-0008](adr/0008-watchdog-fault-log.md)); extended **FR-L4** to cover ~2 s of pre-launch data on a GPS-disciplined real-time clock ([ADR-0007](adr/0007-prelaunch-ring-monotonic-clock.md)). No functional-requirement priority changes. |
 | 2.2 | 2026-07-04 | Added **FR-P14** (connection authorization) at Pri 7, renumbering FR-P6…FR-P12 down to 8…12; added component reqs **FR-L6** (locator broadcasts an ID + authenticates via a USB-C-only password) and **FR-A8** (app recognises only authorized locators, challenges unknowns, warns on conflicting traffic); glossary terms *Locator ID* and *Connection authorization*. Mechanism in [ADR-0006](adr/0006-locator-connect-password.md). |
 | 2.1.1 | 2026-06-19 | No requirement text change. **NFR-9 strapdown implemented & bench-confirmed at ~480 Hz** (FIFO drain off the 20 Hz loop, GPS-disciplined dt); implementation notes appended to [ADR-0005](adr/0005-retire-ekf-raw-primary.md). FR-P13 firing output remains deferred. |
 | 2.1 | 2026-06-18 | Added **FR-P13** (air-start tilt-safety gate) at Pri 3; deferred **FR-P8/FR-P9** (EKF retired from the real-time path — [ADR-0005](adr/0005-retire-ekf-raw-primary.md)); **decoupled IDs from priority** (the `Pri` column is now authoritative; added a `Status` column); added **NFR-9** (high-rate strapdown attitude) and extended NFR-1 to FR-P13 (#13). |
