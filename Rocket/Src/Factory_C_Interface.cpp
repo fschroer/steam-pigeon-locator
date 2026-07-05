@@ -6,6 +6,7 @@
 
 extern "C" {
 #include "tim.h"    // exposes TIM2 base-address macro and htim2
+uint32_t Pps_GetTim2TicksPerSec(void);   // GPS-PPS-disciplined TIM2 ticks/sec (main.c)
 }
 
 // HAL handles provided by CubeMX (C symbols)
@@ -76,8 +77,40 @@ static uint16_t s_oc_start_us    = 0;
 static uint16_t s_oc_end_us      = 0;
 static uint16_t s_process_dur_us = 0;
 
+// ---------------------------------------------------------------------------
+// GPS-PPS-disciplined monotonic millisecond clock.
+//
+// TIM2 free-runs at a nominal 1 MHz (prescaler 47) but its true rate drifts with
+// the MSI oscillator.  Pps_GetTim2TicksPerSec() returns the TIM2 ticks measured
+// between two GPS PPS edges (≈1e6; 0 until PPS lock), so dividing the per-cycle
+// TIM2 delta by it yields real elapsed time anchored to GPS — the same timebase
+// the NFR-9 strapdown dt uses.  Accumulated in microseconds (64-bit) and exposed
+// as milliseconds; the 50 ms loop samples far inside the ~71-min 32-bit wrap, so
+// the uint32 delta is wrap-safe.
+// ---------------------------------------------------------------------------
+static uint64_t s_mono_us     = 0;
+static uint32_t s_prev_tim2   = 0;
+static bool     s_mono_inited = false;
+
+static uint32_t AdvanceMonotonicMs() {
+    const uint32_t tim2_now = TIM2->CNT;
+    if (s_mono_inited) {
+        const uint32_t dt_ticks = tim2_now - s_prev_tim2;   // wrap-safe
+        uint32_t tps = Pps_GetTim2TicksPerSec();
+        if (tps == 0u)
+            tps = 1000000u;                                  // nominal until PPS lock
+        s_mono_us += static_cast<uint64_t>(dt_ticks) * 1000000ull / tps;
+    } else {
+        s_mono_inited = true;
+    }
+    s_prev_tim2 = tim2_now;
+    return static_cast<uint32_t>(s_mono_us / 1000ull);
+}
+
 extern "C" void RocketFactory_ProcessRocketEvents(uint8_t rocket_service_count) {
     const uint16_t proc_start = static_cast<uint16_t>(TIM2->CNT);
+
+    factory.SetFlightClockMs(AdvanceMonotonicMs());
 
     TimingDiag diag;
     diag.oc_start_us      = s_oc_start_us;

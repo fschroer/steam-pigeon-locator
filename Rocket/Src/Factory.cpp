@@ -77,6 +77,11 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 		if (device_state_ == DeviceState::Armed) {
 			BuzzerReset();
 			buzzer_phase_ = BuzzerPhase::Arming;
+			// Full reset so the locator can be re-armed after a landing without a
+			// power cycle: returns the flight state to WaitingLaunch, clears every
+			// per-flight variable, and drops any stale on-pad data from a prior arm.
+			flight_.PrepareForArm();
+			datestamp_saved_ = false;   // re-write FlightTimestampS for the new flight
 #ifndef NAV_TEST
 			archive_.StartOpenNewFlight();
 #endif

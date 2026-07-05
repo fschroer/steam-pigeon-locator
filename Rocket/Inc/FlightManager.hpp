@@ -5,6 +5,7 @@ extern "C" {
 }
 
 #include "Archive.hpp"
+#include "Constants.hpp"
 #include "Types.hpp"
 #include "Navigation.hpp"
 #include "PowerManagement.hpp"
@@ -20,6 +21,28 @@ public:
     // ProcessRocketEvents call.  The values are written into the next archived
     // FlightSample via archive_.WriteData().
     void SetTimingDiag(const TimingDiag &t) { m_timing_diag_ = t; }
+
+    // GPS-PPS-disciplined monotonic millisecond clock, supplied each cycle by the
+    // C interface (Factory_C_Interface.cpp).  Used as the absolute capture time of
+    // every archived sample and as the basis for the (rebased) elapsed flight clock.
+    void SetFlightClockMs(uint32_t mono_ms) { m_flight_clock_ms_ = mono_ms; }
+
+    // Clear the pre-launch ring and record epoch.  Called when a new flight is
+    // armed so stale on-pad data from an abandoned arm cannot leak into the record.
+    void ResetPreLaunchBuffer() {
+        m_ring_head_ = 0;
+        m_ring_count_ = 0;
+        m_record_origin_set_ = false;
+        m_record_origin_ms_  = 0;
+    }
+
+    // Full reset for a fresh arm: returns the state machine to WaitingLaunch and
+    // clears every per-flight variable and the pre-launch ring, so the locator can
+    // be re-armed after a landing WITHOUT a power cycle.
+    void PrepareForArm() {
+        ResetFlight();
+        ResetPreLaunchBuffer();
+    }
 
     FlightStates GetFlightState() const { return flight_state_; }
     void SetFlight_State(FlightStates flight_state) { flight_state_ = flight_state; }
@@ -55,6 +78,31 @@ private:
     void CheckQueuedDeployment();
     void DeployIfClear(uint8_t channel);
     void ResetFlight();
+
+    // ── Pre-launch ring buffer (FR: 2 s of pre-launch data in the record) ─────
+    // Every armed cycle a fully-built FlightSample is pushed here, stamped with the
+    // absolute monotonic clock.  In WaitingLaunch only the most recent
+    // kPreLaunchHoldSamples (2 s) are retained.  At launch the record epoch is set
+    // to the oldest retained sample and the ring is drained oldest-first into the
+    // archive — capped at one flash chunk commit per cycle so no single super-loop
+    // cycle overruns the 50 ms window (see the implementation notes / plan).
+    void PushPreLaunchSample(const FlightArchive::FlightSample &s, bool pre_launch);
+    void DrainPreLaunchRing(bool flush_all);
+
+    static constexpr uint16_t kPreLaunchHoldSamples =
+        2u * SAMPLES_PER_SECOND;                       // 2 s retained before launch
+    static constexpr uint16_t kPreLaunchRingSamples =
+        kPreLaunchHoldSamples + SAMPLES_PER_SECOND / 2u + 1u;  // + drain/launch headroom
+    FlightArchive::FlightSample m_ring_[kPreLaunchRingSamples] { };
+    uint16_t m_ring_head_  = 0;                        // index of oldest buffered sample
+    uint16_t m_ring_count_ = 0;                        // number of buffered samples
+
+    // Record epoch: absolute monotonic ms of the oldest pre-launch sample, set at
+    // launch.  All archived timestamps (samples and events) are this-relative, so
+    // the record starts at ~0 and launch lands at ~2000 ms.
+    uint32_t m_flight_clock_ms_   = 0;                 // absolute monotonic ms (this cycle)
+    uint32_t m_record_origin_ms_  = 0;
+    bool     m_record_origin_set_ = false;
 
     TimingDiag   m_timing_diag_         { };
     FlightStates flight_state_          = FlightStates::WaitingLaunch;

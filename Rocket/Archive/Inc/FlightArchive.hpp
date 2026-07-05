@@ -72,6 +72,14 @@ namespace FlightArchive
         // INVALID_RECORD_ID if none.
         uint16_t FindUnflownOpenRecord(StatId launchedStatId) const;
         bool IsActiveOpen() { return m_rt.activeOpen; };
+        // Number of samples that can be written before the next chunk commit (flash
+        // page-program) occurs.  Writing this many fills the open chunk exactly and
+        // triggers one commit; writing fewer triggers none.  Used by the pre-launch
+        // ring drain to cap each super-loop cycle at a single flash commit.
+        uint16_t SamplesUntilChunkCommit() const {
+            const Geometry g = GetGeometry();
+            return static_cast<uint16_t>(g.samplesPerChunk - m_rt.bufferedSamples);
+        }
         // Free a single record IF it is a dataless ghost — has a valid header,
         // is not cleanly closed, holds zero committed chunks, and is not the
         // currently-open record.  Erases only its first sector (header + valid

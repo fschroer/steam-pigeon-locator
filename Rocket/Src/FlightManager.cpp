@@ -272,12 +272,26 @@ void FlightManager::UpdateFlightState() {
     NavSolution nav_solution = nav_.getFused();
     const RocketPersistentSettings locator_settings = archive_.GetLocatorSettings();
 
+    // Elapsed flight clock: true milliseconds since the record epoch (the oldest
+    // buffered pre-launch sample), derived from the GPS-PPS-disciplined monotonic
+    // clock.  Zero until launch establishes the epoch.
+    if (m_record_origin_set_)
+        flight_time_ms = m_flight_clock_ms_ - m_record_origin_ms_;
+
     // --- Launch detection ---
     if (flight_state_ == FlightStates::WaitingLaunch) {
         if (DetectLaunch(nav_solution)) {
             ResetFlight();
             flight_state_ = FlightStates::Launched;
             nav_.setPhase(FlightStates::Launched);
+            // Anchor the record epoch to the oldest retained pre-launch sample so
+            // the ~2 s leading up to launch is included; launch then lands at
+            // ~2000 ms.  All subsequent timestamps are this-relative.
+            m_record_origin_ms_ = (m_ring_count_ > 0)
+                                ? m_ring_[m_ring_head_].timestamp_ms
+                                : m_flight_clock_ms_;
+            m_record_origin_set_ = true;
+            flight_time_ms = m_flight_clock_ms_ - m_record_origin_ms_;
             archive_.WriteEvent(FlightArchive::Statistic::LaunchTimestampMs, flight_time_ms);
             deployment_ch1_stats_ = static_cast<uint8_t>(locator_settings.deployment_ch1_mode);
             deployment_ch2_stats_ = static_cast<uint8_t>(locator_settings.deployment_ch2_mode);
@@ -576,18 +590,77 @@ void FlightManager::UpdateFlightState() {
         deploy_ch4_time_++;
     }
 
-    if (flight_state_ >= FlightStates::Launched && flight_state_ < FlightStates::Landed) {
-        BaroSample baro_raw = nav_.getRawBaro();
-        archive_.WriteData(flight_time_ms, nav_solution, baro_raw.altitude_m_agl, baro_raw.velocity, flight_state_, m_timing_diag_,
-                           nav_.getTiltFromVerticalRad(), nav_.getStrapdownQuat());
-        flight_time_ms += 1000 / SAMPLES_PER_SECOND;
-        // Force-close the flight once the archive record is full so the landing
-        // timestamp is never larger than the recorded data span.
-        if (flight_time_ms >= kMaxFlightMs) {
-            flight_state_ = FlightStates::Landed;
-            nav_.setPhase(FlightStates::Landed);
-            archive_.WriteEvent(FlightArchive::Statistic::LandingTimestampMs, flight_time_ms);
+    // --- Pre-launch ring producer ---
+    // Capture this cycle's sample (stamped with the absolute monotonic clock) into
+    // the ring.  Runs from WaitingLaunch through the in-flight states; in
+    // WaitingLaunch only the most recent 2 s are retained.
+    if (flight_state_ >= FlightStates::WaitingLaunch && flight_state_ < FlightStates::Landed) {
+        const BaroSample baro_raw = nav_.getRawBaro();
+        const FlightArchive::FlightSample s = Archive::BuildSample(
+            m_flight_clock_ms_, nav_solution, baro_raw.altitude_m_agl, baro_raw.velocity,
+            flight_state_, m_timing_diag_, nav_.getTiltFromVerticalRad(), nav_.getStrapdownQuat());
+        PushPreLaunchSample(s, flight_state_ == FlightStates::WaitingLaunch);
+    }
+
+    // Force-close the flight once the record span is full so the landing timestamp
+    // is never larger than the recorded data span.
+    if (flight_state_ >= FlightStates::Launched && flight_state_ < FlightStates::Landed
+            && flight_time_ms >= kMaxFlightMs) {
+        flight_state_ = FlightStates::Landed;
+        nav_.setPhase(FlightStates::Landed);
+        archive_.WriteEvent(FlightArchive::Statistic::LandingTimestampMs, flight_time_ms);
+    }
+
+    // --- Pre-launch ring drain ---
+    // Once launched, write buffered samples oldest-first into the archive.  While
+    // in flight the drain is throttled to at most one flash chunk commit per cycle
+    // (the timing budget); at landing the (near-empty) remainder is flushed in full
+    // so CloseCurrentFlight, called immediately after, writes a complete record.
+    if (flight_state_ >= FlightStates::Launched)
+        DrainPreLaunchRing(/*flush_all=*/ flight_state_ >= FlightStates::Landed);
+}
+
+// ---------------------------------------------------------------------------
+// PushPreLaunchSample
+// Append a fully-built sample to the ring.  pre_launch=true caps retention at the
+// most recent kPreLaunchHoldSamples (2 s); in flight nothing is evicted (unflushed
+// data must not be dropped) — the drain keeps the ring near-empty.
+// ---------------------------------------------------------------------------
+void FlightManager::PushPreLaunchSample(const FlightArchive::FlightSample &s, bool pre_launch) {
+    const uint16_t tail = static_cast<uint16_t>((m_ring_head_ + m_ring_count_) % kPreLaunchRingSamples);
+    m_ring_[tail] = s;
+    if (m_ring_count_ < kPreLaunchRingSamples)
+        ++m_ring_count_;
+    else
+        m_ring_head_ = static_cast<uint16_t>((m_ring_head_ + 1) % kPreLaunchRingSamples);  // physical-full safety
+
+    if (pre_launch) {
+        while (m_ring_count_ > kPreLaunchHoldSamples) {
+            m_ring_head_ = static_cast<uint16_t>((m_ring_head_ + 1) % kPreLaunchRingSamples);
+            --m_ring_count_;
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DrainPreLaunchRing
+// Write buffered samples oldest-first, rebased to the record epoch.  Throttled
+// mode writes only up to the next chunk boundary (Archive::SamplesUntilChunkCommit)
+// so at most one flash chunk is committed this cycle; flush mode writes all that
+// remain.
+// ---------------------------------------------------------------------------
+void FlightManager::DrainPreLaunchRing(bool flush_all) {
+    uint16_t to_write = flush_all ? m_ring_count_ : archive_.SamplesUntilChunkCommit();
+    if (to_write > m_ring_count_)
+        to_write = m_ring_count_;
+
+    for (uint16_t i = 0; i < to_write; ++i) {
+        FlightArchive::FlightSample s = m_ring_[m_ring_head_];
+        s.timestamp_ms -= m_record_origin_ms_;   // rebase to record epoch
+        if (!archive_.WriteBuiltSample(s))
+            break;                                 // record full / write failed
+        m_ring_head_ = static_cast<uint16_t>((m_ring_head_ + 1) % kPreLaunchRingSamples);
+        --m_ring_count_;
     }
 }
 
@@ -639,4 +712,12 @@ void FlightManager::ResetFlight() {
     m_last_raw_vspeed_      = 0.0f;
     m_last_raw_vspeed_ms_   = 0;
     m_have_raw_vspeed_      = false;
+    deployment_queued_[0]   = false;
+    deployment_queued_[1]   = false;
+    deployment_queued_[2]   = false;
+    deployment_queued_[3]   = false;
+    m_airstart_inhibit_     = RocketNav::AS_DISABLED;
+    // Clear the record epoch; re-established at the next launch detect.
+    m_record_origin_ms_     = 0;
+    m_record_origin_set_    = false;
 }

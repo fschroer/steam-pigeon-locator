@@ -462,6 +462,118 @@ static void TestRecordWrapAround()
 }
 
 // ---------------------------------------------------------------------------
+// Test 5: pre-launch ring drain — throttle, ordering, and epoch rebasing
+//
+// Mirrors FlightManager's pre-launch ring + throttled drain against the real
+// archive write path:
+//   - a 2 s ring (40 samples @ 20 Hz) precedes launch,
+//   - each in-flight cycle pushes one live sample and drains
+//     min(SamplesUntilChunkCommit(), ringCount) samples oldest-first,
+//   - timestamps are rebased to the oldest buffered sample (the record epoch).
+// Verifies: at most ONE flash chunk commit per cycle (the 50 ms-budget guarantee),
+// timestamps are strictly increasing, the record starts at 0, and launch lands at
+// 2 s.
+// ---------------------------------------------------------------------------
+
+// Flash driver that counts Write() calls so we can prove the per-cycle commit cap.
+// One chunk commit = exactly two archive Write() calls (payload + commit header),
+// so <= 2 Writes in a cycle proves <= 1 chunk committed that cycle.
+class CountingFlashDriver : public RamFlashDriver
+{
+public:
+    explicit CountingFlashDriver(uint32_t sz) : RamFlashDriver(sz) {}
+    bool Write(uint32_t address, const void* src, size_t length) override
+    {
+        ++writeCalls;
+        return RamFlashDriver::Write(address, src, length);
+    }
+    uint32_t writeCalls = 0;
+};
+
+static void TestPreLaunchDrainThrottle()
+{
+    printf("\n--- Test 5: pre-launch ring drain (throttle + ordering + epoch) ---\n");
+
+    CountingFlashDriver flash(kFlashSize);
+    RocketArchive archive(flash, MakeConfig());
+    CHECK(archive.Init());
+    CHECK(archive.ScanArchive());
+
+    const uint16_t recId = archive.GetNextAvailableArchiveRecord();
+    CHECK(archive.PrepareRecord(recId));
+    CHECK(archive.InitializeFlightRecord(recId));
+
+    const uint32_t dt        = 50u;        // 20 Hz
+    const uint32_t kPre      = 40u;        // 2 s of pre-launch
+    const uint32_t kFlight   = 120u;       // 6 s of flight cycles
+    const uint32_t baseAbs   = 100000u;    // arbitrary monotonic origin
+
+    // Preload the most-recent 2 s into the ring (absolute timestamps).
+    std::vector<FlightArchive::FlightSample> ring;
+    for (uint32_t i = 0; i < kPre; ++i) {
+        FlightArchive::FlightSample s = MakeSample(i);
+        s.timestamp_ms  = baseAbs + i * dt;
+        s.flight_state  = static_cast<uint8_t>(FlightStates::WaitingLaunch);
+        ring.push_back(s);
+    }
+    const uint32_t origin = ring.front().timestamp_ms;   // record epoch (oldest sample)
+
+    uint32_t produced    = kPre;
+    uint32_t prevTs       = 0;
+    bool     firstWritten = true;
+    bool     throttleOk   = true;
+    bool     orderOk      = true;
+
+    auto writeRebased = [&](FlightArchive::FlightSample d) {
+        d.timestamp_ms -= origin;                        // rebase to epoch
+        archive.WriteFlightDataSample(recId, d);
+        if (!firstWritten && d.timestamp_ms <= prevTs) orderOk = false;
+        prevTs = d.timestamp_ms;
+        firstWritten = false;
+    };
+
+    for (uint32_t cyc = 0; cyc < kFlight; ++cyc) {
+        FlightArchive::FlightSample s = MakeSample(produced);
+        s.timestamp_ms  = baseAbs + produced * dt;
+        s.flight_state  = static_cast<uint8_t>(FlightStates::Launched);
+        ring.push_back(s);
+        ++produced;
+
+        uint16_t budget = archive.SamplesUntilChunkCommit();
+        if (budget > ring.size()) budget = static_cast<uint16_t>(ring.size());
+
+        flash.writeCalls = 0;
+        for (uint16_t k = 0; k < budget; ++k) {
+            writeRebased(ring.front());
+            ring.erase(ring.begin());
+        }
+        if (flash.writeCalls > 2u) throttleOk = false;   // > 1 chunk committed this cycle
+    }
+
+    // Landing: flush the (near-empty) remainder unthrottled.
+    for (auto& d : ring) writeRebased(d);
+    ring.clear();
+
+    CHECK(throttleOk);   // never more than one chunk commit per cycle
+    CHECK(orderOk);      // strictly increasing timestamps across the whole record
+
+    CHECK(archive.FlushFlightData(recId));
+    CHECK(archive.CloseFlightRecord(recId));
+    CHECK(archive.SetRecordValid(recId));
+
+    // First sample sits at the epoch (0); the launch sample sits at 2 s.
+    FlightArchive::FlightSample buf{};
+    uint32_t got = 0;
+    CHECK(archive.ReadFlightDataRange(recId, 0u, &buf, 1u, got));
+    CHECK_EQ(got, 1u);
+    CHECK_EQ(buf.timestamp_ms, 0u);
+
+    CHECK(archive.ReadFlightDataRange(recId, kPre, &buf, 1u, got));
+    CHECK_EQ(got, 1u);
+    CHECK_EQ(buf.timestamp_ms, kPre * dt);   // launch at 2000 ms
+}
+
+// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 
@@ -482,6 +594,7 @@ int main()
     // Tests 3 and 4 use fresh flash images.
     TestTruncatedRecordRecovery();
     TestRecordWrapAround();
+    TestPreLaunchDrainThrottle();
 
     printf("\n==========================================================\n");
     printf(" Results: %d passed, %d failed\n", g_pass, g_fail);

@@ -35,6 +35,10 @@ public:
 	void Init(const Radio_s *radio);
 	void ProcessRocketEvents(uint8_t rocket_service_count);
 	void SetTimingDiag(const TimingDiag &t) { m_timing_diag_ = t; }
+	// GPS-PPS-disciplined monotonic millisecond clock, forwarded to FlightManager
+	// each cycle so archived timestamps reflect true elapsed time (see
+	// Factory_C_Interface.cpp AdvanceMonotonicMs).
+	void SetFlightClockMs(uint32_t mono_ms) { flight_.SetFlightClockMs(mono_ms); }
 	void OnRadioTxDone();
 	void OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t LoraSnr_FskCfo);
 	void ProcessUART2Char(uint8_t uart_char);   // ISR context: enqueue only
