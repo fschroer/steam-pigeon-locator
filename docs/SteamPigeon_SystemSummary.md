@@ -1,6 +1,6 @@
 # Steam Pigeon — System Summary
 
-> **Status:** Draft summary, compiled 2026-06-15; last updated 2026-07-05 (locator LoRa channel settable from the app, receiver follows; pre-launch archival + monotonic clock, watchdog/fault-log, faster USB-C export).
+> **Status:** Draft summary, compiled 2026-06-15; last updated 2026-07-05 (app BLE connection-health probe keeps an idle receiver link alive; locator LoRa channel settable from the app, receiver follows; pre-launch archival + monotonic clock implemented, plus re-arm-after-landing reset; watchdog/fault-log, faster USB-C export).
 > **Scope:** Consolidates the *Steam Pigeon Requirements* outline with the current state of the three implementation repos.
 > **Sources:**
 > - Requirements: [docs/SteamPigeonRequirements.md](SteamPigeonRequirements.md) (maintained source as of v2.0; originally `G:\My Drive\Rocketry\Reference\Steam Pigeon Requirements.docx`)
@@ -145,6 +145,8 @@ The firmware is organized as a composition root (`Factory`) that owns and wires 
 
 States (`FlightStates`): `WaitingLaunch → Launched → Burnout → Noseover → DroguePrimaryEvent → DrogueBackupEvent → MainPrimaryEvent → MainBackupEvent → Landed`.
 
+**Re-arm without a power cycle.** Each arm (`Disarmed → Armed`) calls `FlightManager::PrepareForArm()` — a full flight-state reset (`ResetFlight()` returns the machine to `WaitingLaunch` and zeroes every per-flight variable and the record epoch) plus `ResetPreLaunchBuffer()` (clears the pre-launch ring); `Factory` also clears `datestamp_saved_`. So after a `Landed` flight a disarm→arm cycle re-initialises everything in place and opens a fresh record ([ADR-0007](adr/0007-prelaunch-ring-monotonic-clock.md) Decision 4, pairing with the [ADR-0010](adr/0010-archive-flash-robustness.md) record-reuse lifecycle) — no power cycle needed.
+
 | Transition | Detection logic | Source |
 |---|---|---|
 | Launch | Body accel ≥ 5 g, **or** ≥ 1.5 g combined with AGL ≥ `launch_detect_altitude`; sustained 80 ms | Fused accel (= raw IMU copy) + **fused** AGL |
@@ -178,6 +180,8 @@ Forwarding app→locator commands is timing-aware (half-duplex collision avoidan
 
 Android / Kotlin / Jetpack Compose, organized around a `RocketViewModel` and a set of `StateFlow` repositories (`FlightDataRepository`, `BluetoothManagerRepository`). Screens include: live **Flight Map** (with TTS status callouts), **Download Map**, **Export Flight Path**, **Flight Profiles**, **Locator Settings**, **Receiver Settings**, **App Settings**, **Deployment Test**, and a **Device Picker**. A `Compass`/heads-up view converts the telemetry quaternion into inclination and compass heading to point the user at the rocket. BLE is handled by `BluetoothService` / `BluetoothConnectionManager`; USB serial by `SerialManager`. User preferences persist via a Proto DataStore.
 
+**BLE connection health ([ADR-0012](adr/0012-app-ble-connection-health-probe.md)):** because Android can report a dead GATT link as connected (an OS-cached "phantom"), a watchdog verifies liveness after the link reaches `Ready`. It does **not** treat GATT silence as a dead link — a healthy receiver relays nothing whenever the locator is quiet (powered off, on the pad, out of range). Instead, each 10 s silent window sends a `ReceiverInfoRequest` (which the receiver answers on its own behalf, independent of locator activity); the link is reconnected only after three consecutive probes go unanswered (~30 s). When the locator is actively transmitting, no probe is sent. This replaced an earlier tear-down-on-silence watchdog that looped disconnect/reconnect whenever the locator was idle.
+
 ---
 
 ## 4. Features
@@ -208,6 +212,7 @@ Android / Kotlin / Jetpack Compose, organized around a `RocketViewModel` and a s
 - Archived-flight download, graphical flight profiles, and path export.
 - Remote deployment-charge testing.
 - Connection authorization: password challenge on first contact with an unknown locator, a remembered store of authorized locators, and a conflicting-traffic warning (FR-P14).
+- Resilient BLE link: the connection to the receiver stays up through long stretches of locator silence (locator off / on the pad / out of range), verified by probing the receiver rather than assuming silence means a dead link ([ADR-0012](adr/0012-app-ble-connection-health-probe.md)).
 
 ---
 
@@ -226,6 +231,7 @@ Android / Kotlin / Jetpack Compose, organized around a `RocketViewModel` and a s
 - **Changing the record structure requires erasing the archive.** The record geometry is derived from `sizeof(FlightSample)` and the stat set; a layout change makes old records unreadable and their headers stale at shifted offsets. Export any wanted flights first, then use the data-menu full erase (`e`) to reset the archive region ([ADR-0010](adr/0010-archive-flash-robustness.md)). This is also why `ARCHIVE_VERSION` must be bumped on any layout change.
 - **One charge fires at a time.** Overlapping deployment commands are queued, not fired simultaneously — relevant when reasoning about current draw and near-simultaneous primary/backup events.
 - **Never change the receiver's RF frequency mid-transmit.** When the receiver follows a locator channel change ([ADR-0011](adr/0011-locator-lora-channel-from-app.md)), the `SetChannel` must be deferred until the forwarded command has finished transmitting (after `OnRadioTxDone`) — `radio_->Send()` only *starts* the TX. Switching between `Send()` and TxDone corrupts the forward, so the locator never moves while the receiver does (a bench-observed failure). The locator↔receiver channel pair must stay in sync; the app's confirm/recovery logic is the safety net if it drifts.
+- **On the app, GATT silence is not a dead link.** The BLE health watchdog must not tear down the receiver connection just because no data has arrived — a healthy receiver relays nothing while the locator is quiet. It probes the receiver (`ReceiverInfoRequest`, which the receiver answers itself) and only reconnects after repeated unanswered probes ([ADR-0012](adr/0012-app-ble-connection-health-probe.md)). Reverting to tear-down-on-silence reintroduces the disconnect/reconnect loop. This depends on the receiver answering receiver-info requests unconditionally (FR-R2) — do not gate those replies behind locator activity.
 
 ---
 
