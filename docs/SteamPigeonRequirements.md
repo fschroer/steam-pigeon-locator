@@ -1,6 +1,6 @@
 # Steam Pigeon — Requirements
 
-- **Version:** 2.3.3
+- **Version:** 2.3.4
 - **Date:** 2026-07-05
 - **Supersedes:** the prose outline in `Steam Pigeon Requirements.docx` (this markdown is now the maintained source).
 - **Status key:** each requirement carries a stable ID (`FR-*` functional, `NFR-*` non-functional, `HW-*` hardware). **IDs are append-only, opaque labels — never renumbered.** The historical `FR-P#` numbers embed the priority a requirement was *created* at; as of v2.1 that coupling is retired — the **`Pri` column is the authoritative ranking** (it changes when priorities are reordered) and the **`Status` column** is *Active*, *Deferred*, or *Withdrawn*. A new requirement takes the next free ID regardless of its priority (e.g. `FR-P13` enters at Pri 3).
@@ -40,7 +40,7 @@ The original outline's ranked goals were captured as `FR-P1…FR-P12` with the I
 
 **Locator**
 - FR-L1 — Collect data from the barometric, inertial, and GPS sensors (§HW).
-- FR-L2 — Fire deployment charges on four independently configurable channels, each assignable to drogue-primary, drogue-backup, main-primary, or main-backup.
+- FR-L2 — Fire deployment charges on four independently configurable channels, each assignable to drogue-primary, drogue-backup, main-primary, main-backup, or left unused. The unused mode excludes a channel from the firing schedule, and is configurable from both the locator's USB-C config menu and the app.
 - FR-L3 — Sense deployment-channel continuity before and after firing.
 - FR-L4 — Archive flight data to external flash for later download, including the ~2 s of pre-launch data leading up to launch, timestamped on a GPS-disciplined real-time clock ([ADR-0007](adr/0007-prelaunch-ring-monotonic-clock.md)). Archived data must survive an MCU-only reset (debugger/flash/watchdog) and a flight's committed samples must remain recoverable even if the flight was not cleanly closed (power lost / landing not detected) ([ADR-0010](adr/0010-archive-flash-robustness.md)).
 - FR-L5 — Support configuration and archived-data download over USB-C, plus archive-maintenance commands: reclaim empty/unused records and fully erase the archive (e.g. after a record-structure change) ([ADR-0010](adr/0010-archive-flash-robustness.md)).
@@ -134,6 +134,7 @@ The original outline's ranked goals were captured as `FR-P1…FR-P12` with the I
 
 | Version | Date | Change |
 |---------|------|--------|
+| 2.3.4 | 2026-07-05 | Extended **FR-L2**: a deployment channel may be left **unused** (excluded from the firing schedule), now settable from the locator's USB-C config menu as well as the app. No priority changes; no wire-format change (`DeployMode::Unused` already existed). Routine UI-parity change — no ADR. |
 | 2.3.3 | 2026-07-05 | Added **FR-R5** (receiver follows the locator's channel when relaying a locator channel change, switching only after the forward transmits) and extended **FR-A4** (two LoRa-channel controls: move a locator vs. retarget the receiver; failed-change recovery). Supports **FR-P3**. No priority changes; no wire-format change. Rationale in [ADR-0011](adr/0011-locator-lora-channel-from-app.md); recovery-path bench validation **[#20](https://github.com/fschroer/steam-pigeon-locator/issues/20)**. |
 | 2.3.2 | 2026-07-05 | Extended **FR-L4** (archived data survives an MCU-only reset; an unclosed flight's committed samples remain recoverable) and **FR-L5** (archive-maintenance commands: reclaim empty records / full erase). Enforces **NFR-4**/**NFR-5** (moved console + LoRa-RX flash I/O out of ISR context). Rationale in [ADR-0010](adr/0010-archive-flash-robustness.md); bench validation **[#19](https://github.com/fschroer/steam-pigeon-locator/issues/19)**. |
 | 2.3.1 | 2026-07-04 | No requirement text change. Flight-data OTA transfer made reliable across locator/receiver/app (header-exact framing, "no data" marker, app-driven lifecycle, receiver flight-profile-mode forwarding, burst window 4→8); rationale in [ADR-0009](adr/0009-flight-data-transfer-reliability.md). Supports **FR-A6** / **FR-L4**. |

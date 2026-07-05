@@ -2,6 +2,12 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 'Unused' deployment channel mode on the locator — COMMITTED & BENCH-TESTED (2026-07-05)
+The locator's USB-C config menu (`UserInteraction`) now offers **`Unused`** as a fifth deployment-channel mode, reaching parity with the app (which already exposed it). `DeployMode::Unused` (value 7 in `Types.hpp`) predates this; only the locator UI lacked it (`942ab15`).
+- **Change (`942ab15`, locator `master`):** added `unused_text_` and a `DeployMode::Unused` case in `DeployModeString`, and inserted `Unused` at the end of both the `[`/`]` cycle chains in `AdjustDeploymentChannelMode` (`… → MainBackup → Unused → (wrap)`, both directions). No enum/wire change.
+- **Docs:** requirement **FR-L2** extended (channels assignable to the four roles *or left unused*); system-summary "Deployment scheduling" notes an `Unused` channel is excluded from the firing schedule and is settable from both app and locator menu.
+- **Status:** committed + pushed; user confirmed on the bench. No ADR (routine UI-parity fix per the ADR README's "routine fixes" guidance).
+
 ## Locator LoRa channel from the app — COMMITTED & BENCH-TESTED (happy path) (2026-07-05)
 The app can now set the **locator's** LoRa channel from Locator Settings; the receiver follows automatically. Design & invariants: **[ADR-0011](adr/0011-locator-lora-channel-from-app.md)**; requirement **FR-R5** + extended **FR-A4** (both LoRa-channel controls documented).
 - **Locator** (`cb11f95`): applies `lora_channel` at runtime — `SetChannel()` in `Communication::Process()` right after `SaveLocatorSettings()` (previously only on reboot).
@@ -53,7 +59,7 @@ The strapdown drives the orientation display correctly (pitch/roll/yaw track the
 - **Workflow:** GitHub issues = decision log; ADRs = durable rationale. `gh` authenticated (`fschroer`); `.claude/settings.local.json` allows `gh issue close/edit/comment` + `git push`.
 
 ## Git state
-- **`master` = `2446fa5`** (flight-data transfer reliability — ADR-0009 commits `d2c1808`, `47fd7ed`, `2446fa5` on top of `9bad55b` connect-password), **plus a still-uncommitted working tree**: the four archival/reliability changes in the top section (modified `FlightManager`/`Factory`/`usart.c`/`radio_driver.c`/`Locator.ioc`/… + untracked `FaultLog`/`Archive.cpp` + untracked `docs/adr/0007`,`0008`,`0009` and the doc edits). Firmware builds clean; archive host suite 638/638. **No firmware is flight-validated.** Earlier line — orientation display bench-verified `8f61a1e`. (Note: the ADR-0009 code is committed, but its **doc updates — this handoff, the summary, the requirements, ADR-0009 — are uncommitted**, entangled with the archival doc WIP; commit them together.)
+- **`master` = `490aeec`** (docs: ADR-0011 + pending ADRs 0007–0010) — on top of `942ab15` (`Unused` deploy mode, top section), `9bad55b` (connect-password), `cb11f95` (runtime LoRa channel apply), and the ADR-0009 commits (`d2c1808`, `47fd7ed`, `2446fa5`). **Plus a still-uncommitted working tree**: the archival/reliability changes (modified `FlightManager`/`Factory`/`usart.c`/`radio_driver.c`/`Locator.ioc`/`FlightArchive.hpp`/… + untracked `FaultLog`/`Archive.cpp`) — ADR-0007/0008 are committed but their **code** is not. Firmware builds clean; archive host suite 638/638. **No firmware is flight-validated.** Earlier line — orientation display bench-verified `8f61a1e`.
 - **Receiver repo** (`steam-pigeon-receiver`) `master`: flight-profile-mode command forwarding (`8f416d2`) + `version.h`/`language.settings.xml` gitignored.
 - **App repo** (`rocket-flight-manager`) `main`: flight-data framing/no-data/abort (`d81c22e`) + transfer-health diagnostics (`f8e338c`) on top of the earlier #4/#5 (`bd91e5a`) + warning cleanup (`4fe00a2`). 2 `Theme.kt` warnings intentionally left, pending an edge-to-edge migration decision.
 

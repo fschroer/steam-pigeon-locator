@@ -155,7 +155,7 @@ States (`FlightStates`): `WaitingLaunch → Launched → Burnout → Noseover �
 | Physical drogue/main sensing | Velocity-change signatures | **Fused** vertical speed |
 | Landed | Fused vert speed < 0.25 m/s **or** raw baro \|vel\| < 2.0 m/s, sustained 1.0 s; hard force-close at 8 min | Fused + **raw baro** backup |
 
-**Deployment scheduling:** four channels, each independently mapped to a `DeployMode` (DroguePrimary / DrogueBackup / MainPrimary / MainBackup / Unused). Channels fire one at a time — `DeployIfClear` queues any channel whose firing window overlaps another's, so only one charge is energized at a moment. Each firing records pre-fire continuity; after the configured `deploy_signal_duration` the channel is de-energized and post-fire continuity is recorded. Stats are bit-packed (mode / fired / pre-continuity / post-continuity) per channel.
+**Deployment scheduling:** four channels, each independently mapped to a `DeployMode` (DroguePrimary / DrogueBackup / MainPrimary / MainBackup / Unused — an `Unused` channel is excluded from the firing schedule). The mode is settable from both the app and the locator's USB-C config menu (`UserInteraction` cycles the mode through all five values, including `Unused`). Channels fire one at a time — `DeployIfClear` queues any channel whose firing window overlaps another's, so only one charge is energized at a moment. Each firing records pre-fire continuity; after the configured `deploy_signal_duration` the channel is de-energized and post-fire continuity is recorded. Stats are bit-packed (mode / fired / pre-continuity / post-continuity) per channel.
 
 ### 3.5 Communication protocol
 
