@@ -1,0 +1,3 @@
+# Live serial modes (ports / monitor / capture / export) need pyserial.
+# The offline `analyze` subcommand has no dependencies.
+pyserial>=3.5
