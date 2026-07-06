@@ -38,6 +38,15 @@ void FaultLogInit() {
         // Preserve it; just update the reset-cause snapshot and increment boot count.
         g_fault_log.rcc_csr = csr;
         g_fault_log.boot_count++;
+        // A watchdog (IWDG) reset leaves no fault-handler record — the hardware
+        // resets the CPU with nothing running.  If this boot followed an IWDG
+        // reset and no handler already tagged the record (a HardFault/assert
+        // resets via its own path and sets fault_type first), classify it as a
+        // hang so the last checkpoint tag + uptime that KickWatchdog() wrote
+        // before the stall are reported (NFR-10 / issue #17).
+        if ((csr & RCC_CSR_IWDGRSTF) && g_fault_log.fault_type == FaultType::None) {
+            g_fault_log.fault_type = FaultType::WatchdogHang;
+        }
     } else {
         // First power-on or corrupted record — initialise cleanly.
         std::memset(&g_fault_log, 0, sizeof(g_fault_log));

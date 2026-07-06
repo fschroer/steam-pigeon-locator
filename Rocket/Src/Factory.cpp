@@ -17,6 +17,15 @@ extern "C" {
 //#include "UsartWrite.hpp"
 #include "Faultlog.hpp"
 
+// ---------------------------------------------------------------------------
+// Fault-injection bench commands (issue #17) — DISABLED by default.
+// Set to 1 here (or build with -DSP_FAULT_INJECT=1) to enable the hidden USB-C
+// console keys that deliberately crash the device to validate the FaultLog /
+// IWDG watchdog path.  MUST remain 0 in any production/flight build.
+#ifndef SP_FAULT_INJECT
+#define SP_FAULT_INJECT 0
+#endif
+
 constexpr bool test_mode = false;
 
 PowerManagement *batt = new PowerManagement(&hadc);
@@ -60,9 +69,13 @@ void Factory::Init(const Radio_s *radio) {
 	RgbLed(RgbColor::Off);
 	nav_test_requested_ = true;
 
-	if (Diag::FaultLogHasRecord()) {
-	Diag::FaultLogClear();
-	}
+	// A captured fault (HardFault / assert / watchdog hang) is deliberately left
+	// in the .noinit record so it can be read over the USB-C console with '?'
+	// after the reset that produced it.  Clearing it here (as an earlier version
+	// did) destroyed the evidence before it could ever be read, defeating both
+	// the '?' dump and the boot-loop count.  It now persists until it is cleared
+	// explicitly ('~' console key) or overwritten by the next fault
+	// (see Faultlog.hpp; NFR-10 / issue #17).
 }
 
 void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
@@ -337,13 +350,68 @@ void Factory::HandleConsoleChar(uint8_t uart_char) {
             UartSend(buf);
         }
 
+        // Always surface the assert location when one was captured.  A
+        // FAULT_ASSERT reaches the fault machinery via __BKPT, which — with no
+        // debugger attached — escalates to a HardFault, so fault_type may read
+        // HARDFAULT even though the file/line were recorded by FaultAssert().
+        if (rec->assert_file[0] != '\0') {
+            snprintf(buf, sizeof(buf),
+                "Assert  : %s:%lu\r\n",
+                rec->assert_file, (unsigned long)rec->assert_line);
+            UartSend(buf);
+        }
+
         UartSend("--- END ---\r\n");
 
-        // Optionally clear after reading — comment out if you want the log
-        // to persist across multiple '?' queries until explicitly cleared.
-        // Diag::FaultLogClear();
+        // Not cleared here — the record persists across multiple '?' queries
+        // until the '~' console key clears it (or the next fault overwrites it).
         return;
     }
+#if SP_FAULT_INJECT
+    // -----------------------------------------------------------------------
+    // Hidden fault-injection keys (issue #17).  Compiled out unless
+    // SP_FAULT_INJECT == 1.  Each deliberately crashes the device; after the
+    // reset, read the captured record with '?'.
+    // -----------------------------------------------------------------------
+    else if (uart_char == '!') {          // force a HardFault
+        UartSend("\r\nDIAG|INJECT HardFault - resetting...\r\n");
+        HAL_Delay(20);                    // let the line flush to the terminal
+        // Write to an unmapped address -> precise BusFault -> escalates to
+        // HardFault (BusFault not separately enabled).  Captured by
+        // HardFault_Handler -> SaveFaultAndHalt (PC/LR/CFSR/HFSR).
+        *reinterpret_cast<volatile uint32_t*>(0xA5A5A5A4) = 0xDEADBEEFu;
+    }
+    else if (uart_char == '@') {          // force a watchdog hang (IWDG reset)
+        UartSend("\r\nDIAG|INJECT WatchdogHang - spinning until IWDG reset...\r\n");
+        Diag::KickWatchdog(0xDEADu);      // tag a recognisable checkpoint + one refresh
+        for (;;) { }                      // stall the super-loop; IWDG fires
+    }
+    else if (uart_char == '%') {          // force a FAULT_ASSERT failure
+        UartSend("\r\nDIAG|INJECT FAULT_ASSERT - resetting...\r\n");
+        HAL_Delay(20);
+        FAULT_ASSERT(false);              // records __FILE__/__LINE__, then faults
+    }
+    else if (uart_char == '~') {          // clear the stored fault record
+        Diag::FaultLogClear();
+        UartSend("\r\nDIAG|CLEARED\r\n");
+    }
+#endif
+#if SP_LOSS_INJECT
+    // -----------------------------------------------------------------------
+    // Hidden RF loss-injection keys (issues #18 / #20).  Compiled out unless
+    // SP_LOSS_INJECT == 1.  See docs/bench-loss-injection.md.
+    // -----------------------------------------------------------------------
+    else if (uart_char == '&') {          // #20: force-miss the next config change
+        comm_.DbgArmCfgChgDrop();
+        UartSend("\r\nDIAG|LOSS: next LocatorCfgChgRequest will be dropped\r\n");
+    }
+    else if (uart_char == '#') {          // #18: cycle flight-data drop-per-group 0->1->2
+        char b[72];
+        const unsigned n = comm_.DbgCycleTxDropPerGroup();
+        snprintf(b, sizeof(b), "\r\nDIAG|LOSS: flight-data drop-per-group = %u\r\n", n);
+        UartSend(b);
+    }
+#endif
     else {
     	config_.ProcessChar(uart_char, device_state_);
     }

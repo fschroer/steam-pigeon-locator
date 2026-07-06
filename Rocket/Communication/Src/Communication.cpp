@@ -218,6 +218,16 @@ void Communication::OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
 			// locator is broadcasting PreLaunchData (the Disarmed state).
 			if (device_state != DeviceState::Disarmed)
 				break;
+#if SP_LOSS_INJECT
+			// Forced miss (#20): pretend this forwarded request never arrived, so
+			// the locator stays on the OLD channel while the receiver (which
+			// already followed) moves to the new one — the split-link the app's
+			// recovery path must detect and repair.
+			if (dbg_drop_next_cfg_chg_) {
+				dbg_drop_next_cfg_chg_ = false;   // one-shot
+				break;
+			}
+#endif
 			// Defer the settings flash write to Process() (main loop).  Doing it
 			// here in the radio ISR could preempt a navigation SPI2 transaction
 			// and corrupt both (flash and IMU/baro share SPI2).
@@ -358,6 +368,9 @@ void Communication::BeginTransfer(uint8_t record_id) {
 	std::memset(acked_, 0, sizeof(acked_));
 	std::memset(last_tx_time_, 0, sizeof(last_tx_time_));
 	std::memset(parity_acc_, 0, sizeof(parity_acc_));
+#if SP_LOSS_INJECT
+	std::memset(dbg_dropped_, 0, sizeof(dbg_dropped_));   // one-shot drops reset per transfer
+#endif
 
 	window_start_ = 0;
 	transfer_active_ = true;
@@ -398,6 +411,23 @@ bool Communication::TrySendPacket(const FlightDataPacket &pkt, size_t size) {
 	radio_->Send(reinterpret_cast<const uint8_t*>(&pkt), size);
 	return true;
 }
+
+#if SP_LOSS_INJECT
+// Return true if this data packet should be dropped on THIS transmission.
+// Drops the first dbg_txdrop_per_group_ indices of each parity group, once each
+// (a retransmit of the same index is allowed through), so a single dropped
+// packet per group is parity-recoverable and two force the retransmit path.
+bool Communication::DbgConsumeTxDrop(uint16_t packet_index) {
+	if (dbg_txdrop_per_group_ == 0 || packet_index >= kMaxPackets)
+		return false;
+	if ((packet_index % kParityGroupSize) >= dbg_txdrop_per_group_)
+		return false;
+	if (dbg_dropped_[packet_index])
+		return false;                      // already dropped once — let the retransmit through
+	dbg_dropped_[packet_index] = true;
+	return true;
+}
+#endif
 
 void Communication::SendDataPacket(uint16_t packet_index, uint32_t now_ms) {
 	const size_t spp = FlightProfileCodec::MaxSamplesPerPacket();
@@ -448,7 +478,20 @@ void Communication::SendDataPacket(uint16_t packet_index, uint32_t now_ms) {
 	const size_t msg_size = offsetof(FlightDataPacket, payload) + payload_used;
 	pkt.packet_header.crc = ComputeMessageCrcPartial(reinterpret_cast<const uint8_t*>(&pkt), msg_size);
 
-	if (TrySendPacket(pkt, msg_size)) {
+	bool sent_ok;
+#if SP_LOSS_INJECT
+	// Simulate an over-the-air loss (#18): skip the radio transmission but keep
+	// ALL bookkeeping — mark sent_, record the time, and accumulate this packet
+	// into its parity group below.  That matches a real RF loss: the parity
+	// packet (sent separately) still covers the missing data, so the app must
+	// recover it via parity, or via retransmit once radio_busy_ is irrelevant.
+	if (DbgConsumeTxDrop(packet_index))
+		sent_ok = true;
+	else
+#endif
+		sent_ok = TrySendPacket(pkt, msg_size);
+
+	if (sent_ok) {
 		sent_[packet_index] = true;
 		last_tx_time_[packet_index] = now_ms;
 

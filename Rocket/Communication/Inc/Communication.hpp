@@ -18,6 +18,17 @@
 #include "MessageProtocol.hpp"
 #include "Deployment.hpp"
 
+// ---------------------------------------------------------------------------
+// Deterministic RF loss injection (issues #18 / #20) — DISABLED by default.
+// Set to 1 here (or build with -DSP_LOSS_INJECT=1) to enable hidden USB-C
+// console hooks that deterministically drop flight-data packets (exercises the
+// window/parity/retransmit path) and force-miss a forwarded LocatorCfgChgRequest
+// (exercises the channel-change recovery path).  MUST remain 0 in production.
+// Visible to Factory.cpp too (Factory.hpp includes this header).
+#ifndef SP_LOSS_INJECT
+#define SP_LOSS_INJECT 0
+#endif
+
 namespace Communication {
 
 #define LORA_MSG_TYPE_SIZE 3
@@ -111,6 +122,16 @@ public:
 	// Reverts to Disarmed if the session has been idle too long (e.g. the app's
 	// DisarmRequest was missed).
 	void CheckFlightProfileTimeout(DeviceState &device_state);
+
+#if SP_LOSS_INJECT
+	// Bench loss injection (issues #18 / #20).  Driven from the USB-C console in
+	// Factory.cpp.  See docs/bench-loss-injection.md.
+	void DbgArmCfgChgDrop() { dbg_drop_next_cfg_chg_ = true; }   // #20: one-shot forced miss
+	uint8_t DbgCycleTxDropPerGroup() {                          // #18: 0 -> 1 -> 2 -> 0
+		dbg_txdrop_per_group_ = static_cast<uint8_t>((dbg_txdrop_per_group_ + 1) % 3);
+		return dbg_txdrop_per_group_;
+	}
+#endif
 
 private:
 
@@ -246,6 +267,17 @@ private:
 		bool    pending = false;  // true once the group is complete and parity has not yet been sent
 	};
 	ParityAccumulator parity_acc_[kMaxPackets / kParityGroupSize];
+
+#if SP_LOSS_INJECT
+	// Loss-injection state (issue #18).  dbg_txdrop_per_group_ data packets at the
+	// start of every parity group are dropped ON THEIR FIRST transmission only —
+	// dbg_dropped_ makes the drop one-shot so a retransmit gets through, modelling
+	// a transient RF loss.  Reset each transfer in BeginTransfer().
+	bool     dbg_drop_next_cfg_chg_ = false;   // #20: forced miss of next config change
+	uint8_t  dbg_txdrop_per_group_  = 0;       // #18: 0/1/2 packets dropped per group
+	bool     dbg_dropped_[kMaxPackets] = {};
+	bool     DbgConsumeTxDrop(uint16_t packet_index);
+#endif
 
 	// -----------------------------------------------------------------------
 	// Radio / sequencing state
