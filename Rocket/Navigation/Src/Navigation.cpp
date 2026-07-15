@@ -9,6 +9,7 @@ uint32_t Pps_GetTim2TicksPerSec(void);   // GPS-PPS-disciplined TIM2 ticks/sec (
 #include "Navigation.hpp"
 #include "Units.hpp"
 #include "CubeMonitorGlobals.hpp"
+#include "CycleProfiler.hpp"
 
 namespace RocketNav {
 
@@ -279,13 +280,17 @@ bool Navigation::Update() {
 
     if (!m_test_active_) {
 #endif
+        const uint16_t t_sr = Diag::Now();
         imu_new  = m_imu.readSample(imu);
         baro_new = m_baro.readSample(baro);
+        Diag::mark(Diag::Seg::SensorRead, t_sr);
 
         if (m_cfg.use_gps) {
             if (++m_gps_poll_counter_ >= GPS_POLL_DIVISOR) {
                 m_gps_poll_counter_ = 0;
+                const uint16_t t_gps = Diag::Now();
                 gps_new = m_gps.readSample(gps);
+                Diag::mark(Diag::Seg::GpsRead, t_gps);   // every 2nd cycle
             }
         }
 #ifdef NAV_TEST
@@ -337,6 +342,7 @@ bool Navigation::Update() {
     if (imu_new) applyMountingFrame(imu);
 
     if (imu_new) {
+        const uint16_t t_ekf = Diag::Now();
         m_ekf.predict(imu, dt_s);
 
         if (m_cfg.use_baro && baro_new && baro.valid)
@@ -368,7 +374,9 @@ bool Navigation::Update() {
         m_solution = m_ekf.getSolution();
         m_solution.body_rates_rps  = imu.gyro_rps;
         m_solution.body_accel_mps2 = imu.accel_selected_mps2;
+        Diag::mark(Diag::Seg::Ekf, t_ekf);   // predict + baro/GPS updates + ZUPT
 
+        const uint16_t t_sd = Diag::Now();
         // ── Strapdown attitude (ADR-0005 / NFR-9) ─────────────────────────────
         // Independent of the EKF: seed from gravity while stationary on the pad,
         // then dead-reckon by integrating the (bias-corrected) gyro.  Driven here
@@ -412,6 +420,7 @@ bool Navigation::Update() {
                 // call chain).  Loop until the FIFO empties (fn < batch) or the
                 // safety cap.  Each word integrates at a GPS-disciplined dt (see
                 // below).  FIFO words are raw sensor frame → remap first.
+                const uint16_t t_drain  = Diag::Now();               // FifoDrain sub-segment
                 const uint32_t t2_start = TIM2->CNT;
                 const float    dt_fifo  = m_strapdown_dt_per_word;   // from last loop
                 uint16_t       words_drained = 0;
@@ -443,6 +452,8 @@ bool Navigation::Update() {
                         (1.0f - kStrapdownDtAlpha) * m_strapdown_dt_per_word + kStrapdownDtAlpha * dt;
                 }
                 m_strapdown_last_tim2 = t2_start;
+                Diag::recordCount(Diag::Cnt::FifoWords, words_drained);  // per-cycle drain count
+                Diag::mark(Diag::Seg::FifoDrain, t_drain);              // reads + propagate only
 #ifdef NAV_TEST
             }
 #endif
@@ -452,6 +463,7 @@ bool Navigation::Update() {
             if (quasi_static)
                 m_attitude.correctTiltFromAccel(imu.accel_selected_mps2, kStrapdownTiltGain);
         }
+        Diag::mark(Diag::Seg::Strapdown, t_sd);   // FIFO drain + integrate + tilt
 
         if (m_solution.altitude_agl_m > m_max_altitude_agl_m) {
             m_max_altitude_agl_m    = m_solution.altitude_agl_m;

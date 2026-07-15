@@ -9,6 +9,7 @@ extern "C" {
 #include <Factory.hpp>
 #include <PowerManagement.hpp>
 #include "CubeMonitorGlobals.hpp"
+#include "CycleProfiler.hpp"
 #include "StRadioAdapter.hpp"
 #include "Constants.hpp"
 #include "RgbLed.hpp"
@@ -79,9 +80,13 @@ void Factory::Init(const Radio_s *radio) {
 }
 
 void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
+	const uint16_t t_proc = Diag::Now();   // whole-cycle profiler (Seg::ProcTotal)
+
 	// Handle any queued console (UART2) input first, in main-loop context, so
 	// terminal flash I/O never preempts a navigation SPI2 transaction.
+	const uint16_t t_console = Diag::Now();
 	ServiceConsole();
+	Diag::mark(Diag::Seg::Console, t_console);
 
 	FlightStates flight_state = flight_.GetFlightState();
 	navigation_.SetD1Converted();
@@ -107,12 +112,16 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 
 	// Run deferred communication tasks (e.g. pending VersionInfo response)
 	// regardless of device state, before the per-state switch below.
+	const uint16_t t_comm = Diag::Now();
 	comm_.Process(device_state_);
+	Diag::mark(Diag::Seg::Comm, t_comm);
 
 	switch (device_state_) {
 	case DeviceState::Disarmed:
 		DisableDeployment();
+		Diag::begin(Diag::Seg::NavUpdate);
 		navigation_.Update();
+		Diag::end(Diag::Seg::NavUpdate);
 		if (buzzer_phase_ == BuzzerPhase::PowerOn) {
 			if (BuzzerSequenceOnce(PowerOn))
 				buzzer_phase_ = BuzzerPhase::Idle;
@@ -128,7 +137,9 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 		}
 		case 2: {
 			navigation_.CalibrateOnPadAndZeroAglUntilLaunch(flight_state);
+			const uint16_t t_tlm = Diag::Now();
 			comm_.SendPreLaunchData();
+			Diag::mark(Diag::Seg::Telemetry, t_tlm);
 			if (buzzer_phase_ == BuzzerPhase::Idle)
 				HAL_TIM_PWM_Stop(&htim16, TIM_CHANNEL_1);
 			break;
@@ -153,7 +164,9 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 		}
 #endif
 		EnableDeployment();
+		Diag::begin(Diag::Seg::NavUpdate);
 		navigation_.Update();
+		Diag::end(Diag::Seg::NavUpdate);
 
 		// Flash erase for the new flight record was started on entry to Armed
 		// (StartOpenNewFlight in the state-change block above).  Poll it EVERY
@@ -185,7 +198,9 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 				BuzzerStop();
 		}
 		flight_.SetTimingDiag(m_timing_diag_);
+		Diag::begin(Diag::Seg::FlightState);
 		flight_.UpdateFlightState();
+		Diag::end(Diag::Seg::FlightState);
 		if (flight_state >= FlightStates::Launched && !datestamp_saved_) {
 			GpsSample gps_sample = navigation_.getRawGps();
 			if (gps_sample.time_valid) {
@@ -203,7 +218,9 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			if (flight_state == FlightStates::WaitingLaunch) {
 				navigation_.CalibrateOnPadAndZeroAglUntilLaunch(flight_state);
 			}
+			Diag::begin(Diag::Seg::Telemetry);
 			comm_.SendTelemetryData();
+			Diag::end(Diag::Seg::Telemetry);
 			break;
 		case 5:
 			RgbLed(RgbColor::Off);
@@ -234,6 +251,8 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 		comm_.CheckFlightProfileTimeout(device_state_);
 		break;
 	}
+
+	Diag::mark(Diag::Seg::ProcTotal, t_proc);
 }
 
 void Factory::OnRadioTxDone() {

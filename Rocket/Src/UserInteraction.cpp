@@ -5,6 +5,7 @@ extern "C" {
 
 #include <UserInteraction.hpp>
 #include "CubeMonitorGlobals.hpp"
+#include "CycleProfiler.hpp"
 #include "Constants.hpp"
 #include "StaticString.hpp"
 #include "StaticStringWriter.hpp"
@@ -215,6 +216,8 @@ void UserInteraction::ProcessChar(uint8_t uart_char, DeviceState &device_state) 
 			erase_all_pending_ = true;
 			StaticStringWriter<UART_LINE_MAX_LENGTH> line(&huart2_);
 			line.WriteMany(data_erase_confirm_text_);
+		} else if (uart_char == 't' || uart_char == 'T') {
+			DisplayCycleProfile();   // per-cycle timing breakdown
 		} else if (uart_char == 27) { // Esc key
 			erase_all_pending_ = false;
 			device_state = DeviceState::Disarmed;
@@ -610,6 +613,37 @@ void UserInteraction::AdjustPasswordSetting(uint8_t uart_char) {
 		HAL_UART_Transmit(&huart2_, (uint8_t*) masked, 1, uart_timeout);
 		user_input_[char_pos++] = uart_char;
 	}
+}
+
+// ---------------------------------------------------------------------------
+// DisplayCycleProfile — dump the per-segment super-loop timing breakdown.
+//
+// Prints, for every Diag::Seg, the LAST cycle's duration and the running MAX
+// (worst case) in microseconds, then clears the maxima.  Indented rows are
+// Navigation::Update() sub-segments.  Workflow: arm on the bench, let it run a
+// few seconds (so a GPS-poll cycle and, if launched, a flash-drain cycle are
+// captured in the maxima), disarm, then read this — the MAX column shows where
+// the 50 ms budget actually goes.  Press once to clear boot transients, then
+// again after a fresh run for a clean worst-case snapshot.
+// ---------------------------------------------------------------------------
+void UserInteraction::DisplayCycleProfile() {
+	StaticStringWriter<UART_LINE_MAX_LENGTH> line(&huart2_);
+	line.WriteMany(clear_screen_, "Per-cycle timing (us)   segment: last / max", crlf_);
+	for (uint8_t i = 0; i < static_cast<uint8_t>(Diag::Seg::Count); ++i) {
+		const Diag::Seg s = static_cast<Diag::Seg>(i);
+		line.WriteMany("  ", Diag::SegName(s), ": ",
+				static_cast<uint32_t>(Diag::lastUs(s)), " / ",
+				static_cast<uint32_t>(Diag::maxUs(s)), crlf_);
+	}
+	line.WriteMany("counts   name: last / max", crlf_);
+	for (uint8_t i = 0; i < static_cast<uint8_t>(Diag::Cnt::Count); ++i) {
+		const Diag::Cnt c = static_cast<Diag::Cnt>(i);
+		line.WriteMany("  ", Diag::CntName(c), ": ",
+				static_cast<uint32_t>(Diag::lastCount(c)), " / ",
+				static_cast<uint32_t>(Diag::maxCount(c)), crlf_);
+	}
+	line.WriteMany("(max cleared; run again then re-read for a clean worst case)", crlf_);
+	Diag::resetMax();
 }
 
 void UserInteraction::ExportData(uint16_t archive_position) {

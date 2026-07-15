@@ -110,12 +110,15 @@ private:
   const char* data_menu_header_ = "#  Date       Time     Apogee (m) Time to Apogee (s)\r\n\0";
   const char* data_exit_text_ = "Exiting Data Menu\r\n\r\n\0";
   const char* data_guidance_text_ = "\r\nStart terminal logging and enter a valid number to retrieve CSV output of corresponding flight\r\n"
-		  "  c) Clear empty/unused records   e) Erase ALL flight memory\r\n";
+		  "  c) Clear empty/unused records   e) Erase ALL flight memory   t) Per-cycle timing breakdown\r\n";
   const char* data_reclaim_done_text_ = "\r\nCleared empty records.\r\n\0";
   const char* data_erase_confirm_text_ = "\r\nErase ALL flight memory? This cannot be undone. Press Y to confirm, any other key to cancel.\r\n\0";
   const char* data_erase_progress_text_ = "\r\nErasing all flight memory, please wait...\r\n\0";
   const char* data_erase_done_text_ = "\r\nAll flight memory erased.\r\n\0";
   const char* data_cancel_text_ = "\r\nCancelled.\r\n\0";
+  // fused_agl_m / fused_vspeed_mps are the EKF fused solution (retired from the
+  // real-time authority per ADR-0005 but still computed every cycle and logged here
+  // for offline observation, ADR-0004).  tilt_deg / q_* are the NFR-9 strapdown.
   const char* export_header_text_ = "time_ms,raw_baro_agl_m,fused_agl_m,raw_baro_vel_mps,fused_vspeed_mps,accel_x_g,accel_y_g,accel_z_g,gyro_x_dps,gyro_y_dps,gyro_z_dps,lat_deg,lon_deg,flight_state,oc_start_us,oc_end_us,process_start_us,process_dur_us,tilt_deg,q_w,q_x,q_y,q_z\0";
 
   const char* test_menu_intro_ = "Rocket Locator Test Menu\r\n\r\n\0";
@@ -195,6 +198,7 @@ private:
   void DisplayTestMenu();
   void ExportData(uint16_t archive_position);
   void ExportFlightStats(uint16_t archive_position);
+  void DisplayCycleProfile();   // per-segment super-loop timing breakdown
   void MakeDateTime(char *target, int date, int time, int sample_index, bool time_zone_adjust, bool fractional);
   void FloatToCharArray(char *target, float source, uint8_t size, uint8_t fraction_digits);
   void DisplayDfuMenu();
