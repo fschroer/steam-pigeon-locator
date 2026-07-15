@@ -423,6 +423,50 @@ static void B3_SustainedDropoutStillDeploys() {
     }
 }
 
+// B4 (#10): a low apogee (below the main-deploy altitude) fires BOTH main events
+// at apogee — i.e. before the 2 s drogue-backup delay elapses.  The drogue-backup
+// event must STILL be recorded when its delay comes due, even though flight_state_
+// has already advanced past DrogueBackupEvent.  The old flight_state_ < XxxEvent
+// gate skipped it forever (the bug behind flight 2026-07-12 item #10).
+static std::vector<Cycle> makeLowApogeeFlight() {
+    std::vector<Cycle> f;
+    const float dt = 0.05f;
+    uint32_t t = 0;
+    float agl = 0.0f, vel = 0.0f;
+    auto push = [&](float accel_mag) {
+        Cycle c; c.t_ms = t; c.raw_agl = agl; c.raw_vel = vel; c.raw_valid = true;
+        c.fused_agl = agl; c.fused_vspeed = vel; c.accel_mag = accel_mag;
+        f.push_back(c); t += 50;
+    };
+    for (int i = 0; i < 10; ++i) push(9.81f);                        // pad
+    for (int i = 0; i < 16; ++i) { vel += 50.0f * dt; agl += vel * dt; push(60.0f); } // boost -> ~40 m/s
+    while (vel > 0.0f) { vel -= 9.81f * dt; agl += vel * dt; push(0.5f); }            // coast to ~80 m apogee
+    while (agl > 0.5f) { vel = -6.0f; agl += vel * dt; if (agl < 0.0f) agl = 0.0f; push(9.81f); } // slow descent
+    for (int i = 0; i < 30; ++i) push(9.81f);                        // landing
+    return f;
+}
+
+static void B4_DrogueBackupAfterMain() {
+    printf("\n--- B4: drogue-backup still fires after main (low-apogee latch, #10) ---\n");
+    std::vector<Cycle> flight = makeLowApogeeFlight();
+    Archive ar = runFlight(flight);
+
+    const double apo    = ar.Event(Stat::NoseoverTimestampMs);
+    const double mainp  = ar.Event(Stat::MainPrimaryDeployTimestampMs);
+    const double dbackup= ar.Event(Stat::DrogueBackupDeployTimestampMs);
+
+    CHECK_MSG(ar.HasEvent(Stat::MainPrimaryDeployTimestampMs), "main primary never fired");
+    CHECK_MSG(nearf((float)mainp, (float)apo, 60.0f), "main primary not at apogee: main=%.0f apo=%.0f", mainp, apo);
+    // The regression assertion: the backup event survives the main having already
+    // advanced the state past it.
+    CHECK_MSG(ar.HasEvent(Stat::DrogueBackupDeployTimestampMs),
+              "#10: drogue-backup event skipped after main fired first");
+    CHECK_MSG(dbackup > mainp,
+              "drogue-backup should fire ~2 s AFTER the (apogee) main: dbackup=%.0f main=%.0f", dbackup, mainp);
+    CHECK_MSG(g_bench.FiredOn(2), "drogue-backup channel (ch2) never fired");
+    printf("       apo=%.0f mainPrimary=%.0f drogueBackup=%.0f ms\n", apo, mainp, dbackup);
+}
+
 // ===========================================================================
 // CSV replay mode
 // ===========================================================================
@@ -520,6 +564,7 @@ int main(int argc, char** argv) {
     B1_NominalFlight();
     B2_SpikeNearMainRejected();
     B3_SustainedDropoutStillDeploys();
+    B4_DrogueBackupAfterMain();
 
     printf("\n==========================================================\n");
     printf(" Results: %d passed, %d failed\n", g_pass, g_fail);

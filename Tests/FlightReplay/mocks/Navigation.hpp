@@ -30,6 +30,7 @@ public:
     // ---- Surface FlightManager.cpp actually calls --------------------------
     const NavSolution& getFused()   const { return m_solution; }
     const BaroSample&  getRawBaro() const { return m_raw_baro; }
+    const GpsSample&   getRawGps()  const { return m_raw_gps; }   // #13
     void  setPhase(FlightStates /*state*/) {}
     float getMaxAltitude()          const { return m_max_altitude_agl_m; }
     bool  baroAglReferenceReady()   const { return m_baro_ref_ready; }
@@ -41,6 +42,7 @@ public:
 private:
     NavSolution m_solution{};
     BaroSample  m_raw_baro{};
+    GpsSample   m_raw_gps{};            // #13 — default (lat/lon 0); harness does not exercise position
     Quaternionf m_quat{};              // identity
     float       m_max_altitude_agl_m = 0.0f;
     float       m_tilt_rad           = 0.0f;

@@ -43,12 +43,21 @@ public:
     bool     WriteBuiltSample(const FlightArchive::FlightSample& /*s*/) { return true; }
 
     static FlightArchive::FlightSample BuildSample(
-            uint32_t flight_time_ms, const NavSolution& /*nav*/,
-            const float /*raw_agl*/, const float /*raw_vel*/,
-            FlightStates /*state*/, const TimingDiag& /*t*/,
+            uint32_t flight_time_ms, const NavSolution& nav,
+            const float raw_agl, const float raw_vel,
+            FlightStates state, const TimingDiag& /*t*/,
             float /*tilt_rad*/, const Quaternionf& /*quat*/) {
+        // Mirror the fields the real BuildSample fills that the harness relies on —
+        // notably body accel, so the #7 launch-onset ring scan sees real thrust.
         FlightArchive::FlightSample s{};
-        s.timestamp_ms = flight_time_ms;
+        s.timestamp_ms          = flight_time_ms;
+        s.raw_baro_altitude_agl = raw_agl;
+        s.raw_baro_velocity     = raw_vel;
+        s.accel                 = nav.body_accel_mps2;
+        s.gyro                  = nav.body_rates_rps;
+        s.lat_rad               = nav.pos.lat_rad;
+        s.lon_rad               = nav.pos.lon_rad;
+        s.flight_state          = static_cast<uint8_t>(state);
         return s;
     }
 

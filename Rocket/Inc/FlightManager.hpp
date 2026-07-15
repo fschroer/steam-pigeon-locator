@@ -78,6 +78,15 @@ private:
     void CheckQueuedDeployment();
     void DeployIfClear(uint8_t channel);
     void ResetFlight();
+    // Advance flight_state_ monotonically (never regress) and forward the phase to
+    // Navigation.  Used by the deployment events (#10) so a late-firing event (e.g.
+    // drogue backup after its 2 s delay, once main has already fired) does not pull
+    // the state backwards past events already reached.
+    void AdvanceFlightState(FlightStates s);
+    // #7: at launch, drop the pre-thrust pad samples from the pre-launch ring and
+    // return the onset sample's absolute timestamp, so the record epoch (t=0) lands
+    // at the launch instant rather than ~2 s before it.
+    uint32_t AnchorRecordToLaunchOnset();
 
     // ── Pre-launch ring buffer (FR: 2 s of pre-launch data in the record) ─────
     // Every armed cycle a fully-built FlightSample is pushed here, stamped with the
@@ -127,6 +136,19 @@ private:
 
     // Launch detection debounce
     uint32_t     m_launch_candidate_ms_ = 0;
+    // #7: body-accel magnitude marking thrust onset when scanning the pre-launch
+    // ring for the launch epoch — just above the 1 g on-pad band.
+    static constexpr float kLaunchOnsetAccelG = 1.3f;
+
+    // #10: per-event fired latches.  Deployment events must NOT be gated on the
+    // shared flight_state_ ordinal: an event whose delay lands it AFTER a later
+    // event that already fired (main firing before the 2 s drogue-backup delay) was
+    // skipped forever, so the drogue-backup event was never recorded (flight
+    // 2026-07-12).  Each event now latches independently.
+    bool m_drogue_primary_fired_ = false;
+    bool m_drogue_backup_fired_  = false;
+    bool m_main_primary_fired_   = false;
+    bool m_main_backup_fired_    = false;
 
     // Apogee detection state — tracked here rather than in Navigation since
     // FlightManager now owns all flight event logic.
@@ -136,6 +158,13 @@ private:
     // Apogee detection thresholds
     static constexpr float    kVzThresholdMps       = 1.0f;   // m/s descending
     static constexpr uint16_t kNoIncreaseWindowMs   = 500;    // ms without new peak
+    // #1/#6: apogee cannot be declared while the airframe is still under thrust.
+    // During boost the base/ram pressure biases raw baro low, so its altitude can
+    // fall and its derived velocity go negative mid-boost — which the detector read
+    // as a descent and latched a false apogee at ~13 m / 3300 ms, pre-empting
+    // burnout detection and cascading every deployment (flight 2026-07-12).  At real
+    // apogee the airframe is in ballistic coast (|a| well under 1 g).
+    static constexpr float    kApogeeMaxThrustG     = 1.3f;   // g; above this = thrust
 
     // Burnout detection threshold and debounce
     static constexpr float   kBurnoutAccelG        = 1.5f;  // accel drops below this at burnout

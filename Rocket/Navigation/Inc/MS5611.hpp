@@ -6,8 +6,23 @@
 
 namespace RocketNav {
 
-#define MS5611_D2_START_NUM  14U
+// D2 (temperature) conversion start phase within the 50 ms TIM17 period, as a
+// fraction of ARR.  Start EARLY (~8 ms): the two sequential OSR-4096 conversions
+// (~9.7 ms each) plus their reads must finish with margin before the next cycle's
+// readSample(), and — since the conversion commands are now enqueued on the shared
+// SPI2 bus and drained in main-loop context (behind IMU/flash traffic), not issued
+// directly from the ISR — the sequence carries queue latency the old direct-ISR
+// path did not.  The previous 28 ms (14/25) left only ~2 ms of slack before the
+// 50 ms boundary, so under flash-logging contention D1 completion slipped past the
+// window and the pipeline stalled to a 2-cycle (10 Hz) cadence (issue #2).  8 ms
+// (D1 done ~28 ms) leaves ~22 ms of margin.  Must stay comfortably AFTER
+// readSample() runs (early in ProcessRocketEvents) so OCCallback still finds
+// m_state == Idle, and comfortably BEFORE 50 ms minus (2 conversions + reads).
+#define MS5611_D2_START_NUM   4U
 #define MS5611_D2_START_DEN  25U
+// Legacy: the pre-60e15d5 two-phase ISR scheme re-armed CC1 to also fire at this
+// D1-start phase.  The current design derives the D1 start from measured D2
+// completion (SetD1Converted), so this is unused — kept only for reference.
 #define MS5611_D1_START_NUM  39U
 #define MS5611_D1_START_DEN  50U
 

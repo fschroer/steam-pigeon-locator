@@ -133,6 +133,16 @@ bool FlightManager::DetectApogee(const NavSolution& sol, const BaroSample& baro_
         m_apogee_last_increase_ms_ = now_ms;
     }
 
+    // #1/#6: never declare apogee while still under thrust.  Peak tracking above
+    // still runs (so the recorded max altitude keeps climbing to the true apogee),
+    // but the descent test below is inhibited until the airframe is coasting.  This
+    // blocks the powered-flight base/ram-pressure false apogee independently of
+    // whether burnout has been separately confirmed, and lets burnout be detected
+    // first (it was pre-empted by the false apogee on flight 2026-07-12).
+    const float accel_g = RocketNav::Math::norm(sol.body_accel_mps2) / G0_F;
+    if (accel_g > kApogeeMaxThrustG)
+        return false;
+
     const bool descending          = (vz < -kVzThresholdMps);   // positive = climbing
     const bool no_new_max_for_window =
         (now_ms - m_apogee_last_increase_ms_) > kNoIncreaseWindowMs;
@@ -141,30 +151,30 @@ bool FlightManager::DetectApogee(const NavSolution& sol, const BaroSample& baro_
 }
 
 // ---------------------------------------------------------------------------
-// DetectLanded
-// Primary: fused vertical speed near zero sustained for 1 s.
-// Backup:  raw baro AGL below kLandedBaroAglThresholdM AND raw baro velocity
-//          below kLandedRawBaroSpeedMps for the same window.
+// DetectLanded  (#12)
+// Landing is declared purely from RAW baro velocity sustained near zero.
 //
-// The backup path handles the case where a deployment shock has accumulated a
-// ~20 m offset in the fused altitude, keeping fused vspeed non-zero (1-2 m/s)
-// even after the rocket is stationary.  Raw baro is unaffected by EKF state
-// accumulation and correctly shows near-zero velocity once on the ground.
-// Both paths share the same counter so the confirmation window is consistent.
+// The former primary path keyed on fused vertical speed (|sol.vertical_speed_mps|
+// < 0.25).  The EKF is retired from the real-time path (ADR-0005) and produces no
+// usable vertical speed in this build — it reads 0 on every sample — so that term
+// was ALWAYS satisfied and forced a false landing ~1 s after the near-apogee window
+// expired, mid-descent and tens of metres up, which closed the flight record early
+// (flight 2026-07-12: "landing" at 7.7 s while still at 67 m and descending).  Raw
+// baro velocity is the authoritative descent signal under NFR-1, so it is now the
+// sole criterion.
+//
+// kLandedRawBaroSpeedMps is tuned for the 10-sample (500 ms) velocity window; the
+// longer window averages out baro pressure noise that would otherwise inflate the
+// velocity reading at rest.  AGL threshold omitted: landing may be on terrain above
+// the pad elevation, so an absolute ceiling would block detection on uphill sites.
 // ---------------------------------------------------------------------------
 bool FlightManager::DetectLanded(const NavSolution& sol, const BaroSample& baro_raw) {
-    const bool fused_settled = std::fabs(sol.vertical_speed_mps) < kLandedSpeedMps;
+    (void) sol;   // fused vertical speed retired (ADR-0005) — see note above
 
-    // Raw baro backup: valid baro, rocket is near ground, and baro velocity low.
-    // kLandedRawBaroSpeedMps is tuned for the 10-sample (500 ms) velocity window;
-    // the longer window averages out baro pressure noise that would otherwise
-    // inflate the velocity reading at rest.
-    // AGL threshold omitted: landing may be on terrain above the pad elevation,
-    // so an absolute ceiling would block detection on uphill landing sites.
     const bool baro_settled = baro_raw.valid
                            && std::fabs(baro_raw.velocity) < kLandedRawBaroSpeedMps;
 
-    if (fused_settled || baro_settled) {
+    if (baro_settled) {
         if (m_landed_count_ < kLandedConfirmSamples)
             ++m_landed_count_;
     } else {
@@ -284,11 +294,16 @@ void FlightManager::UpdateFlightState() {
             ResetFlight();
             flight_state_ = FlightStates::Launched;
             nav_.setPhase(FlightStates::Launched);
-            // Anchor the record epoch to the oldest retained pre-launch sample so
-            // the ~2 s leading up to launch is included; launch then lands at
-            // ~2000 ms.  All subsequent timestamps are this-relative.
+            // #7: anchor the record epoch (t=0) to the launch instant.  Scan the
+            // retained pre-launch ring for thrust onset (the sample just before body
+            // accel rises out of the 1 g pad band) and drop the older pad samples —
+            // timestamps are unsigned, so pre-onset data cannot carry negative time.
+            // The record therefore starts at launch onset (~0 ms) rather than ~2 s
+            // before it; the ~2 s pre-onset pad buffer of ADR-0007 is intentionally
+            // no longer retained (a signed-timestamp scheme would be required to keep
+            // it with launch at 0).
             m_record_origin_ms_ = (m_ring_count_ > 0)
-                                ? m_ring_[m_ring_head_].timestamp_ms
+                                ? AnchorRecordToLaunchOnset()
                                 : m_flight_clock_ms_;
             m_record_origin_set_ = true;
             flight_time_ms = m_flight_clock_ms_ - m_record_origin_ms_;
@@ -306,11 +321,26 @@ void FlightManager::UpdateFlightState() {
             flight_state_ = FlightStates::Burnout;
             nav_.setPhase(FlightStates::Burnout);
             archive_.WriteEvent(FlightArchive::Statistic::BurnoutTimestampMs, flight_time_ms);
+            // #1: discard any apogee-peak state accumulated during boost.  The base/
+            // ram-pressure dip plants a FALSE altitude peak under thrust (20.7 m at
+            // 2700 ms on flight 2026-07-12) that the coast never exceeds until well
+            // after motor cut-off, which — with the lagging baro velocity — otherwise
+            // reads as an immediate post-burnout apogee.  Restart peak tracking from
+            // the burnout altitude so the coast peak is the true apogee.
+            const BaroSample baro_bo    = nav_.getRawBaro();
+            m_apogee_peak_agl_m_        = baro_bo.altitude_m_agl;
+            m_apogee_last_increase_ms_  = nav_solution.timestamp_ms;
         }
     }
 
     // --- Noseover / apogee detection ---
-    if (flight_state_ > FlightStates::WaitingLaunch && flight_state_ < FlightStates::Noseover) {
+    // #1/#6/#8: apogee is evaluated ONLY after burnout is CONFIRMED.  Under thrust
+    // the raw baro is unreliable (base/ram pressure), and the boost-dip false peak +
+    // lagging velocity made a fused-independent detector latch a false apogee at
+    // ~13-20 m mid-boost, pre-empting burnout and cascading every deployment (flight
+    // 2026-07-12).  Gating on the Burnout state (with the peak reset above) confines
+    // apogee detection to the ballistic coast where raw baro tracks the true arc.
+    if (flight_state_ == FlightStates::Burnout) {
         const BaroSample baro_raw = nav_.getRawBaro();
         if (DetectApogee(nav_solution, baro_raw)) {
             noseover_time_ = 0;
@@ -318,7 +348,11 @@ void FlightManager::UpdateFlightState() {
             nav_.setPhase(FlightStates::Noseover);
             archive_.WriteEvent(FlightArchive::Statistic::NoseoverTimestampMs,  flight_time_ms);
             archive_.WriteEvent(FlightArchive::Statistic::ApogeeTimestampMs,    flight_time_ms);
-            archive_.WriteEvent(FlightArchive::Statistic::MaxAltitudeM,         nav_.getMaxAltitude());
+            // #1: record the RAW-baro apogee peak (tracked in DetectApogee via the
+            // raw-primary deployment source), NOT nav_.getMaxAltitude() which tracks
+            // the retired EKF's fused altitude — that produced a wrong 29.8 m vs the
+            // true 92.4 m raw-baro apogee (flight 2026-07-12).
+            archive_.WriteEvent(FlightArchive::Statistic::MaxAltitudeM,         m_apogee_peak_agl_m_);
             near_apogee_ = true;
         }
     }
@@ -360,7 +394,7 @@ void FlightManager::UpdateFlightState() {
         const float deploy_vspeed = dsrc.vspeed_mps;
 
         // Drogue primary
-        if (flight_state_ < FlightStates::DroguePrimaryEvent
+        if (!m_drogue_primary_fired_
                 && noseover_time_ >= SAMPLES_PER_SECOND * locator_settings.drogue_primary_deploy_delay / 10) {
             uint8_t status = DeploymentChannelContinuity();
             if (locator_settings.deployment_ch1_mode == DeployMode::DroguePrimary) {
@@ -391,13 +425,14 @@ void FlightManager::UpdateFlightState() {
                     | (status << (bit_shift_pre_fire_continuity - 3));
                 DeployIfClear(4);
             }
-            flight_state_ = FlightStates::DroguePrimaryEvent;
-            nav_.setPhase(FlightStates::DroguePrimaryEvent);
+            m_drogue_primary_fired_ = true;
+            AdvanceFlightState(FlightStates::DroguePrimaryEvent);
             archive_.WriteEvent(FlightArchive::Statistic::DroguePrimaryDeployTimestampMs, flight_time_ms);
         }
 
-        // Drogue backup
-        if (flight_state_ < FlightStates::DrogueBackupEvent
+        // Drogue backup (#10: latched independently — must still fire after its
+        // delay even if a main event has already advanced flight_state_ past it).
+        if (!m_drogue_backup_fired_
                 && noseover_time_ >= SAMPLES_PER_SECOND * locator_settings.drogue_backup_deploy_delay / 10) {
             uint8_t status = DeploymentChannelContinuity();
             if (locator_settings.deployment_ch1_mode == DeployMode::DrogueBackup) {
@@ -428,13 +463,13 @@ void FlightManager::UpdateFlightState() {
                     | (status << (bit_shift_pre_fire_continuity - 3));
                 DeployIfClear(4);
             }
-            flight_state_ = FlightStates::DrogueBackupEvent;
-            nav_.setPhase(FlightStates::DrogueBackupEvent);
+            m_drogue_backup_fired_ = true;
+            AdvanceFlightState(FlightStates::DrogueBackupEvent);
             archive_.WriteEvent(FlightArchive::Statistic::DrogueBackupDeployTimestampMs, flight_time_ms);
         }
 
         // Main primary
-        if (flight_state_ < FlightStates::MainPrimaryEvent
+        if (!m_main_primary_fired_
                 && deploy_agl <= locator_settings.main_primary_deploy_altitude) {
             uint8_t status = DeploymentChannelContinuity();
             pre_main_velocity_ = deploy_vspeed;
@@ -466,13 +501,13 @@ void FlightManager::UpdateFlightState() {
                     | (status << (bit_shift_pre_fire_continuity - 3));
                 DeployIfClear(4);
             }
-            flight_state_ = FlightStates::MainPrimaryEvent;
-            nav_.setPhase(FlightStates::MainPrimaryEvent);
+            m_main_primary_fired_ = true;
+            AdvanceFlightState(FlightStates::MainPrimaryEvent);
             archive_.WriteEvent(FlightArchive::Statistic::MainPrimaryDeployTimestampMs, flight_time_ms);
         }
 
         // Main backup
-        if (flight_state_ < FlightStates::MainBackupEvent
+        if (!m_main_backup_fired_
                 && deploy_agl <= locator_settings.main_backup_deploy_altitude) {
             uint8_t status = DeploymentChannelContinuity();
             if (deploy_vspeed < pre_main_velocity_)
@@ -505,8 +540,8 @@ void FlightManager::UpdateFlightState() {
                     | (status << (bit_shift_pre_fire_continuity - 3));
                 DeployIfClear(4);
             }
-            flight_state_ = FlightStates::MainBackupEvent;
-            nav_.setPhase(FlightStates::MainBackupEvent);
+            m_main_backup_fired_ = true;
+            AdvanceFlightState(FlightStates::MainBackupEvent);
             archive_.WriteEvent(FlightArchive::Statistic::MainBackupDeployTimestampMs, flight_time_ms);
         }
 
@@ -596,9 +631,20 @@ void FlightManager::UpdateFlightState() {
     // WaitingLaunch only the most recent 2 s are retained.
     if (flight_state_ >= FlightStates::WaitingLaunch && flight_state_ < FlightStates::Landed) {
         const BaroSample baro_raw = nav_.getRawBaro();
-        const FlightArchive::FlightSample s = Archive::BuildSample(
+        FlightArchive::FlightSample s = Archive::BuildSample(
             m_flight_clock_ms_, nav_solution, baro_raw.altitude_m_agl, baro_raw.velocity,
             flight_state_, m_timing_diag_, nav_.getTiltFromVerticalRad(), nav_.getStrapdownQuat());
+        // #13: archive RAW GPS position (ADR-0005 raw-primary), not the retired EKF's
+        // nav_solution.pos — that stayed frozen at the pad in the record even though
+        // the live telemetry path (raw GPS) showed the real moving track.
+        const GpsSample gps_raw = nav_.getRawGps();
+        s.lat_rad = gps_raw.lat_rad;
+        s.lon_rad = gps_raw.lon_rad;
+        // fused_altitude_agl / fused_vertical_speed_mps are left as BuildSample set
+        // them — the EKF's fused solution (nav_solution.altitude_agl_m /
+        // vertical_speed_mps).  The EKF is retired from the real-time authority
+        // (ADR-0005) but still runs every cycle; these columns are how its output is
+        // observed offline (ADR-0004) and are deliberately NOT overwritten here.
         PushPreLaunchSample(s, flight_state_ == FlightStates::WaitingLaunch);
     }
 
@@ -712,6 +758,10 @@ void FlightManager::ResetFlight() {
     m_last_raw_vspeed_      = 0.0f;
     m_last_raw_vspeed_ms_   = 0;
     m_have_raw_vspeed_      = false;
+    m_drogue_primary_fired_ = false;
+    m_drogue_backup_fired_  = false;
+    m_main_primary_fired_   = false;
+    m_main_backup_fired_    = false;
     deployment_queued_[0]   = false;
     deployment_queued_[1]   = false;
     deployment_queued_[2]   = false;
@@ -720,4 +770,47 @@ void FlightManager::ResetFlight() {
     // Clear the record epoch; re-established at the next launch detect.
     m_record_origin_ms_     = 0;
     m_record_origin_set_    = false;
+}
+
+// ---------------------------------------------------------------------------
+// AdvanceFlightState (#10)
+// Move the flight state forward only.  Deployment events latch independently now,
+// so a late event (e.g. drogue backup after its delay, once main already fired)
+// must record its timestamp without pulling flight_state_ back to a lower ordinal.
+// setPhase is forwarded only on a real advance; the event states (4..7) all map to
+// the same EKF/baro phase, so no behaviour is lost when an advance is suppressed.
+// ---------------------------------------------------------------------------
+void FlightManager::AdvanceFlightState(FlightStates s) {
+    if (static_cast<uint8_t>(s) > static_cast<uint8_t>(flight_state_)) {
+        flight_state_ = s;
+        nav_.setPhase(s);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AnchorRecordToLaunchOnset (#7)
+// Scan the retained pre-launch ring oldest-first for thrust onset — the first
+// sample whose body-accel magnitude rises out of the 1 g pad band — and drop the
+// pad samples before it, so the record epoch (t=0) is the launch instant.  Returns
+// the absolute (monotonic-clock) timestamp of the onset sample, which the caller
+// uses as m_record_origin_ms_.  Because archived timestamps are unsigned, samples
+// older than the onset cannot be represented and are discarded here.
+// ---------------------------------------------------------------------------
+uint32_t FlightManager::AnchorRecordToLaunchOnset() {
+    uint16_t idx       = m_ring_head_;
+    uint16_t onset_off = 0;                 // default: keep the oldest sample
+    for (uint16_t i = 0; i < m_ring_count_; ++i) {
+        const float a_g = RocketNav::Math::norm(m_ring_[idx].accel) / G0_F;
+        if (a_g >= kLaunchOnsetAccelG) {
+            // Onset = the sample just before accel first exceeds the pad band, so
+            // t=0 sits immediately before the thresholds trip (per the request).
+            onset_off = (i > 0) ? static_cast<uint16_t>(i - 1) : 0;
+            break;
+        }
+        idx = static_cast<uint16_t>((idx + 1) % kPreLaunchRingSamples);
+    }
+    // Discard the pre-onset pad samples so the remaining ring starts at onset.
+    m_ring_head_  = static_cast<uint16_t>((m_ring_head_ + onset_off) % kPreLaunchRingSamples);
+    m_ring_count_ = static_cast<uint16_t>(m_ring_count_ - onset_off);
+    return m_ring_[m_ring_head_].timestamp_ms;
 }

@@ -266,7 +266,7 @@ void MS5611::RearmCC1ForD2() {
 }
 
 /*---------------------------------------------------------------------------
- * OCCallback  (CC1 fires at 28ms then 39ms within each 50ms period)
+ * OCCallback  (CC1 fires once per 50 ms period, at MS5611_D2_START ≈ 8 ms)
  *--------------------------------------------------------------------------*/
 volatile int32_t d_d2_converting_ms_ = 0;
 volatile int32_t d_d1_converting_ms_ = 0;
@@ -277,7 +277,7 @@ volatile int32_t d_d1_converting_ms_ = 0;
 // instant each conversion command goes out, so SetD1Converted() measures the
 // 9.12 ms D1 conversion from actual issue time, not from enqueue time.
 void MS5611::OCCallback() {
-	// Cadence kick only: at the CC1 instant (28 ms into the period) queue the
+	// Cadence kick only: at the CC1 instant (~8 ms into the period) queue the
 	// D2 conversion-start.  Everything after this — the D2 read, the D1
 	// conversion-start, and the D1 read — is sequenced by ServiceConversions()
 	// (called SetD1Converted) in main-loop context, gated on the ACTUAL
