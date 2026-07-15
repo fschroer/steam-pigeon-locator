@@ -135,11 +135,17 @@ void InsEkf15::setPhase(FlightStates state) {
     m_floor_gps_acc_ = (state == FlightStates::Launched ||
                         state == FlightStates::Burnout);
 
-    // GPS-only mode: active from Noseover onward.  IMU acceleration integration
-    // is suppressed so inertial drift doesn't corrupt position after apogee.
-    // Baro is also skipped.  GPS position + velocity fusion remain active to
-    // capture a clean recovery fix before LoRA loses range near the horizon.
-    m_gps_only_ = (state >= FlightStates::Noseover);
+    // GPS-only mode is RETIRED (was: active from Noseover onward, suppressing
+    // inertial velocity integration AND baro updates so post-apogee inertial drift
+    // couldn't corrupt the EKF recovery position).  That specialisation is obsolete:
+    // the recovery position is now raw GPS (ADR-0005), the EKF drives nothing
+    // authoritative, and the user wants the fused solution OBSERVABLE through descent
+    // (ADR-0004) rather than frozen — the old gating left fused altitude flat and
+    // fused vertical speed at 0 for the whole descent.  Keep the EKF running its full
+    // baro + inertial + GPS fusion in every phase so its descent output is logged;
+    // predict()'s velocity-divergence guard still bounds any tumble-induced runaway.
+    // (See the m_gps_only_ guards in predict() / updateBaro().)
+    m_gps_only_ = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -354,22 +360,45 @@ void InsEkf15::predict(const ImuSample& imu, float dt_s) {
         Phi[6+i][9+i] += -dt_s;                   // attitude <- gyro bias
     }
 
-    // tmp = Phi P
+    // tmp = Phi P.  Phi = I + F dt, and the two bias blocks (states 9..14) have zero
+    // dynamics — d(dbg)=d(dba)=0 — so Phi rows 9..14 are pure identity.  Hence tmp
+    // rows 9..14 are EXACT copies of P rows 9..14 (a single 1.0 term each, no
+    // rounding), needing no multiplies.  Only the dynamic rows 0..8 do the full inner
+    // product.  This core has no FPU, so every skipped float multiply is a skipped
+    // software-emulated op.
+    constexpr int kDyn = 9;   // states 0..8 have dynamics; 9..14 (gyro/accel bias) are identity rows in Phi
     static float tmp[n][n];
-    for (int i = 0; i < n; ++i)
+    for (int i = 0; i < kDyn; ++i)
         for (int j = 0; j < n; ++j) {
             float s = 0.0f;
             for (int k = 0; k < n; ++k)
                 s += Phi[i][k] * P[k*n + j];
             tmp[i][j] = s;
         }
-    // P = tmp Phi^T
+    for (int i = kDyn; i < n; ++i)
+        for (int j = 0; j < n; ++j)
+            tmp[i][j] = P[i*n + j];   // Phi row i == e_i
+    // P = tmp Phi^T.  Two reductions stack here:
+    //  (1) Phi P Phi^T is symmetric (P is), so compute only the upper triangle
+    //      (j >= i) and mirror into the lower.
+    //  (2) Phi^T columns 9..14 are identity (Phi rows 9..14 = e_r), so
+    //      P[i][j] = tmp[i][j] EXACTLY for j >= kDyn — a whole block with no mults.
+    // Net: only the 45 upper-triangle elements with i,j in 0..8 do an inner product
+    // (down from 225 full).  symmetrizeP() still runs below: its diagonal-positivity
+    // floor is required, and its averaging (a no-op here, the triangles are already
+    // equal) is still needed by the non-symmetric measurement updates that call it.
     for (int i = 0; i < n; ++i)
-        for (int j = 0; j < n; ++j) {
-            float s = 0.0f;
-            for (int k = 0; k < n; ++k)
-                s += tmp[i][k] * Phi[j][k];
+        for (int j = i; j < n; ++j) {
+            float s;
+            if (j >= kDyn) {
+                s = tmp[i][j];                       // Phi^T column j == e_j
+            } else {
+                s = 0.0f;
+                for (int k = 0; k < n; ++k)
+                    s += tmp[i][k] * Phi[j][k];
+            }
             P[i*n + j] = s;
+            P[j*n + i] = s;
         }
 
     // Process noise:  + Q dt  (plus the explicit altitude term m_q_alt).
