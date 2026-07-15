@@ -5,3 +5,4 @@
 
 # IDE scanner-discovery cache (machine-specific churn)
 /.settings/language.settings.xml
+/Release/
