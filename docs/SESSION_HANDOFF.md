@@ -1,6 +1,55 @@
-# Session Handoff — 2026-07-05
+# Session Handoff — 2026-07-15
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
+
+## 2026-07-15 session — flight-2026-07-12 fixes + real-time performance investigation — UNCOMMITTED, host-verified, NOT bench/flight-tested
+
+Working tree has **uncommitted** changes across the locator (and one app file). Host suites pass (`Tests/FlightReplay` **36/36**, `Tests/ArchiveRoundTrip` **638/638**). **Nothing flashed/flight-tested this session** — the user was iterating profiler dumps on hardware but the code edits below are not yet committed. **First next step: review + commit.**
+
+### A. Flight-2026-07-12 low-power test-flight correctness fixes → GitHub **#25** (validate)
+Driven by a real flight CSV + `docs`/ADR review. All in `Rocket/Src/FlightManager.cpp` (+ `.hpp`) unless noted; host-verified via `FlightReplay` (added test **B4** for the drogue-backup latch):
+- **False apogee → cascade (root cause of most items).** Boost base/ram pressure made raw-baro altitude *fall* under thrust and its derived velocity go negative, so the fused-independent apogee detector latched a **false apogee at ~13 m / 3300 ms**, which pre-empted burnout and cascaded *every* deployment in one cycle. Fix: **apogee only after CONFIRMED burnout** (`flight_state_ == Burnout`), **discard the boost-time false peak at the burnout transition** (reset `m_apogee_peak_agl_m_`/timer), plus a thrust guard (`|a| > kApogeeMaxThrustG` inhibits apogee). Burnout now fires (was pre-empted). True apogee then detected ~correctly (raw baro).
+- **#12 landing:** removed the `|fused vertical_speed| < 0.25` term from `DetectLanded` — the retired EKF makes it **always true**, so it force-closed the record mid-descent (67 m, 7.7 s). Landing is now **raw-baro velocity only**.
+- **#10 drogue backup:** gated on independent per-event **fired latches** + `AdvanceFlightState()` (monotonic), not the shared `flight_state_` ordinal — mains firing first no longer permanently skips the delayed backup.
+- **#1 MaxAltitude:** stored from the **raw-baro apogee peak** (`m_apogee_peak_agl_m_`), not `getMaxAltitude()` (retired-EKF fused) — was 29.8 vs true 92.4 m.
+- **#13:** archive logs **raw GPS** lat/lon (`nav_.getRawGps()`), not the frozen EKF `nav_solution.pos`.
+- **#7 launch epoch:** `AnchorRecordToLaunchOnset()` → `time_ms = 0` at thrust onset; pre-onset pad data dropped. **Amends [ADR-0007](adr/0007-prelaunch-ring-monotonic-clock.md)** (records no longer lead launch by ~2 s).
+- **#2 baro cadence** (`MS5611.hpp`): `MS5611_D2_START` moved 28 ms → ~8 ms into the cycle so the two OSR-4096 conversions finish with margin and a **fresh baro sample lands every 50 ms** (was every 100 ms — regressed when the ISR→SpiBus-enqueue refactor added drain latency). Bench-check: each `raw_baro_agl_m` distinct at 20 Hz.
+- **#4 note:** fused columns were briefly repurposed to the raw deploy source then **reverted** — they are the EKF's again (see ADR-0005 amendment).
+
+### B. Real-time performance — the big picture (a 6-hour rabbit hole; read this before optimizing anything)
+Original `process_dur_us` looked alarming (~25–47 ms). The causes, in order of impact:
+1. **This core has NO FPU.** STM32WL5MOC M4 → `-mfloat-abi=soft`, all float software-emulated (IDE offers only FPU=None). **This is hardware, not a bug — do NOT try hard-float.** It means float *op count* is the cost.
+2. **Build config.** Debug = `-O0`, Release = `-O3`. The Release config was a stale stub **missing the `Rocket` source folder, the `../Rocket/*` + `Accelerometer`/`BMP280` include paths, and the C++/C language standards (gnu++17/gnu18)** — all present in Debug. Fixed in the IDE (un-exclude `Rocket`, copy includes + std). **Recommended: clone the Debug config and just set -O3** to avoid this whack-a-mole. Fly/measure on -O3.
+3. **ITM trace was blocking.** `ITM_Trace::send` spun `while (ITM->PORT==0)` — blocks forever when SWO isn't drained (standalone, or a debugger without the SWO console open). Called 3×/cycle in `MS5611OCCallback` (an ISR) → stalled the ISR → inflated **every** profiled segment, and `-O3` can't speed a busy-wait. **Fixed to non-blocking (drop if port busy).** This was also a real **flight-safety bug** (ITM is enabled in Release; a debugger-less flight would stall). Keep it.
+4. **EKF covariance = ~13 ms of soft-float.** Optimized to ~7.6 ms — see **[ADR-0013](adr/0013-realtime-ekf-fpuless-covariance-heuristics.md)**. **EKF kept LIVE for observation** (amends ADR-0005); `m_gps_only_` retired so it fuses through descent.
+5. **SPI perf fix #1** (`SpiDevice::readAfterWriteByte`): one `HAL_SPI_TransmitReceive` instead of `Transmit`+`Receive` — removes a HAL call + BSY gap per word; helps all IMU/baro reads in both builds.
+
+**Result:** worst-case `ProcTotal` **47 → 23 ms**, EKF live, comfortably within NFR-3.
+
+### C. Cycle profiler (new tool — `Diag::`, TIM2-based)
+Added `Rocket/Common/Inc/CycleProfiler.hpp` (impl appended to `CubeMonitorGlobals.cpp` — no new TU) with per-segment last/max timers (Console, Comm, NavUpdate → {SensorRead, GpsRead, Ekf, Strapdown → FifoDrain}, FlightState, Telemetry, ProcTotal) + a `FifoWords` counter. Marks in `Factory.cpp` / `Navigation.cpp`. **Dump: USB-C data menu → `t`** (`UserInteraction::DisplayCycleProfile`). Prints then clears max. Use it to judge any future perf change; **note the numbers are `-O0`-inflated in Debug** — measure on -O3, and TIM2 (not `HAL_GetTick`) is the trusted timebase under a debugger.
+
+### D. Open work created this session
+- **#21** SPI2 clock too slow (prescaler 32→8) — `FifoDrain`/reads transfer-bound (~217 µs/word). Optional headroom; shared-bus, needs bench check.
+- **#22** GPS I2C read is a ~5.5 ms blocking busy-wait — length-aware (u-blox 0xFD/0xFE) or DMA. Optional.
+- **#23** FR-P13 air-start tilt is open-loop gyro dead-reckoning — needs a **bounding reference** (GPS velocity-vector aiding + full gyro cal + coning comp). See below.
+- **#24** Cap strapdown FIFO drain/cycle to prevent a backlog runaway (startup drain hit ~60 ms). Low priority.
+- **#25** Bench/flight-validate the flight-2026-07-12 fixes (this section A).
+- Commented **#14** (profiler confirms 480 Hz FIFO delivers ~20-24 words/cycle — tilt is NOT 20 Hz-undersampled) and **#15**.
+
+### E. Air-start tilt — what's actually wrong (don't relitigate as "gyro drift")
+Flight tilt grew monotonically 4.5→123°. Key insight (issue #23): the ~250 dps axial spin **averages out** transverse gyro errors (bias/cross-axis/misalignment → bounded coning over ~1.4 s/rev), so the growth is **largely REAL rotation** (a slow low-power rocket genuinely arcs over + tumbles) plus **unbounded** open-loop drift — NOT the ~6° that simple bias would give. Bare gyro integration is unbounded + unvalidated → unusable for a safety-critical firing gate regardless of accuracy. Fielded air-start systems have a **second attitude reference**; here that's **GPS velocity-vector aiding** (nose ≈ velocity for a stable rocket). The cardinal mounting map is CORRECT (verified by integrating the archived gyro — it reproduces the recorded tilt); the gap is a bounding reference + fine calibration, not the axis mapping.
+
+### F. Heuristics to NOT accidentally break (future context)
+- **EKF covariance ([ADR-0013](adr/0013-realtime-ekf-fpuless-covariance-heuristics.md)):** `predict()` computes only the **upper triangle** of `P` (symmetric) and **copies rows/cols 9..14** (bias states = pure-identity `Φ` rows, `kDyn=9`). **If anyone gives the biases dynamics (Gauss-Markov bias, etc.), `Φ` rows 9..14 stop being identity and the copies silently produce a WRONG covariance** — revert to full loops / adjust `kDyn`. `symmetrizeP()` must stay (diagonal floor + used by the non-symmetric measurement updates). Verified numerically identical (host, ~7e-8).
+- **No FPU:** optimize float *op count* (structure, not micro-ops); covariance is O(n³) in software.
+- **ITM `send` must stay non-blocking.**
+
+### G. App (`rocket-flight-manager`) — #16 crash fix, UNCOMMITTED
+`FlightMapScreen.kt` (~lines 1568/1581): the draggable locator-stats panel called `coerceIn(min, max)` with `max < min` when the scaffold isn't measured on return to the map screen → `IllegalArgumentException` crash (your logcat). Floored the max bound with `maxOf(marginPx, …)` at both call sites. Not the wire-format mismatch I first guessed — it's a pure UI-layout clamp. Couldn't Gradle-build here; verify.
+
+---
 
 ## Pre-launch ring + monotonic clock IMPLEMENTED, + re-arm-after-landing reset — COMMITTED (`390f9bf`), host-tested; NOT bench/flight-tested (2026-07-05)
 Wrote the [ADR-0007](adr/0007-prelaunch-ring-monotonic-clock.md) code (the ADR pre-existed as the authorizing record; the implementation did not) and extended it with a full flight-state reset on arm. **Committed to the locator `master` (`390f9bf`)**; the changed C++ TUs syntax-check clean with the ARM toolchain and the archive host suite passes **638/638** (`Tests/ArchiveRoundTrip`, incl. the new Test 5). **A full firmware link and any hardware run are still pending** — do not treat as flight-ready.
