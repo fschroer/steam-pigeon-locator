@@ -209,7 +209,10 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			}
 		}
 		if (flight_state == FlightStates::Landed) {
-			if (archive_.IsActiveOpen())
+			// Hold the record open until the ~2 s post-landing sample tail has been
+			// captured and drained (RecordComplete()); on a kMaxFlightMs force-close
+			// the tail is never armed, so this is true immediately as before.
+			if (flight_.RecordComplete() && archive_.IsActiveOpen())
 				archive_.CloseCurrentFlight();
 			BuzzerSequence(Landed);
 		}

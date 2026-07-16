@@ -47,6 +47,16 @@ public:
     FlightStates GetFlightState() const { return flight_state_; }
     void SetFlight_State(FlightStates flight_state) { flight_state_ = flight_state; }
 
+    // True once the flight is Landed AND the post-landing sample tail has been
+    // fully captured/drained — the signal Factory uses to close the record.  The
+    // tail lets the record retain ~2 s of the settled-on-ground signal (previously
+    // the record ended one cycle BEFORE landing).  On a kMaxFlightMs force-close the
+    // tail counter is never armed, so this is true immediately, preserving the
+    // previous close-on-landing behaviour there.
+    bool RecordComplete() const {
+        return flight_state_ == FlightStates::Landed && m_landed_tail_remaining_ == 0;
+    }
+
     uint8_t GetDeploymentStats(uint8_t channel) const {
         switch (channel) {
             case 1: return deployment_ch1_stats_;
@@ -183,6 +193,18 @@ private:
     // exceed the span of the recorded data.
     static constexpr uint32_t kMaxFlightMs             = 8u * 60u * 1000u;
     uint8_t m_landed_count_  = 0;
+
+    // Post-landing tail: after landing is detected, the sample producer keeps
+    // capturing for kLandedTailSamples cycles (~2 s) in the Landed state so the
+    // record shows the settled-on-ground signal.  Without this the record ended one
+    // cycle BEFORE landing — the producer guard was flight_state_ < Landed and
+    // DetectLanded flips the state earlier in the same cycle, so the landing cycle's
+    // sample (and every later one) was never captured.  Armed ONLY on the
+    // DetectLanded path — NOT on the kMaxFlightMs force-close, where the record span
+    // is already full and has no room for a tail.  Counts down to 0, at which point
+    // RecordComplete() lets Factory close the record.
+    static constexpr uint16_t kLandedTailSamples = 2u * SAMPLES_PER_SECOND;  // ~2 s
+    uint16_t m_landed_tail_remaining_ = 0;
 
     // ── Priority-1 deployment source selection (ADR-0003 Decision 2) ──────────
     // Produces the per-cycle deployment altitude and velocity from RAW baro, each

@@ -564,6 +564,9 @@ void FlightManager::UpdateFlightState() {
         if (!near_apogee_ && DetectLanded(nav_solution, baro_raw)) {
             flight_state_ = FlightStates::Landed;
             nav_.setPhase(FlightStates::Landed);
+            // Arm the post-landing tail so ~2 s of settled-on-ground samples are
+            // captured in the Landed state before the record is closed.
+            m_landed_tail_remaining_ = kLandedTailSamples;
             archive_.WriteEvent(FlightArchive::Statistic::LandingTimestampMs, flight_time_ms);
             archive_.WriteEvent(FlightArchive::Statistic::DeploymentCh1Stats, locator_settings.deployment_ch1_mode);
             archive_.WriteEvent(FlightArchive::Statistic::DeploymentCh2Stats, locator_settings.deployment_ch2_mode);
@@ -628,8 +631,14 @@ void FlightManager::UpdateFlightState() {
     // --- Pre-launch ring producer ---
     // Capture this cycle's sample (stamped with the absolute monotonic clock) into
     // the ring.  Runs from WaitingLaunch through the in-flight states; in
-    // WaitingLaunch only the most recent 2 s are retained.
-    if (flight_state_ >= FlightStates::WaitingLaunch && flight_state_ < FlightStates::Landed) {
+    // WaitingLaunch only the most recent 2 s are retained.  It also runs for the
+    // post-landing tail (~2 s in the Landed state) so the record retains the
+    // settled-on-ground signal rather than ending one cycle before landing.
+    const bool producer_in_flight = flight_state_ >= FlightStates::WaitingLaunch
+                                 && flight_state_ <  FlightStates::Landed;
+    const bool producer_landed_tail = flight_state_ == FlightStates::Landed
+                                   && m_landed_tail_remaining_ > 0;
+    if (producer_in_flight || producer_landed_tail) {
         const BaroSample baro_raw = nav_.getRawBaro();
         FlightArchive::FlightSample s = Archive::BuildSample(
             m_flight_clock_ms_, nav_solution, baro_raw.altitude_m_agl, baro_raw.velocity,
@@ -646,6 +655,8 @@ void FlightManager::UpdateFlightState() {
         // (ADR-0005) but still runs every cycle; these columns are how its output is
         // observed offline (ADR-0004) and are deliberately NOT overwritten here.
         PushPreLaunchSample(s, flight_state_ == FlightStates::WaitingLaunch);
+        if (producer_landed_tail)
+            --m_landed_tail_remaining_;
     }
 
     // Force-close the flight once the record span is full so the landing timestamp
@@ -752,6 +763,7 @@ void FlightManager::ResetFlight() {
     m_apogee_last_increase_ms_ = 0;
     m_burnout_count_        = 0;
     m_landed_count_         = 0;
+    m_landed_tail_remaining_ = 0;
     m_last_raw_agl_m_       = 0.0f;
     m_last_raw_agl_ms_      = 0;
     m_have_raw_agl_         = false;
