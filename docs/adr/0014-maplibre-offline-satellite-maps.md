@@ -3,7 +3,7 @@
 - **Status:** Accepted (map stack); tile provider for release **unresolved — see Consequences**
 - **Date:** 2026-07-16
 - **Deciders:** fschroer
-- **Related issues:** —
+- **Related issues:** [#26](https://github.com/fschroer/steam-pigeon-locator/issues/26) (tile-provider licensing — release blocker)
 
 ## Context
 

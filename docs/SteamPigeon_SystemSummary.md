@@ -46,6 +46,7 @@ The gaps catalogued in **Appendix A** are tracked as GitHub issues in [`fschroer
 - [ ] [#16 — Radio RX: verify removed CRC-mismatch discard doesn't admit corrupt frames](https://github.com/fschroer/steam-pigeon-locator/issues/16) — *bench validation of the 2026-07-04 `radio_driver.c` change*
 - [ ] [#17 — Validate IWDG watchdog timeout + `.noinit` fault-log persistence (NFR-10)](https://github.com/fschroer/steam-pigeon-locator/issues/17) — *bench validation of [ADR-0008](adr/0008-watchdog-fault-log.md)*
 - [ ] [#20 — Validate locator channel-change recovery path (forced miss → receiver revert + retry)](https://github.com/fschroer/steam-pigeon-locator/issues/20) — *bench validation of [ADR-0011](adr/0011-locator-lora-channel-from-app.md) invariant 4 (happy path already bench-tested)*
+- [ ] [#26 — Offline satellite maps: no wired tile provider permits permanent caching](https://github.com/fschroer/steam-pigeon-locator/issues/26) — *release blocker for the offline-maps feature ([ADR-0014](adr/0014-maplibre-offline-satellite-maps.md)); feature implemented and bench-verified, but Mapbox/Esri/MapTiler Cloud terms forbid permanent on-device packs — decide the licensed source (written permission, public-domain NAIP, or online-only)*
 
 ---
 
