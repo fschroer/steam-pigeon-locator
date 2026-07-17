@@ -28,3 +28,4 @@ Write an ADR for a decision that is costly to reverse, or that future work must 
 | [0011](0011-locator-lora-channel-from-app.md) | Change the locator LoRa channel from the app — receiver follows after forwarding | Accepted |
 | [0012](0012-app-ble-connection-health-probe.md) | App BLE connection health — probe the receiver before declaring a phantom link | Accepted |
 | [0013](0013-realtime-ekf-fpuless-covariance-heuristics.md) | Keep the EKF live on an FPU-less core — covariance sparsity/symmetry heuristics (amends 0005) | Accepted |
+| [0014](0014-maplibre-offline-satellite-maps.md) | MapLibre for the app map — offline satellite caching, and the tile-licensing constraint | Accepted (provider for release unresolved) |
