@@ -36,9 +36,15 @@ void FlightManager::Init() {
 // ---------------------------------------------------------------------------
 // DetectLaunch
 // Uses the fused solution's body_accel (= raw IMU accel, copied each Update)
-// and the raw baro AGL as dual confirming sensors.
-// Requires threshold sustained for launch_detect_hold_ms to suppress false
-// triggers from road vibration or rail loading.
+// and the raw baro AGL as dual confirming sensors.  Two OR'd confirmations,
+// each hardened so a dropped-and-armed locator cannot false-trigger "launch":
+//   • Dual-sensor: thrust present AND raw baro AGL past the configured gate
+//     (short hold — two independent sensors already agree).
+//   • Accel-only:  high accel sustained for the longer kAccelOnlyHoldMs (a drop
+//     impact is a spike far shorter than any real motor burn).
+// Both accel-driven paths are vetoed if free-fall was seen in the last
+// kFreeFallVetoMs — the tell-tale precursor of a drop.  See the header for the
+// full rationale (including why the accel-only path must NOT be removed).
 // ---------------------------------------------------------------------------
 bool FlightManager::DetectLaunch(const NavSolution& sol) {
     const RocketPersistentSettings settings = archive_.GetLocatorSettings();
@@ -50,26 +56,44 @@ bool FlightManager::DetectLaunch(const NavSolution& sol) {
     // AGL term (#11): use RAW baro AGL per NFR-1, gated on the on-pad ground
     // reference having been zeroed (nav_.baroAglReferenceReady()).  Before it is
     // zeroed, raw baro AGL reads an unzeroed MSL altitude (hundreds of metres) and
-    // could false-trigger, so until then only the high-accel path is active.
+    // could false-trigger, so until then only the accel-only path is active.
     const BaroSample baro = nav_.getRawBaro();
     const bool agl_ready  = nav_.baroAglReferenceReady() && baro.valid;
 
-    // Two independent paths to launch detection:
-    //   1. High-accel alone (≥5 g): fast response regardless of AGL availability.
-    //   2. AGL + moderate-accel combined: rocket has risen past the configured
-    //      threshold (raw baro AGL) AND is under at least partial thrust (≥1.5 g).
-    //      Active only once the AGL reference is ready.
-    constexpr float kLaunchConfirmAccelG = 1.5f;  // >= 1.5 g = thrust is present
-    const bool threshold = (accel_g >= 5.0f)
-                        || (accel_g >= kLaunchConfirmAccelG
-                            && agl_ready
-                            && baro.altitude_m_agl >= settings.launch_detect_altitude);
-
     const uint32_t now = HAL_GetTick();
-    if (threshold) {
+
+    // Free-fall precursor veto (drop rejection): a dropped-and-armed locator sees
+    // ~0 g free-fall in the instants before the impact spike, whereas a rocket at
+    // rest on the pad holds ~1 g right up to ignition.  Record the last free-fall
+    // instant; any accel-driven candidate within kFreeFallVetoMs of it is treated
+    // as a drop impact, not a launch.
+    if (accel_g < kFreeFallG) {
+        m_last_freefall_ms_ = now;
+        m_freefall_seen_    = true;
+    }
+    const bool freefall_recent = m_freefall_seen_
+                              && (now - m_last_freefall_ms_) < kFreeFallVetoMs;
+
+    // Two OR'd confirmations; either declares launch (see header for rationale).
+    const bool dual_sensor = agl_ready
+                          && accel_g >= kLaunchConfirmAccelG
+                          && baro.altitude_m_agl >= settings.launch_detect_altitude;
+    const bool accel_only  = accel_g >= kLaunchHighAccelG;
+
+    // A drop's free-fall precursor suppresses both accel-driven paths.
+    const bool candidate = !freefall_recent && (dual_sensor || accel_only);
+
+    // The dual-sensor path (two independent sensors agreeing) is trusted after a
+    // short hold; the accel-only path must sustain for the longer hold, since a
+    // drop impact is a brief spike while any real motor burns for far longer.  If
+    // both hold this cycle the shorter (dual-sensor) window wins — baro has
+    // corroborated the accel, so there is nothing left to wait for.
+    const uint32_t hold_ms = dual_sensor ? kDualSensorHoldMs : kAccelOnlyHoldMs;
+
+    if (candidate) {
         if (m_launch_candidate_ms_ == 0) {
             m_launch_candidate_ms_ = now;
-        } else if ((now - m_launch_candidate_ms_) >= 80u) {
+        } else if ((now - m_launch_candidate_ms_) >= hold_ms) {
             return true;
         }
     } else {
@@ -759,6 +783,8 @@ void FlightManager::ResetFlight() {
     pre_main_velocity_      = 0.0f;
     flight_time_ms          = 0;
     m_launch_candidate_ms_  = 0;
+    m_last_freefall_ms_     = 0;
+    m_freefall_seen_        = false;
     m_apogee_peak_agl_m_    = 0.0f;
     m_apogee_last_increase_ms_ = 0;
     m_burnout_count_        = 0;

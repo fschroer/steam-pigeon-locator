@@ -150,7 +150,7 @@ States (`FlightStates`): `WaitingLaunch → Launched → Burnout → Noseover �
 
 | Transition | Detection logic | Source |
 |---|---|---|
-| Launch | Body accel ≥ 5 g, **or** ≥ 1.5 g combined with AGL ≥ `launch_detect_altitude`; sustained 80 ms | Fused accel (= raw IMU copy) + **fused** AGL |
+| Launch ([ADR-0015](adr/0015-launch-detection-drop-rejection.md)) | Two OR'd confirmations, each vetoed if free-fall (< 0.3 g) was seen in the last 200 ms (drop-impact rejection): **dual-sensor** — accel ≥ 1.5 g **and** raw baro AGL ≥ `launch_detect_altitude`, sustained 80 ms; **or accel-only** — accel ≥ 5 g sustained 200 ms (the longer hold rejects a drop spike; the only path when baro is unzeroed/failed, and the one that catches a short-burn motor that coasts past the AGL gate only after burnout) | Fused accel (= raw IMU copy) + **raw baro** AGL |
 | Burnout | Body accel < 1.5 g for 3 consecutive samples (150 ms) | Fused/raw IMU accel |
 | Noseover/Apogee | Descending faster than 1.0 m/s **and** no new altitude max for 500 ms | **Raw baro** altitude + velocity (fused fallback only) |
 | Drogue primary/backup | Time-since-noseover ≥ configured delay (tenths of a second) | Flight clock |

@@ -468,6 +468,132 @@ static void B4_DrogueBackupAfterMain() {
 }
 
 // ===========================================================================
+// PART C — launch detection & drop rejection (DetectLaunch hardening)
+// ===========================================================================
+//
+// A locator that is armed and then dropped can momentarily exceed a bare accel
+// threshold.  These tests drive the REAL state machine from WaitingLaunch and
+// assert launch is (or is not) declared for drop, knock, and genuine-boost
+// signatures — including a short-burn motor that coasts past the AGL gate only
+// after burnout, which a baro-gated-only detector would MISS.
+
+// One launch-detection input cycle: body specific-force magnitude, raw baro AGL,
+// and whether the on-pad baro reference is zeroed / valid this cycle.
+struct LC { float accel_mps2; float agl; bool baro_ready; bool baro_valid; };
+
+// Feed a sequence at 50 ms cadence into the real state machine; return the tick
+// at which launch was detected (state left WaitingLaunch), or 0 if never.  The
+// clock starts at a realistic tick (not 0) so the free-fall veto's unsigned
+// window arithmetic is exercised as on-device.
+static uint32_t runLaunchDetect(const std::vector<LC>& seq, uint32_t t0 = 100000) {
+    g_bench.Reset();
+    RocketNav::Navigation nav; Archive ar; PowerManagement pw(nullptr);
+    FlightManager fm(nav, ar, pw);
+    fm.Init();
+    fm.PrepareForArm();                      // WaitingLaunch + clean per-flight state
+    uint32_t t = t0;
+    for (const LC& s : seq) {
+        Cycle c; c.t_ms = t;
+        c.raw_agl = s.agl; c.raw_vel = 0.0f; c.raw_valid = s.baro_valid;
+        c.fused_agl = s.agl; c.fused_vspeed = 0.0f; c.accel_mag = s.accel_mps2;
+        applyCycle(nav, c);
+        nav.SetBaroRefReady(s.baro_ready);
+        g_bench.hal_ms = t;
+        fm.SetFlightClockMs(t);
+        fm.UpdateFlightState();
+        if (fm.flight_state_ != FlightStates::WaitingLaunch)
+            return t;
+        t += 50;
+    }
+    return 0;
+}
+
+static const float PAD_1G   = 9.81f;    // ~1.0 g on the pad
+static const float FREEFALL = 0.5f;     // ~0.05 g — free-fall band (< 0.3 g)
+static const float BOOST_7G = 70.0f;    // ~7.1 g — above the 5 g accel-only bar
+static const float BOOST_6G = 60.0f;    // ~6.1 g — above the 5 g accel-only bar
+static const float WEAK_2G  = 20.0f;    // ~2.0 g — thrust, but below the 5 g bar
+static const float IMPACT_8G= 80.0f;    // ~8.2 g — drop impact spike
+
+static void C1_DropDoesNotLaunch() {
+    printf("\n--- C1: armed locator dropped on the pad does NOT launch ---\n");
+    // Sit at 1 g, then ~0 g free-fall, then a brief high-g impact, then settle on
+    // the ground.  Vetoed by BOTH the free-fall precursor and the short duration.
+    std::vector<LC> seq;
+    for (int i = 0; i < 6; ++i) seq.push_back({ PAD_1G,   0.0f, true, true }); // on pad
+    for (int i = 0; i < 5; ++i) seq.push_back({ FREEFALL, 0.0f, true, true }); // falling
+    for (int i = 0; i < 2; ++i) seq.push_back({ IMPACT_8G,0.0f, true, true }); // impact (100 ms)
+    for (int i = 0; i < 6; ++i) seq.push_back({ PAD_1G,   0.0f, true, true }); // settled
+    const uint32_t t = runLaunchDetect(seq);
+    CHECK_MSG(t == 0, "false launch on a drop at t=%u", t);
+}
+
+static void C2_KnockDoesNotLaunch() {
+    printf("\n--- C2: brief high-g knock (no free-fall) does NOT launch ---\n");
+    // A rail/transport knock: a short high-g burst with NO preceding free-fall and
+    // no altitude gain.  Rejected by the longer accel-only hold alone (100 ms burst
+    // < 200 ms hold), independent of the free-fall veto.
+    std::vector<LC> seq;
+    for (int i = 0; i < 6; ++i) seq.push_back({ PAD_1G,   0.0f, true, true });
+    for (int i = 0; i < 2; ++i) seq.push_back({ IMPACT_8G,0.0f, true, true }); // 100 ms
+    for (int i = 0; i < 6; ++i) seq.push_back({ PAD_1G,   0.0f, true, true });
+    const uint32_t t = runLaunchDetect(seq);
+    CHECK_MSG(t == 0, "false launch on a brief knock at t=%u", t);
+}
+
+static void C3_NormalBoostLaunches() {
+    printf("\n--- C3: normal boost launches via the accel-only path ---\n");
+    // Sustained ~7 g with only a little altitude gain (well below the 30 m gate),
+    // proving the accel-only path fires without waiting for the baro gate.
+    std::vector<LC> seq;
+    for (int i = 0; i < 6; ++i) seq.push_back({ PAD_1G,  0.0f, true, true });
+    for (int i = 0; i < 10; ++i) seq.push_back({ BOOST_7G, 0.5f * i, true, true }); // 500 ms boost
+    const uint32_t t = runLaunchDetect(seq);
+    CHECK_MSG(t != 0, "genuine boost missed");
+    // Boost starts at 100000 + 6*50 = 100300; accel-only hold is 200 ms.
+    CHECK_MSG(t >= 100500 && t <= 100600, "launch time off: t=%u (want ~100500)", t);
+}
+
+static void C4_ShortBoostBelowGateLaunches() {
+    printf("\n--- C4: short-burn motor (burns out below the AGL gate) still launches ---\n");
+    // Boost for 300 ms reaching only ~12 m, then burnout — accel collapses to a
+    // coast while the airframe COASTS up past the 30 m gate.  With the accel-only
+    // path removed this launch would be detected only during coast, or never;
+    // keeping it means launch is caught on accel during the sub-gate boost.
+    std::vector<LC> seq;
+    for (int i = 0; i < 6; ++i) seq.push_back({ PAD_1G,  0.0f, true, true });
+    for (int i = 0; i < 6; ++i) seq.push_back({ BOOST_6G, 2.0f * i, true, true }); // 300 ms, ->10 m
+    for (int i = 0; i < 12; ++i) seq.push_back({ FREEFALL, 12.0f + 3.0f * i, true, true }); // coast up
+    const uint32_t t = runLaunchDetect(seq);
+    CHECK_MSG(t != 0, "short-boost launch missed entirely");
+    // Must be caught during the boost (accel-only, ~200 ms in), NOT during coast.
+    // Boost spans [100300, 100550]; accel-only fires at ~100500.
+    CHECK_MSG(t <= 100550, "launch not caught during boost: t=%u (coast started ~100600)", t);
+}
+
+static void C5_WeakBoostLaunchesViaBaro() {
+    printf("\n--- C5: weak boost (below accel bar) launches via the dual-sensor path ---\n");
+    // ~2 g sustained (never reaches the 5 g accel-only bar) while raw baro climbs
+    // past the 30 m gate — the dual-sensor confirmation carries it.
+    std::vector<LC> seq;
+    for (int i = 0; i < 6; ++i)  seq.push_back({ PAD_1G, 0.0f, true, true });
+    for (int i = 0; i < 20; ++i) seq.push_back({ WEAK_2G, 3.0f * i, true, true }); // crosses 30 m at i=10
+    const uint32_t t = runLaunchDetect(seq);
+    CHECK_MSG(t != 0, "weak boat-tail boost missed by the dual-sensor path");
+}
+
+static void C6_BaroDeadStillLaunches() {
+    printf("\n--- C6: baro reference not ready -> accel-only still launches ---\n");
+    // Baro never zeroes (dead sensor / pre-zero window): only the accel-only path
+    // is available, and a genuine boost must still be detected.
+    std::vector<LC> seq;
+    for (int i = 0; i < 6; ++i)  seq.push_back({ PAD_1G,  0.0f, false, false });
+    for (int i = 0; i < 10; ++i) seq.push_back({ BOOST_7G, 0.0f, false, false });
+    const uint32_t t = runLaunchDetect(seq);
+    CHECK_MSG(t != 0, "boost missed with baro reference unavailable");
+}
+
+// ===========================================================================
 // CSV replay mode
 // ===========================================================================
 static bool loadCsv(const char* path, std::vector<Cycle>& out) {
@@ -565,6 +691,13 @@ int main(int argc, char** argv) {
     B2_SpikeNearMainRejected();
     B3_SustainedDropoutStillDeploys();
     B4_DrogueBackupAfterMain();
+
+    C1_DropDoesNotLaunch();
+    C2_KnockDoesNotLaunch();
+    C3_NormalBoostLaunches();
+    C4_ShortBoostBelowGateLaunches();
+    C5_WeakBoostLaunchesViaBaro();
+    C6_BaroDeadStillLaunches();
 
     printf("\n==========================================================\n");
     printf(" Results: %d passed, %d failed\n", g_pass, g_fail);

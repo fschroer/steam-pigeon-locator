@@ -29,3 +29,4 @@ Write an ADR for a decision that is costly to reverse, or that future work must 
 | [0012](0012-app-ble-connection-health-probe.md) | App BLE connection health — probe the receiver before declaring a phantom link | Accepted |
 | [0013](0013-realtime-ekf-fpuless-covariance-heuristics.md) | Keep the EKF live on an FPU-less core — covariance sparsity/symmetry heuristics (amends 0005) | Accepted |
 | [0014](0014-maplibre-offline-satellite-maps.md) | MapLibre for the app map — offline satellite caching, and the tile-licensing constraint | Accepted (provider for release unresolved) |
+| [0015](0015-launch-detection-drop-rejection.md) | Launch-detection drop rejection — free-fall veto + sustained accel; keep the accel-only path | Accepted |

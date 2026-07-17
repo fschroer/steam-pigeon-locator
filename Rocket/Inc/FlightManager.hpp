@@ -150,6 +150,34 @@ private:
     // ring for the launch epoch — just above the 1 g on-pad band.
     static constexpr float kLaunchOnsetAccelG = 1.3f;
 
+    // ── Launch detection thresholds / drop rejection ─────────────────────────
+    // A locator that is armed and then dropped can momentarily exceed a bare
+    // acceleration threshold and false-trigger "launch".  Two OR'd confirmations
+    // (either declares launch), each hardened against that:
+    //   • Dual-sensor: thrust present AND raw baro AGL past the configured gate —
+    //     two independent sensors must agree, so no single knock trips it (short
+    //     hold).  Primary path for a weak motor that never hits the accel bar.
+    //   • Accel-only: high accel SUSTAINED for kAccelOnlyHoldMs.  Primary path for
+    //     a normal boost, and the ONLY path when baro is not yet zeroed or has
+    //     failed — so it cannot be removed (a short-burn motor may coast past the
+    //     AGL gate only AFTER burnout, i.e. it must be caught on accel alone).  A
+    //     drop impact is a spike far shorter than any real burn, so the long hold
+    //     rejects it where the old 80 ms hold could not.
+    // Both accel-driven paths are additionally vetoed if free-fall was seen within
+    // the last kFreeFallVetoMs: a drop is always preceded by ~0 g free-fall,
+    // whereas a rocket at rest on the pad sits at ~1 g right up to ignition.
+    // DetectLaunch only ever runs from a pad-rest condition — staged / air-start
+    // ignition is gated separately in the Burnout state (FR-P13) — so a real
+    // launch never carries a free-fall precursor here.
+    static constexpr float    kLaunchHighAccelG    = 5.0f;   // accel-only path bar (g)
+    static constexpr float    kLaunchConfirmAccelG = 1.5f;   // dual-sensor thrust bar (g)
+    static constexpr uint32_t kDualSensorHoldMs    = 80u;    // accel+baro sustained (ms)
+    static constexpr uint32_t kAccelOnlyHoldMs     = 200u;   // accel-alone sustained (ms)
+    static constexpr float    kFreeFallG           = 0.3f;   // below this = free-fall (g)
+    static constexpr uint32_t kFreeFallVetoMs      = 200u;   // veto window after free-fall (ms)
+    uint32_t m_last_freefall_ms_ = 0;                        // HAL tick of last free-fall
+    bool     m_freefall_seen_    = false;                    // any free-fall since arm/launch
+
     // #10: per-event fired latches.  Deployment events must NOT be gated on the
     // shared flight_state_ ordinal: an event whose delay lands it AFTER a later
     // event that already fired (main firing before the 2 s drogue-backup delay) was
