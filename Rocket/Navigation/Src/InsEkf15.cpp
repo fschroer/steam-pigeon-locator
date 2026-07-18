@@ -114,19 +114,30 @@ void InsEkf15::setPhase(FlightStates state) {
     m_R_baro  = p.r_baro;
     m_q_alt   = p.q_alt;
 
-    // Enable horizontal position propagation only during flight.
-    // On the pad and after landing, lat/lon are held entirely by GPS corrections.
-    // This prevents attitude-error gravity leakage from causing drift.
+    // Enable inertial position propagation (all three axes) only during flight.
+    // On the pad and after landing, lat/lon are held entirely by GPS corrections
+    // and altitude entirely by baro.  This prevents attitude-error gravity
+    // leakage from causing drift while stationary.
+    //
+    // Launched and Burnout were previously MISSING from this list, contradicting
+    // both this function's intent and the member's own declaration comment
+    // ("Launched through MainBackupEvent").  The effect was that altitude was
+    // baro-only through the entire powered phase and then switched to full
+    // inertial propagation at Noseover -- so any accumulated velocity error
+    // arrived as a step at that transition rather than being visible as it built
+    // (flight 2026-07-17: +7.5 m in one 50 ms sample at the noseover boundary).
     switch (state) {
+        case FlightStates::Launched:
+        case FlightStates::Burnout:
         case FlightStates::Noseover:
         case FlightStates::DroguePrimaryEvent:
         case FlightStates::DrogueBackupEvent:
         case FlightStates::MainPrimaryEvent:
         case FlightStates::MainBackupEvent:
-            m_propagate_horiz_pos_ = true;
+            m_propagate_inertial_pos_ = true;
             break;
         default:
-            m_propagate_horiz_pos_ = false;
+            m_propagate_inertial_pos_ = false;
             break;
     }
 
@@ -276,8 +287,9 @@ void InsEkf15::predict(const ImuSample& imu, float dt_s) {
         // gate in place, altitude is held purely by baro updates when on the
         // pad -- no inertial input means no tilt-induced altitude accumulation.
         // During flight all three axes are propagated for dead-reckoning between
-        // GPS and baro updates.
-        if (m_propagate_horiz_pos_) {
+        // GPS and baro updates.  NOTE this gate covers ALTITUDE as well as
+        // lat/lon -- the alt_m integration below is inside it.
+        if (m_propagate_inertial_pos_) {
             const double alt_dot = -static_cast<double>(m_sol.vel_ned_mps.z);
             m_sol.pos.alt_m += alt_dot * dt_s;
 
@@ -431,9 +443,13 @@ void InsEkf15::updateBaro(const BaroSample& baro) {
     // Dynamic-pressure (pitot) correction: during fast ascent the sensor port
     // sees ram pressure and reads lower than true static altitude.  Add back
     // the altitude equivalent of dynamic pressure: Δh = k·v²/(2g).
-    // Only applied while airborne (horizontal position propagation is enabled).
+    // Only applied while airborne (inertial position propagation is enabled).
+    // NOTE: this now covers Launched/Burnout too.  Previously the gating phase
+    // list excluded them, so the ram-pressure correction was disabled during
+    // exactly the fast-ascent regime it exists for, and active only during the
+    // slow descent where dynamic pressure is smallest.  Inert until tuned:
     // m_pitot_k defaults to 0 (off); tune from post-flight GPS vs baro data.
-    if (m_propagate_horiz_pos_ && m_pitot_k > 0.0f) {
+    if (m_propagate_inertial_pos_ && m_pitot_k > 0.0f) {
         const float v2 = m_sol.vel_ned_mps.x * m_sol.vel_ned_mps.x
                        + m_sol.vel_ned_mps.y * m_sol.vel_ned_mps.y
                        + m_sol.vel_ned_mps.z * m_sol.vel_ned_mps.z;
@@ -711,7 +727,7 @@ void InsEkf15::applyZupt(float sigma_mps) {
     //     altitude upward when the device is repeatedly shaken.
     //
     //   Horizontal position (0,1): owned by GPS.  On the pad lat/lon are not
-    //     inertially propagated (m_propagate_horiz_pos_=false) so there is no
+    //     inertially propagated (m_propagate_inertial_pos_=false) so there is no
     //     position error for ZUPT to correct here.
     //
     // Zeroing K[0..2] before the P update protects P[2,2] from tightening,

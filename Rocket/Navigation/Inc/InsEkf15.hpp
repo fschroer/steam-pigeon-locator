@@ -81,10 +81,15 @@ private:
     // This prevents attitude-error gravity leakage from causing horizontal
     // position drift on the pad, where the attitude quaternion may have
     // accumulated error before gyro bias estimation converges.
+    // Gates inertial propagation of ALL THREE position axes (altitude as well as
+    // lat/lon) -- see predict().  Named for the horizontal case historically, but
+    // the altitude integration sits under the same gate; renamed so that is not
+    // mistaken for horizontal-only again.
+    //
     // Set true only during flight (Launched through MainBackupEvent) by setPhase().
-    // On the pad: GPS-only horizontal position.
-    // During flight: IMU dead-reckoning between GPS updates.
-    bool m_propagate_horiz_pos_      = false;
+    // On the pad: GPS-only horizontal position, baro-only altitude.
+    // During flight: IMU dead-reckoning between GPS and baro updates.
+    bool m_propagate_inertial_pos_   = false;
 
     // True only during Launched and Burnout: GPS h_acc is floored at 50 m to
     // prevent high-vibration / high-g GPS noise from dominating the Kalman gain.
