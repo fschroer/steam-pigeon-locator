@@ -188,6 +188,67 @@ void Communication::SendFlightProfileMetadata(DeviceState &device_state) {
 	}
 }
 
+// Read one archived event timestamp into the message, setting its present bit
+// only when the archive actually holds the stat.  An absent event (e.g. a
+// backup charge that never fired) leaves the slot zero and the bit clear, which
+// is what tells the app not to draw a marker for it.
+static void ReadEventTimestamp(Archive &archive, uint8_t record, FlightArchive::Statistic stat,
+		FlightEvent event, FlightEventsMessage &msg) {
+	bool present = false;
+	uint32_t value = 0;
+	archive.ReadEvent(record, stat, value, present);
+	if (present) {
+		msg.event_timestamp_ms[static_cast<size_t>(event)] = value;
+		msg.present_mask |= static_cast<uint16_t>(1u << static_cast<uint8_t>(event));
+	}
+}
+
+void Communication::SendFlightEvents() {
+	FlightEventsMessage msg { };
+	msg.packet_header.system_id = system_id;
+	msg.packet_header.msg_type  = MsgType::FlightEvents;
+	msg.packet_header.msg_count = next_msg_count_++;
+	msg.packet_header.crc       = 0;
+	msg.record = record_id_;
+
+	bool present = false;
+	archive_.ReadEvent(record_id_, FlightArchive::Statistic::FlightTimestampS, msg.flight_timestamp_s, present);
+	archive_.ReadEvent(record_id_, FlightArchive::Statistic::MaxAltitudeM, msg.max_altitude_m, present);
+
+	ReadEventTimestamp(archive_, record_id_, FlightArchive::Statistic::LaunchTimestampMs,
+			FlightEvent::Launch, msg);
+	ReadEventTimestamp(archive_, record_id_, FlightArchive::Statistic::BurnoutTimestampMs,
+			FlightEvent::Burnout, msg);
+	ReadEventTimestamp(archive_, record_id_, FlightArchive::Statistic::ApogeeTimestampMs,
+			FlightEvent::Apogee, msg);
+	ReadEventTimestamp(archive_, record_id_, FlightArchive::Statistic::NoseoverTimestampMs,
+			FlightEvent::Noseover, msg);
+	ReadEventTimestamp(archive_, record_id_, FlightArchive::Statistic::DroguePrimaryDeployTimestampMs,
+			FlightEvent::DroguePrimaryDeploy, msg);
+	ReadEventTimestamp(archive_, record_id_, FlightArchive::Statistic::DrogueBackupDeployTimestampMs,
+			FlightEvent::DrogueBackupDeploy, msg);
+	ReadEventTimestamp(archive_, record_id_, FlightArchive::Statistic::DrogueVelocityThresholdTimestampMs,
+			FlightEvent::DrogueVelocityThreshold, msg);
+	ReadEventTimestamp(archive_, record_id_, FlightArchive::Statistic::MainPrimaryDeployTimestampMs,
+			FlightEvent::MainPrimaryDeploy, msg);
+	ReadEventTimestamp(archive_, record_id_, FlightArchive::Statistic::MainBackupDeployTimestampMs,
+			FlightEvent::MainBackupDeploy, msg);
+	ReadEventTimestamp(archive_, record_id_, FlightArchive::Statistic::MainVelocityThresholdTimestampMs,
+			FlightEvent::MainVelocityThreshold, msg);
+	ReadEventTimestamp(archive_, record_id_, FlightArchive::Statistic::LandingTimestampMs,
+			FlightEvent::Landing, msg);
+
+	archive_.ReadEvent(record_id_, FlightArchive::Statistic::DeploymentCh1Stats, msg.deployment_ch_stats[0], present);
+	archive_.ReadEvent(record_id_, FlightArchive::Statistic::DeploymentCh2Stats, msg.deployment_ch_stats[1], present);
+	archive_.ReadEvent(record_id_, FlightArchive::Statistic::DeploymentCh3Stats, msg.deployment_ch_stats[2], present);
+	archive_.ReadEvent(record_id_, FlightArchive::Statistic::DeploymentCh4Stats, msg.deployment_ch_stats[3], present);
+
+	msg.packet_header.crc = ComputeMessageCrc(msg);
+	RgbLed(RgbColor::Blue); // Blink LoRa transmit LED for visual validation
+	radio_busy_ = true;
+	radio_->Send(reinterpret_cast<uint8_t*>(&msg), sizeof(FlightEventsMessage));
+}
+
 void Communication::SendFlightProfileData() {
 	// Intentionally thin: transfer is driven by Process() after BeginTransfer()
 	// is called from OnRadioRxDone(). Nothing to do here.
@@ -324,6 +385,9 @@ void Communication::OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
 
 void Communication::BeginTransfer(uint8_t record_id) {
 	record_id_ = record_id;
+	// Queue the event summary for this record.  Done before the sample-count
+	// check so an empty/missing record still reports whatever events it holds.
+	flight_events_repeats_ = kFlightEventsRepeats;
 	transfer_active_ = false;
 	complete_ = false;
 	total_samples_ = 0;
@@ -628,6 +692,16 @@ void Communication::Process(DeviceState &device_state) {
 		radio_->Send(reinterpret_cast<uint8_t*>(&msg), sizeof(msg));
 	}
 
+	// Send the FlightEvents summary for the record being transferred.  Runs
+	// before the transfer guard (and before the data burst) so it lands during
+	// the kPreTransferGuardMs window, ahead of the first data packet — the app
+	// then has the event times in hand as samples start arriving.
+	if (flight_events_repeats_ > 0 && !radio_busy_
+			&& HAL_GetTick() - last_radio_tx_end_ms_ >= kMinRxWindowMs) {
+		SendFlightEvents();
+		--flight_events_repeats_;
+	}
+
 	// Send the zero-length "no data" marker for an empty/missing record.  Like
 	// VersionInfo this must run before the transfer guard below, since no real
 	// transfer is active.  A header-only frame (packet_count = 0) tells the app
@@ -657,6 +731,7 @@ void Communication::Process(DeviceState &device_state) {
 	// the in-flight transfer immediately rather than transmitting into the void.
 	if (device_state != DeviceState::DataRequested) {
 		transfer_active_ = false;
+		flight_events_repeats_ = 0;   // no listener left for the summary either
 		return;
 	}
 

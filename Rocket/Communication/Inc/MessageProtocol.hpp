@@ -46,8 +46,28 @@ enum class MsgType : uint8_t {
 	DeploymentTestRequest = 13, // Request from the app, via the receiver, for the locator to execute a deployment test.
 	DeploymentTest = 14, // Deployment test countdown sent from the locator to the app via the receiver.
 	VersionRequest = 17, // Request from the app, via the receiver, for both firmware versions.
-	VersionInfo = 18     // Response: locator version forwarded through receiver, which appends its own version.
+	VersionInfo = 18,    // Response: locator version forwarded through receiver, which appends its own version.
+	FlightEvents = 19    // Per-record flight event summary sent alongside a FlightData transfer.
 };
+
+// Flight event summary indices.  One entry per archived event timestamp; the
+// order is the wire order of FlightEventsMessage::event_timestamp_ms and MUST
+// match the app's FlightEventIndex (RocketState.kt).
+enum class FlightEvent : uint8_t {
+	Launch = 0,
+	Burnout,
+	Apogee,
+	Noseover,
+	DroguePrimaryDeploy,
+	DrogueBackupDeploy,
+	DrogueVelocityThreshold,
+	MainPrimaryDeploy,
+	MainBackupDeploy,
+	MainVelocityThreshold,
+	Landing,
+	Count
+};
+constexpr size_t kFlightEventCount = static_cast<size_t>(FlightEvent::Count);
 
 #pragma pack(push, 1)
 // Common packet header (on-wire)
@@ -136,6 +156,30 @@ struct FlightMetadata {
 	FlightMetadataRecord record[record_count];
 };
 
+// Per-record flight event summary.  The FlightMetadata list message carries only
+// what is needed to *identify* a record (timestamp/apogee/flight time) for all
+// record_count slots; a full event set for every slot would not fit one LoRa
+// frame.  This message instead describes the ONE record the app has asked for,
+// and the locator sends it alongside the FlightData transfer for that record.
+//
+// Only event *times* are sent.  Event altitudes are not: the app derives them by
+// looking up the flight sample nearest each timestamp in the profile data it
+// receives, which keeps the two in exact agreement on the chart.
+struct FlightEventsMessage {
+	PacketHeader packet_header;
+	uint8_t  record;              // archive slot this summary describes
+	uint8_t  reserved;            // pad to keep the u16/u32 fields naturally sized
+	uint16_t present_mask;        // bit (1 << FlightEvent) set ⇒ that timestamp is valid
+	uint32_t flight_timestamp_s;  // GPS wall clock at flight start (Statistic::FlightTimestampS)
+	uint32_t event_timestamp_ms[kFlightEventCount];  // ms since the launch epoch, indexed by FlightEvent
+	float    max_altitude_m;      // raw-baro apogee peak (Statistic::MaxAltitudeM)
+	uint8_t  deployment_ch_stats[4];   // per channel: mode (bits 0-2) | fired (3) | pre-fire cont. (4) | post-fire cont. (5)
+};
+// NOTE: Statistic::MaxVelocityMps, MaxAccelerationMps2 and PhysicalDeploymentStats
+// exist in the archive enum but are never written by FlightManager, so they are
+// deliberately absent here — sending them would ship guaranteed zeros.  Add them
+// once the locator actually records them (and bump the size assert below).
+
 // On-wire packet for flight profile transfer
 struct FlightDataPacket {
 	PacketHeader packet_header;
@@ -207,6 +251,8 @@ static_assert(sizeof(PreLaunchData)                  == 115, "PreLaunchData size
 static_assert(sizeof(TelemetryData)                  ==  68, "TelemetryData size changed (app payload 62 + rssi 2 = 64)");
 static_assert(sizeof(FlightMetadataRecord)           ==  10, "FlightMetadataRecord size changed");
 static_assert(sizeof(FlightMetadata)                 == 106, "FlightMetadata size changed (app payload 100)");
+static_assert(kFlightEventCount                      ==  11, "FlightEvent count changed — sync app FlightEventIndex");
+static_assert(sizeof(FlightEventsMessage)            ==  66, "FlightEventsMessage size changed (app payload 60)");
 static_assert(sizeof(FlightDataPacket)               == 255, "FlightDataPacket size changed (max LoRa frame 255)");
 static_assert(sizeof(RocketPersistentSettings)       ==  34, "RocketPersistentSettings size changed");
 static_assert(sizeof(LocatorSettings)                ==  40, "LocatorSettings size changed");

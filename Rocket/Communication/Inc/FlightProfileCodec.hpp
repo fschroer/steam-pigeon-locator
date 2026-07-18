@@ -13,7 +13,7 @@ constexpr double LATLON_SCALE = 1e7; // ~1 cm precision
 
 struct CompressedHeader {
     uint32_t base_timestamp_ms;
-    float    base_altitude_m;
+    float    base_altitude_m;   // raw baro AGL (FlightSample::raw_baro_altitude_agl)
     Vec3f    base_accel_mps2;
     Vec3f    base_gyro_dps;
     double   base_lat_rad;

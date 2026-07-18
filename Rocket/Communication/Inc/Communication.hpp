@@ -108,6 +108,9 @@ public:
 	void SendTestCountdownMessage(uint16_t test_deploy_count);
 	void SendFlightProfileMetadata(DeviceState &device_state);
 	void SendFlightProfileData();
+	// Transmit the FlightEvents summary for record_id_ (event times + deployment
+	// stats).  Queued by BeginTransfer and drained from Process().
+	void SendFlightEvents();
 
 	// Initiate a reliable chunked transfer of one flight record.
 	// Called from OnRadioRxDone on receipt of FlightDataRequest.
@@ -152,6 +155,13 @@ private:
 	// transfer that never arrives.  The locator stays quiet (no PreLaunchData)
 	// until the user leaves the screen.
 	uint8_t empty_marker_repeats_ = 0;
+
+	// Pending FlightEvents transmissions for the record being transferred.  The
+	// summary is a single unacknowledged frame, so BeginTransfer queues a couple
+	// of repeats — losing it costs the app its chart event markers, but must not
+	// stall the (independently ACKed) data transfer.
+	uint8_t flight_events_repeats_ = 0;
+	static constexpr uint8_t kFlightEventsRepeats = 2;
 
 	// Deferred radio-ISR work — executed in Process() (main-loop context) so the
 	// flash access never preempts a navigation SPI2 transaction (flash and the

@@ -77,7 +77,7 @@ The NFR-9 high-rate strapdown (Decision 3) is **implemented and bench-confirmed 
 
 The strapdown rate, FIFO health (no overrun), and integration timebase are bench-verified; **what remains is behavioural verification** — that tilt-from-vertical tracks correctly through rotation and the FR-P13 gate reads as intended (read values in-app, not CubeMonitor). FR-P13 firing-output wiring remains deferred (master switch OFF).
 
-To feed that verification (and [#14](https://github.com/fschroer/steam-pigeon-locator/issues/14)/[#15](https://github.com/fschroer/steam-pigeon-locator/issues/15)), the strapdown **tilt and quaternion are now logged per sample** to the flight archive (packed int16; `ARCHIVE_VERSION` 5) and dumped via the UART CSV export. The LoRa flight-profile format to the app is unchanged (its codec packs only timestamp/accel/gyro), so this is locator-side only.
+To feed that verification (and [#14](https://github.com/fschroer/steam-pigeon-locator/issues/14)/[#15](https://github.com/fschroer/steam-pigeon-locator/issues/15)), the strapdown **tilt and quaternion are now logged per sample** to the flight archive (packed int16; `ARCHIVE_VERSION` 5) and dumped via the UART CSV export. Tilt/quaternion are not in the LoRa flight-profile format, so that part is locator-side only. *(Correction, 2026-07-17: the parenthetical "its codec packs only timestamp/accel/gyro" was wrong — `FlightProfileCodec` has always packed an altitude too. See the amendment below for which one.)*
 
 ## Amendment (2026-07-15) — EKF kept LIVE for observation; see [ADR-0013](0013-realtime-ekf-fpuless-covariance-heuristics.md)
 
@@ -86,3 +86,15 @@ The "retire from the real-time path / compile out / offline-only" framing above 
 - The archive `fused_agl_m` / `fused_vertical_speed_mps` columns carry the EKF output again. (A flight-#4 change had repurposed them to the raw deployment-selected source; that was reverted — those columns are the EKF's, do NOT repurpose them.)
 - **`m_gps_only_` is retired** (`InsEkf15::setPhase` sets it `false` unconditionally). It previously flipped true at `Noseover`, disabling `updateBaro` and inertial velocity integration — which froze fused altitude and zeroed fused vertical speed for the entire descent (and, because a *false* apogee latched Noseover at 3300 ms on flight 2026-07-12, for almost the whole flight). The EKF now fuses baro+inertial+GPS through descent too. The old "clean GPS recovery fix after apogee" rationale for `gps_only` is obsolete: recovery position is raw GPS.
 - Running a 15-state float EKF on this **FPU-less** core costs ~13 ms/cycle; ADR-0013 halves the covariance cost (sparsity+symmetry) to keep it affordable live, and records the offline-replay fallback (ADR-0004) if the budget is ever needed.
+
+## Amendment (2026-07-17) — the app's flight profile carries RAW BARO altitude
+
+`FlightProfileCodec` packed `FlightSample::fused_altitude_agl` into `base_altitude_m` / `d_alt_0p1m`, with the raw-baro lines sitting commented out beside them. So the app's flight-profile chart plotted the EKF's *observational* output while every deployment on that same chart had been decided on raw baro — the two can differ substantially (flight 2026-07-12: fused apogee 29.8 m vs raw-baro 92.4 m), which makes an event marker look misplaced against its own trace.
+
+**The codec now packs `raw_baro_altitude_agl`.** Rationale, and the invariant future work must not silently reverse:
+
+- Raw baro is the Priority-1 source of record ([ADR-0003](0003-priority1-deployment-raw-baro.md)) and, since this ADR, the telemetry source. The post-flight chart is where a user judges whether the deployments fired at the right altitudes, so it must show the signal those decisions were made on.
+- This does **not** contradict the 2026-07-15 amendment above. That one says the archive's `fused_*` **columns** must keep carrying the EKF output — they still do. This is about which of the archive's two altitude columns the *LoRa profile message* selects, which the wire format has only ever had room for one of.
+- The fused column remains observable through the locator's USB-C CSV export, which dumps every archived field.
+
+Only the selected column changed — the wire layout is untouched (`CompressedHeader` 48 B / `CompressedDelta` 24 B, size asserts unchanged), so no app or receiver decode change was needed for this part. **If a future change wants both altitudes on the chart:** a second int16 delta plus a float base fits without costing packets (header 52 + 7 × 26 = 234 ≤ 239, still 8 samples/packet), but it is a wire-format change requiring both firmwares, the app, and all the size asserts to move together.
