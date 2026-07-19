@@ -164,7 +164,20 @@ void InsEkf15::setPhase(FlightStates state) {
 // ---------------------------------------------------------------------------
 bool InsEkf15::initialize(const ImuSample& imu, const BaroSample* baro, const GpsSample* gps) {
     m_sol.timestamp_ms    = imu.timestamp_ms;
-    m_sol.q_bn            = Math::quatFromAccel(imu.accel_selected_mps2);
+    // Negate accel: the IMU reports specific force (+1 g "up" at rest) but
+    // quatFromAccel expects the gravity (nav-down) direction.  Seeding from the
+    // un-negated vector put the attitude ~180 deg out -- on the pad the filter
+    // believed the nose pointed DOWN.  Measured by replaying flight 2026-07-17
+    // (Tests/EkfReplay): at t=0, at rest on the rail, EKF tilt-from-vertical
+    // read 170.6 deg against the strapdown's 2.8 deg; negating gives 9.4 deg.
+    //
+    // AttitudeEstimator::initializeFromRestAccel has always done this and says
+    // so in its own comment -- the strapdown was given the fix, the EKF was not.
+    // A ~180 deg seed error is also effectively unrecoverable: correctTiltFromAccel
+    // injects a small fraction (gain 0.01) of the error each cycle, and 180 deg is
+    // the antipode where the error axis is ill-conditioned, so the filter cannot
+    // walk back from it.
+    m_sol.q_bn            = Math::quatFromAccel(imu.accel_selected_mps2 * -1.0f);
     m_sol.euler           = Math::quatToEuler(m_sol.q_bn);
     m_sol.body_rates_rps  = imu.gyro_rps;
     m_sol.body_accel_mps2 = imu.accel_selected_mps2;
