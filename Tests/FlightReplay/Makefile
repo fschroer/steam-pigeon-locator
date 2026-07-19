@@ -34,7 +34,8 @@ TARGET   := test_flight_replay
 SRCS     := test_flight_replay.cpp \
             mocks/MockEnv.cpp \
             $(ROOT)/Rocket/Src/FlightManager.cpp \
-            $(ROOT)/Rocket/Navigation/Src/Math.cpp
+            $(ROOT)/Rocket/Navigation/Src/Math.cpp \
+            $(ROOT)/Rocket/Common/Src/PpsDiscipline.c
 
 .PHONY: all build run clean
 

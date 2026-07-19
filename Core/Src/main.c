@@ -34,6 +34,7 @@
 //#include "stm32wlxx_ll_gpio.h"
 #include "Constants.h"
 #include "FaultLogC.h"
+#include "PpsDiscipline.h"
 
 /* USER CODE END Includes */
 
@@ -62,6 +63,8 @@ volatile static uint32_t pps_last_ts = 0;    // TIM2 timestamp of previous PPS
 volatile static uint32_t pps_this_ts = 0;    // TIM2 timestamp of current PPS
 volatile static bool arr_update_pending = false;
 volatile static uint32_t elapsed = 0;
+volatile static uint32_t pps_missed_edges = 0;       // edges reconstructed from multi-second intervals
+volatile static uint32_t pps_rejected_intervals = 0; // intervals too far out of band to use at all
 volatile static uint32_t tim17_arr = 49999;
 volatile static uint8_t rocket_service_count = 0;
 volatile static float alpha = 0.05;
@@ -81,6 +84,12 @@ void SystemClock_Config(void);
 // GPS-PPS-disciplined TIM2 tick rate (ticks per GPS second), for converting
 // free-running TIM2 deltas to real time.  Returns 0 until two PPS edges seen.
 uint32_t Pps_GetTim2TicksPerSec(void) { return elapsed; }
+// Health counters: how many PPS edges were reconstructed from a multi-second
+// interval, and how many intervals were rejected entirely (clock free-running on
+// the last good rate).  Both non-zero means the archived timestamps were not
+// continuously GPS-disciplined -- see ADR-0007.
+uint32_t Pps_GetMissedEdgeCount(void) { return pps_missed_edges; }
+uint32_t Pps_GetRejectedIntervalCount(void) { return pps_rejected_intervals; }
 /* USER CODE END 0 */
 
 /**
@@ -285,14 +294,24 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 	if (GPIO_Pin == GPIO_PIN_6) {
 		pps_this_ts = TIM2->CNT;
 		if (pps_last_ts != 0) {
-			elapsed = pps_this_ts - pps_last_ts;
-			if (elapsed > 950000 && elapsed < 1050000) {
-				tim17_arr = (tim17_arr + 1) * (1 - alpha) + (elapsed / SAMPLES_PER_SECOND) * alpha - 1;
+			// Never adopt the raw delta: a missed edge makes it a whole multiple
+			// of a second, and taking that as the tick rate scales the monotonic
+			// clock by the same multiple (issue #30).  Pps_AcceptInterval divides
+			// the multiple out and vets the resulting per-second rate; a rejected
+			// interval leaves `elapsed` holding its last good value.
+			PpsInterval iv;
+			if (Pps_AcceptInterval(pps_this_ts - pps_last_ts, &iv)) {
+				elapsed = iv.ticks_per_sec;
+				if (iv.seconds > 1)
+					pps_missed_edges += iv.seconds - 1;
+				tim17_arr = (tim17_arr + 1) * (1 - alpha) + (iv.ticks_per_sec / SAMPLES_PER_SECOND) * alpha - 1;
 				if (tim17_arr > 55000)
 					tim17_arr = 55000;
 				if (tim17_arr < 45000)
 					tim17_arr = 45000;
 				arr_update_pending = true;
+			} else {
+				pps_rejected_intervals++;
 			}
 		}
 		pps_last_ts = pps_this_ts;

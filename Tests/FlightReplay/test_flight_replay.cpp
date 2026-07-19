@@ -47,6 +47,7 @@
 #include "Navigation.hpp"
 #include "Archive.hpp"
 #include "Deployment.hpp"
+#include "PpsDiscipline.h"   // real ISR arithmetic, no HAL (Part D)
 
 #define private public
 #include "FlightManager.hpp"   // pulls the REAL PowerManagement.hpp (same dir)
@@ -596,6 +597,152 @@ static void C6_BaroDeadStillLaunches() {
 }
 
 // ===========================================================================
+// PART D — PPS interval discipline (issue #30)
+// ===========================================================================
+// Pps_AcceptInterval() is the REAL ISR arithmetic, split out of main.c into
+// Rocket/Common/Src/PpsDiscipline.c precisely so it can be driven here without
+// the HAL.  No reimplementation: the firmware ISR calls this same function.
+//
+// The bug: the raw TIM2 delta was adopted as the tick rate unconditionally.  A
+// missed PPS edge makes that delta a whole multiple of a second, so the
+// monotonic clock ran at 1/n real rate until the next good edge.
+
+// Walk a PPS edge sequence and model the consumer in Factory_C_Interface.cpp:
+// integrate elapsed TIM2 ticks at whatever rate discipline currently believes.
+// Returns the monotonic microseconds accumulated over the whole sequence.
+//
+// `deltas` are the raw TIM2 deltas the ISR would see between surviving edges.
+static uint64_t runPpsSequence(const std::vector<uint32_t>& deltas,
+                               uint32_t true_ticks_per_sec,
+                               uint32_t* out_missed = nullptr,
+                               uint32_t* out_rejected = nullptr) {
+    uint32_t rate = true_ticks_per_sec;  // seeded as if already locked
+    uint32_t missed = 0, rejected = 0;
+    uint64_t mono_us = 0;
+
+    for (uint32_t d : deltas) {
+        // Consumer advances over this interval using the CURRENT believed rate,
+        // before the new edge updates it — same ordering as the firmware.
+        mono_us += static_cast<uint64_t>(d) * 1000000ull / rate;
+
+        PpsInterval iv{};
+        if (Pps_AcceptInterval(d, &iv)) {
+            rate = iv.ticks_per_sec;
+            if (iv.seconds > 1) missed += iv.seconds - 1;
+        } else {
+            ++rejected;
+        }
+    }
+    if (out_missed)   *out_missed = missed;
+    if (out_rejected) *out_rejected = rejected;
+    return mono_us;
+}
+
+static void D1_NominalIntervalsAccepted() {
+    printf("\n--- D1: nominal 1 s intervals accepted, rate tracked ---\n");
+    PpsInterval iv{};
+    CHECK(Pps_AcceptInterval(1000000u, &iv));
+    CHECK_MSG(iv.ticks_per_sec == 1000000u, "tps=%u (want 1000000)", iv.ticks_per_sec);
+    CHECK_MSG(iv.seconds == 1u, "seconds=%u (want 1)", iv.seconds);
+
+    // A drifting-but-plausible oscillator is still adopted.
+    CHECK(Pps_AcceptInterval(1020000u, &iv));
+    CHECK_MSG(iv.ticks_per_sec == 1020000u, "tps=%u (want 1020000)", iv.ticks_per_sec);
+    CHECK(iv.seconds == 1u);
+}
+
+static void D2_MissedEdgeDoesNotPoisonClock() {
+    printf("\n--- D2: dropped PPS edge -> clock stays on real time (the #30 bug) ---\n");
+    // Exactly the flight 2026-07-17 shape: steady 1 s edges, then two missed
+    // edges leaving one 3 s interval, then steady again.
+    const uint32_t TPS = 1000000u;
+    std::vector<uint32_t> deltas;
+    for (int i = 0; i < 5; ++i) deltas.push_back(TPS);
+    deltas.push_back(3u * TPS);          // two edges lost
+    for (int i = 0; i < 5; ++i) deltas.push_back(TPS);
+
+    uint32_t missed = 0, rejected = 0;
+    const uint64_t mono_us = runPpsSequence(deltas, TPS, &missed, &rejected);
+
+    // 13 real seconds elapsed (5 + 3 + 5).  Pre-fix this came out at ~11 s: the
+    // 3 s interval was integrated fine, but the FOLLOWING five 1 s intervals ran
+    // at 1/3 rate because `elapsed` had been poisoned to 3e6.
+    const uint64_t expected_us = 13ull * 1000000ull;
+    CHECK_MSG(mono_us == expected_us,
+              "mono=%llu us, want %llu us (clock scaled by dropout)",
+              (unsigned long long)mono_us, (unsigned long long)expected_us);
+    CHECK_MSG(missed == 2u, "missed=%u (want 2)", missed);
+    CHECK_MSG(rejected == 0u, "rejected=%u (want 0, 3 s is recoverable)", rejected);
+}
+
+static void D3_MultiSecondRecovery() {
+    printf("\n--- D3: multi-second dropouts recover a valid rate ---\n");
+    // Anticipated in flight: GPS occlusion under canopy drops several edges.
+    // Each of these must yield the per-second rate, not the raw multiple.
+    for (uint32_t n = 1; n <= PPS_MAX_MISSED_SECONDS; ++n) {
+        PpsInterval iv{};
+        const uint32_t d = n * 1000000u;
+        CHECK_MSG(Pps_AcceptInterval(d, &iv), "n=%u interval rejected", n);
+        CHECK_MSG(iv.ticks_per_sec == 1000000u,
+                  "n=%u: tps=%u (want 1000000 — raw multiple adopted?)", n, iv.ticks_per_sec);
+        CHECK_MSG(iv.seconds == n, "n=%u: seconds=%u", n, iv.seconds);
+    }
+
+    // Recovery must also work off-nominal: a 1.02 MHz clock across a 4 s gap.
+    PpsInterval iv{};
+    CHECK(Pps_AcceptInterval(4u * 1020000u, &iv));
+    CHECK_MSG(iv.ticks_per_sec == 1020000u, "tps=%u (want 1020000)", iv.ticks_per_sec);
+    CHECK(iv.seconds == 4u);
+}
+
+static void D4_OutOfBandRejectedNotAdopted() {
+    printf("\n--- D4: unrecoverable intervals rejected, last good rate held ---\n");
+    PpsInterval iv{};
+
+    // Beyond the reconstruction cap: rounding to a whole second is no longer
+    // unambiguous, so hold rather than guess.
+    CHECK(!Pps_AcceptInterval((PPS_MAX_MISSED_SECONDS + 1u) * 1000000u, &iv));
+
+    // Spurious early edge — under half a second rounds to n = 0.
+    CHECK(!Pps_AcceptInterval(200000u, &iv));
+    CHECK(!Pps_AcceptInterval(1u, &iv));
+
+    // In the right ballpark for one second but the rate is out of band: a real
+    // measurement fault (e.g. ISR latency), not oscillator drift.
+    CHECK(!Pps_AcceptInterval(900000u, &iv));
+    CHECK(!Pps_AcceptInterval(1100000u, &iv));
+
+    // A rejected interval must leave the clock on its previous rate rather than
+    // scaling it.  Feed one unrecoverable 30 s gap mid-sequence.
+    const uint32_t TPS = 1000000u;
+    std::vector<uint32_t> deltas = { TPS, TPS, 30u * TPS, TPS, TPS };
+    uint32_t missed = 0, rejected = 0;
+    const uint64_t mono_us = runPpsSequence(deltas, TPS, &missed, &rejected);
+    CHECK_MSG(mono_us == 34ull * 1000000ull,
+              "mono=%llu us, want 34000000 us", (unsigned long long)mono_us);
+    CHECK_MSG(rejected == 1u, "rejected=%u (want 1)", rejected);
+    CHECK_MSG(missed == 0u, "missed=%u (want 0 — rejected gap is not a count)", missed);
+}
+
+static void D5_RejectionBandBoundaries() {
+    printf("\n--- D5: acceptance band edges ---\n");
+    PpsInterval iv{};
+    // Band is exclusive at both ends, matching the original ISR comparison.
+    CHECK(!Pps_AcceptInterval(PPS_TICKS_PER_SEC_MIN, &iv));
+    CHECK(!Pps_AcceptInterval(PPS_TICKS_PER_SEC_MAX, &iv));
+    CHECK(Pps_AcceptInterval(PPS_TICKS_PER_SEC_MIN + 1u, &iv));
+    CHECK(Pps_AcceptInterval(PPS_TICKS_PER_SEC_MAX - 1u, &iv));
+
+    // *out must be untouched on rejection — the caller relies on holding its
+    // previous value.
+    iv.ticks_per_sec = 0xDEADBEEFu;
+    iv.seconds = 42u;
+    CHECK(!Pps_AcceptInterval(0u, &iv));
+    CHECK_MSG(iv.ticks_per_sec == 0xDEADBEEFu && iv.seconds == 42u,
+              "rejected call clobbered *out");
+}
+
+// ===========================================================================
 // CSV replay mode
 // ===========================================================================
 // Load a flight CSV into Cycles.  Parsing lives in Tests/common/FlightCsv.hpp
@@ -723,6 +870,12 @@ int main(int argc, char** argv) {
     C4_ShortBoostBelowGateLaunches();
     C5_WeakBoostLaunchesViaBaro();
     C6_BaroDeadStillLaunches();
+
+    D1_NominalIntervalsAccepted();
+    D2_MissedEdgeDoesNotPoisonClock();
+    D3_MultiSecondRecovery();
+    D4_OutOfBandRejectedNotAdopted();
+    D5_RejectionBandBoundaries();
 
     printf("\n==========================================================\n");
     printf(" Results: %d passed, %d failed\n", g_pass, g_fail);
