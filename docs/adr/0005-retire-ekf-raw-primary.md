@@ -98,3 +98,38 @@ The "retire from the real-time path / compile out / offline-only" framing above 
 - The fused column remains observable through the locator's USB-C CSV export, which dumps every archived field.
 
 Only the selected column changed — the wire layout is untouched (`CompressedHeader` 48 B / `CompressedDelta` 24 B, size asserts unchanged), so no app or receiver decode change was needed for this part. **If a future change wants both altitudes on the chart:** a second int16 delta plus a float base fits without costing packets (header 52 + 7 × 26 = 234 ≤ 239, still 8 samples/packet), but it is a wire-format change requiring both firmwares, the app, and all the size asserts to move together.
+
+## Amendment (2026-07-18) — part of the EKF's bad attitude was a plain SEED BUG, not estimator weakness
+
+This ADR's Decision 2 downgrades EKF orientation to "at most an *approximate* attitude clearly labelled as such", and the code that replaced it carries the note *"the EKF `q_bn` was itself not rendering correctly, so this replaces it."* Both readings attribute the failure to the estimator being unfit — 20 Hz aliasing, no magnetometer, gravity leakage. **At least part of it was simply a sign error in the seed**, and that distinction matters for anyone reconsidering FR-P8/FR-P9.
+
+`InsEkf15::initialize()` seeded attitude from the raw specific-force vector:
+
+```cpp
+m_sol.q_bn = Math::quatFromAccel(imu.accel_selected_mps2);        // no negation
+```
+
+while `AttitudeEstimator::initializeFromRestAccel()` — written later, for the strapdown — negates it, and says why: the IMU reports specific force (+1 g "up" at rest) but `quatFromAccel` expects the gravity (nav-down) direction. **The strapdown was given that fix; the EKF was not.**
+
+Measured by replaying flight 2026-07-17 offline (`Tests/EkfReplay`), at t = 0, at rest on the launch rail, before the airframe has moved:
+
+| | tilt from vertical |
+|---|---|
+| strapdown | **2.81°** (rocket points up — correct) |
+| EKF, as shipped | **170.63°** (filter believes the nose points DOWN) |
+| EKF, negated seed | **9.37°** |
+
+This is not aliasing, dynamics, or replay artefact — the vehicle is stationary for the whole window, and tilt is directly comparable because the Y-reflection in `getStrapdownQuat` leaves pitch/inclination unchanged.
+
+It is also effectively unrecoverable in flight: `correctTiltFromAccel()` injects `gain × error` (gain 0.01) per cycle, and 180° is the antipode where the rotation-error axis is ill-conditioned. So the filter has most likely flown every flight to date resolving gravity and body acceleration through a rotation ~180° from truth — which would corrupt the vertical channel far more than the aliasing this ADR blames.
+
+**Fixed** (`662a783`): the EKF now seeds from the negated vector, matching the strapdown.
+
+### What this does and does not change
+
+- **Decision 1 and 2 stand.** Raw-primary is unaffected; the EKF still drives nothing authoritative, and this changes no deployment path.
+- **The strapdown stays.** It is the FR-P13 attitude source for independent reasons — 480 Hz vs 20 Hz, and a known seed reference — and NFR-9 is unaffected.
+- **The evidence base for "the estimator adds error" is now weaker than it looked.** Some portion of the observed attitude and vertical-channel error was this bug, not an inherent limit. The ADR-0003/ADR-0004 conclusions were reached against a filter that was seeded upside down.
+- **It does NOT fully explain the divergence.** Replayed peak |fused vertical speed| improves 1268 → 808 m/s: better, still badly wrong. At least one further mechanism is unaccounted for ([#28](https://github.com/fschroer/steam-pigeon-locator/issues/28)).
+
+**Do not read this as rehabilitating the EKF.** Nothing here has flown, and the remaining divergence is large. But if FR-P8/FR-P9 are ever revisited, the fair test is against the *fixed* filter — re-running ADR-0004's vetting method on pre-fix data would compare against a straw man.

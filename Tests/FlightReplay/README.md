@@ -75,15 +75,44 @@ A green run ends with `Results: N passed, 0 failed` and exit code 0.
 ./test_flight_replay flight.csv --dropout 44000 47000 # mark raw invalid over [44000,47000] ms
 ```
 
-CSV columns (header row required):
+**A real archived flight replays directly** — export it over USB-C (the data
+menu CSV) and pass the file. No column mapping, no editing. Parsing lives in
+[`Tests/common/FlightCsv.hpp`](../common/FlightCsv.hpp), shared with
+`Tests/EkfReplay` so the two harnesses cannot drift apart on schema.
+
+The reader skips the `Key: value` metadata block the exporter emits and matches
+columns **by name**, so extra, missing or reordered columns are tolerated. Both
+schemas work:
 
 ```
+# on-device export (23 columns at ARCHIVE_VERSION 5, and growing)
+time_ms,raw_baro_agl_m,fused_agl_m,raw_baro_vel_mps,fused_vspeed_mps,accel_x_g,...
+
+# original positional form (header optional)
 t_ms,raw_agl,raw_vel,raw_valid,fused_agl,fused_vspeed,accel_mag
 ```
 
-- `raw_*` — raw baro AGL (m) / velocity (m/s, +up) / validity (1/0)
-- `fused_*` — fused altitude AGL (m) / vertical speed (m/s, +up)
-- `accel_mag` — body specific-force magnitude (m/s²), for launch/burnout detection
+What the harness consumes, and where it comes from in either schema:
+
+| field | export column | legacy column |
+|---|---|---|
+| time | `time_ms` | `t_ms` |
+| raw baro AGL (m) | `raw_baro_agl_m` | `raw_agl` |
+| raw baro velocity (m/s, +up) | `raw_baro_vel_mps` | `raw_vel` |
+| raw validity (1/0) | *absent — defaults true* | `raw_valid` |
+| fused AGL (m) | `fused_agl_m` | `fused_agl` |
+| fused vertical speed (m/s, +up) | `fused_vspeed_mps` | `fused_vspeed` |
+| body specific force | derived from `accel_x_g`/`y`/`z` | `accel_mag` |
+
+Two notes worth knowing:
+
+- **Units differ.** The export logs acceleration in **g**; the harness works in
+  **m/s²**, and converts when deriving from the `accel_*_g` columns.
+- **`raw_valid` has no export column** and defaults to true — every archived
+  sample came from a baro read. Use `--dropout` to simulate invalidity.
+
+The `raw_*` fields are what the deployment ladder actually consumes; `fused_*`
+exercises the robustness fallbacks.
 
 Generate a ready-made template (the synthetic nominal flight):
 
@@ -91,10 +120,9 @@ Generate a ready-made template (the synthetic nominal flight):
 ./test_flight_replay --emit sample_flight.csv
 ```
 
-To replay a **real** archived flight, export it over USB-C (the data menu CSV) or
-from the app and map its columns onto the schema above. The `raw_*` columns are
-the ones the deployment ladder actually consumes; `fused_*` exercises the
-robustness fallbacks.
+> Replaying raw sensors through the **EKF** is a different harness:
+> [`Tests/EkfReplay`](../EkfReplay). This one *mocks* `Navigation`, so it cannot
+> see the filter at all — it replays a fused solution INTO `FlightManager`.
 
 ## How the shadowing works
 

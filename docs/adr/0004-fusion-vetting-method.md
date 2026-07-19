@@ -40,3 +40,21 @@ To vet any fused quantity for an elevated-trust use, validate it against an **in
 
 - **Agreement-with-raw gate (original ADR-0001).** Rejected: circular; cannot demonstrate superiority.
 - **No formal method (tune by feel).** Rejected: that is what produced the raw-vs-fused inconsistency this whole thread is untangling.
+
+## Implementation status (2026-07-18) — a replay harness now exists; the smoother does not
+
+*Consequences* records: "Requires building an offline smoother / analysis tool (a PC-side effort), **which does not exist yet**." Partially superseded — be precise about which half.
+
+**Exists** (`Tests/EkfReplay`, commit `901a766`): a host harness that compiles the real `InsEkf15.cpp` and drives `predict()` / `updateBaro()` / `updateGpsPosition()` from an archived flight CSV, dumping per-sample internals (accel- and gyro-bias states, attitude, altitude, vertical speed) and comparing EKF attitude against the archived strapdown reference. `InsEkf15` pulls in no HAL or driver headers, so it links on host unmodified — no fork, no reimplementation. Tuning can be swept without spending a flight (`--q-abias`, `--accel-scale`, `--fix-seed`).
+
+This satisfies Decision 3 (*"the comparison must be regenerable from archived data"*) for the **filter-under-test** side, and it has already paid for itself: it refuted one hypothesis about [#28](https://github.com/fschroer/steam-pigeon-locator/issues/28) (accel-bias poisoning — the bias state never moves) and found a real seed-sign bug in `InsEkf15::initialize()` (see the [ADR-0005](0005-retire-ekf-raw-primary.md) 2026-07-18 amendment).
+
+**Does NOT exist:** the **non-causal smoother** of Decision 1. Replaying the same causal filter over recorded data is not an independent reference — it shares every sensor-error source and the filter's own lag, which is exactly the circularity this ADR was written to avoid. Nothing in the harness constitutes vetting evidence under this method.
+
+**Known gaps before the harness can produce quantitative claims:**
+
+- It does not reproduce `Navigation`'s orchestration around the EKF (pad-rest seeding, ZUPT, `correctTiltFromAccel`, gyro-bias recalibration, mounting calibration). The replayed pad phase therefore drifts where the real one is held still.
+- The archive decimates gyro to 20 Hz (one sample per cycle); the strapdown integrates at ~480 Hz from the IMU FIFO. An offline replay cannot reproduce that reference at high roll rates, so EKF-vs-strapdown attitude comparisons are only trustworthy at rest — which is where the seed bug was caught.
+- The archive logs a single accel triple (the *selected* channel), not both low-g and high-g, so a channel scale mismatch is invisible in every flight already recorded.
+
+**Bearing on the vetting gate:** unchanged. Decision 2's bar (fused must beat raw against an *independent* reference) still requires the smoother plus GPS/second-altimeter triangulation. The harness makes iteration cheap; it does not lower the bar.
