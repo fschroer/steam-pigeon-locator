@@ -39,6 +39,8 @@
 #include <sstream>
 #include <algorithm>
 
+#include "FlightCsv.hpp"
+
 // Parse all std + mock headers with normal access keywords BEFORE the private
 // hack, so nothing in libstdc++ or the mocks is disturbed by it.
 #include "MockEnv.hpp"
@@ -596,26 +598,49 @@ static void C6_BaroDeadStillLaunches() {
 // ===========================================================================
 // CSV replay mode
 // ===========================================================================
+// Load a flight CSV into Cycles.  Parsing lives in Tests/common/FlightCsv.hpp
+// so this harness and the EKF replay harness cannot drift apart on schema.
+//
+// Unit note: the on-device export logs acceleration in g; Cycle wants m/s^2.
 static bool loadCsv(const char* path, std::vector<Cycle>& out) {
-    std::ifstream in(path);
-    if (!in) { printf("cannot open %s\n", path); return false; }
-    std::string line; bool header = true;
-    while (std::getline(in, line)) {
-        if (line.empty()) continue;
-        if (header) { header = false; if (!isdigit((unsigned char)line[0]) && line[0] != '-') continue; }
-        std::stringstream ss(line); std::string tok; Cycle c; int col = 0;
-        while (std::getline(ss, tok, ',')) {
-            const float v = tok.empty() ? 0.0f : std::stof(tok);
-            switch (col++) {
-                case 0: c.t_ms = (uint32_t)v; break;
-                case 1: c.raw_agl = v; break;
-                case 2: c.raw_vel = v; break;
-                case 3: c.raw_valid = (v != 0.0f); break;
-                case 4: c.fused_agl = v; break;
-                case 5: c.fused_vspeed = v; break;
-                case 6: c.accel_mag = v; break;
-                default: break;
-            }
+    flightcsv::Table t;
+    if (!flightcsv::load(path, t)) return false;
+
+    int c_t = 0, c_ragl = 1, c_rvel = 2, c_rvalid = 3, c_fagl = 4, c_fvs = 5, c_amag = 6;
+    int c_ax = -1, c_ay = -1, c_az = -1;
+    if (!t.positional) {
+        c_t      = t.find({"t_ms", "time_ms"});
+        c_ragl   = t.find({"raw_agl", "raw_baro_agl_m"});
+        c_rvel   = t.find({"raw_vel", "raw_baro_vel_mps"});
+        c_rvalid = t.find({"raw_valid"});
+        c_fagl   = t.find({"fused_agl", "fused_agl_m"});
+        c_fvs    = t.find({"fused_vspeed", "fused_vspeed_mps"});
+        c_amag   = t.find({"accel_mag"});
+        c_ax     = t.find({"accel_x_g"});
+        c_ay     = t.find({"accel_y_g"});
+        c_az     = t.find({"accel_z_g"});
+        if (c_t < 0 || c_ragl < 0) {
+            printf("%s: need a time and raw-baro-altitude column "
+                   "(t_ms/time_ms and raw_agl/raw_baro_agl_m)\n", path);
+            return false;
+        }
+    }
+
+    for (size_t i = 0; i < t.size(); ++i) {
+        Cycle c;
+        c.t_ms         = (uint32_t)t.get(i, c_t);
+        c.raw_agl      = (float)t.get(i, c_ragl);
+        c.raw_vel      = (float)t.get(i, c_rvel);
+        c.fused_agl    = (float)t.get(i, c_fagl);
+        c.fused_vspeed = (float)t.get(i, c_fvs);
+        // raw_valid is absent from the on-device export: every archived sample
+        // came from a baro read, so default true.
+        c.raw_valid    = (t.get(i, c_rvalid, 1.0) != 0.0);
+        if (c_amag >= 0) {
+            c.accel_mag = (float)t.get(i, c_amag);            // already m/s^2
+        } else if (c_ax >= 0 || c_ay >= 0 || c_az >= 0) {
+            const double ax = t.get(i, c_ax), ay = t.get(i, c_ay), az = t.get(i, c_az);
+            c.accel_mag = (float)(std::sqrt(ax*ax + ay*ay + az*az) * 9.80665);  // g -> m/s^2
         }
         out.push_back(c);
     }

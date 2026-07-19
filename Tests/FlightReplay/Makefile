@@ -26,7 +26,8 @@ CXXFLAGS := -std=c++17 -Wall -Wextra -O0 -g \
             -I$(ROOT)/Rocket/Inc \
             -I$(ROOT)/Rocket/Common/Inc \
             -I$(ROOT)/Rocket/Archive/Inc \
-            -I$(ROOT)/Rocket/Navigation/Inc
+            -I$(ROOT)/Rocket/Navigation/Inc \
+            -I$(ROOT)/Tests/common
 LDFLAGS  := -Wl,--gc-sections
 
 TARGET   := test_flight_replay
