@@ -220,6 +220,29 @@ Android / Kotlin / Jetpack Compose, organized around a `RocketViewModel` and a s
 - Connection authorization: password challenge on first contact with an unknown locator, a remembered store of authorized locators, and a conflicting-traffic warning (FR-P14).
 - Resilient BLE link: the connection to the receiver stays up through long stretches of locator silence (locator off / on the pad / out of range), verified by probing the receiver rather than assuming silence means a dead link ([ADR-0012](adr/0012-app-ble-connection-health-probe.md)).
 
+### 4.4 Platform parity (Android ⇄ iOS)
+
+A native Swift/SwiftUI iOS app is planned as a **second codebase** ([ADR-0015](adr/0015-ios-port-corebluetooth-and-platform-parity.md)); nothing is implemented yet. **Android is the reference implementation** — new behavior lands there first, then iOS, and never without being written down in an ADR or here first.
+
+The wire format is already defined twice by hand (C++ structs, Kotlin offsets); Swift makes it three, which is why parity is a stated policy. The guard is a **test triad** pinned to identical constants — firmware `static_assert`s in `MessageProtocol.hpp`, `WireLayoutTest.kt`, and (to add) `WireLayoutTests.swift` — all updated in the **same session** with cross-referenced commits. Behavioral invariants live in ADRs, not in one app's code comments, so a fix updates the ADR once and both apps follow. See ADR-0015 for the per-layer mechanisms and the change checklist.
+
+**Parity matrix** — keep this current; an entry that differs is either a known gap or a bug.
+
+| Capability | Android | iOS | Notes |
+|---|---|---|---|
+| BLE receiver link (scan/connect/notify) | ✅ | ⬜ | iOS scans by service UUID FFE0 (confirmed advertised), not MAC |
+| Background operation | ✅ foreground service | ⬜ | iOS: `bluetooth-central` + State Preservation & Restoration |
+| Connection-health probe (ADR-0012) | ✅ | ⬜ | Behavior is the ADR; both must implement it |
+| Locator password gate (ADR-0006) | ✅ | ⬜ | Keys on `locator_id`, platform-neutral; port test vectors |
+| Live telemetry + flight states | ✅ | ⬜ | |
+| Map + offline satellite (ADR-0014) | ✅ | ⬜ | Same MapLibre style JSON; blocked for release by [#26](https://github.com/fschroer/steam-pigeon-locator/issues/26) on both platforms |
+| Archived-flight download (ADR-0009) | ✅ | ⬜ | iOS throughput unmeasured; no connection-interval control |
+| Flight profiles / path export | ✅ | ⬜ | |
+| Locator/receiver settings, LoRa channel (ADR-0011) | ✅ | ⬜ | |
+| Deployment test | ✅ | ⬜ | |
+| TTS callouts | ✅ | ⬜ | `AVSpeechSynthesizer` |
+| Heads-up "point at the sky" view | ✅ | ⬜ | CoreMotion + AVFoundation |
+
 ---
 
 ## 5. Operational Notes

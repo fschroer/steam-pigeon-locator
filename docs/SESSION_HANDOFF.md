@@ -1,6 +1,45 @@
-# Session Handoff — 2026-07-18
+# Session Handoff — 2026-07-19
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
+
+## 2026-07-19 session — app map migrated to MapLibre + offline satellite; iOS port de-risked on hardware — COMMITTED + PUSHED
+
+Two threads, both **app-side**; no firmware changed. Locator/Receiver firmware untouched this session.
+
+### A. App map: Google Maps → MapLibre, with offline satellite ([ADR-0014](adr/0014-maplibre-offline-satellite-maps.md), app `769956d`)
+
+Google's Maps SDK exposes **no offline API** on either platform, so offline satellite — the thing recovery in no-signal terrain actually needs — was unreachable without replacing the map stack. `DownloadMapScreen` had been a UI stub with no download logic. Now real: area picker, max-zoom slider with live detail inset, coverage/size estimate with a 1 GB guard, preset sites from a user-editable CSV, lat/lon entry, region list/delete.
+
+**Verified air-gapped on device** — airplane mode **AND Wi-Fi off** (airplane mode alone does NOT disable Wi-Fi; an earlier "proof" was invalid because Wi-Fi was silently up), ambient cache cleared: a downloaded region renders as a hard-edged rectangle of imagery with nothing outside it.
+
+Non-obvious things that cost real time — all captured in ADR-0014:
+- MapLibre's offline downloader accepts **only an `http(s)` style URL** (rejects `asset://`, `data:`, `file://` — region stalls at "0/1 tiles"). Hence the embedded `LocalStyleServer` on 127.0.0.1 and the localhost-scoped `network_security_config.xml` — **that config is required, not scaffolding**.
+- **Never probe the map to compute camera framing.** The old 2D `moveCamera(newLatLngBounds(...))` "probe" moved the camera mid-frame; MapLibre's continuously-rendering GL thread drew that intermediate state as a persistent auto-zoom **wobble**. Use the pure `getCameraForLatLngBounds(bounds, padding, 0.0, 0.0)` query, fit **north-up/flat** (tilt is already compensated by `zoomCorrection` — letting the SDK also account for it corrects twice and over-zooms out).
+- The picker's **shape becomes the region's shape** (download takes the visible bounds), so the preview is square on purpose.
+- Tile-size estimates are **measured per zoom**, not tiles × one constant (Mapbox bytes/tile collapse past z19 — upscaled imagery; Esri flat ~23 KB). Validated within 2% against a real 23,014-tile region.
+
+**⛔ Release blocker — [#26](https://github.com/fschroer/steam-pigeon-locator/issues/26):** no wired tile provider permits permanent offline caching. Mapbox §2.9.1 requires their own Mobile SDK on mobile and §2.8.1 caps caching at 30 days; Esri and MapTiler Cloud restrict bulk caching. Wired providers are **evaluation-only**. Public-domain **NAIP** is the identified clean path (~3–4 days: GDAL pipeline + on-device MBTiles server). USGS `USGSImageryOnly` was evaluated and rejected — **z16 ceiling (~2 m/px)**, too coarse to spot a rocket. Cheapest next step: **ask Mapbox/MapTiler in writing** (both terms say "unless otherwise agreed in writing").
+
+### B. iOS port de-risked on real hardware ([ADR-0015](adr/0015-ios-port-corebluetooth-and-platform-parity.md))
+
+Nothing implemented. The two unknowns that could have invalidated a native Swift port were probed and **both came back favorable**.
+
+- **FFE0 IS advertised** — VG6328A default advert is `03 03 E0FF` (AD type 0x03 = 16-bit service UUID list); receiver firmware issues no `AT+UIDS`/`AT+SADV`/`AT+UADV` to change it. Confirmed on hardware: "Frank's Receiver" found by a **service-filtered** scan. ⇒ **iOS background BLE is viable** (background scans require a service filter). This was the big structural risk.
+- **GATT table identical** to Android: service `FFE0`, `FFE1` [WRITE, WRITE_NO_RESP] outbound, `FFE2` [NOTIFY] inbound. CoreBluetooth writes the CCCD itself.
+- **⚠️ MTU trap:** `maximumWriteValueLength(.withoutResponse)` read **20** inside `didConnect` (= default MTU 23), yet **140-byte notifications** arrived after. iOS negotiates MTU *after* connect and has **no MTU-changed callback**. **Do not cache it** — re-query per write. (`.withResponse` reported 512, which is ATT long-write capacity, *not* the MTU.)
+- Throughput measured was the **1 Hz telemetry cadence** (16 packets × exactly 140 B over 15.7 s = 142.9 B/s), **not** a bulk transfer. Flight-data download rate on iOS remains **unmeasured** — needs the protocol layer.
+- Probe source preserved: **`Tools/ios-ble-probe/BLEProbe.swift`** (iOS 16.0+; setup notes in the file header).
+
+**Prerequisites before coding:** sustained Mac access (Apple Silicon — macOS 27 drops Intel; Xcode 26.6 needs macOS Tahoe 26.2), a **physical iPhone** (the Simulator has **no Bluetooth**), Apple Developer Program $99/yr, deployment target **iOS 16.0**.
+
+**Recommended build order:** (1) protocol + auth layer in pure Swift with `WireLayoutTest`/`LocatorAuthTest` ported — no hardware needed, and it pins the **third** hand-maintained copy of the wire format; (2) CoreBluetooth transport; (3) SwiftUI UI.
+
+**Parity policy** is now stated: Android is the reference implementation; wire format guarded by a **test triad** (firmware `static_assert`s + `WireLayoutTest.kt` + `WireLayoutTests.swift`) updated in one session with cross-referenced commits; behavior lives in ADRs; parity matrix in SystemSummary §4.4.
+
+### Also this session
+- Removed the unused **USB-serial path** (`SerialManager`, jSerialComm, usb-serial-for-android, `USB_PERMISSION`) after bench-confirming the app is unaffected — it was dead code.
+- Removed the **Google Maps SDK** entirely (maps-compose ×3, play-services-maps, `geo.API_KEY`); `play-services-location` stays for fused location.
+- ⚠️ **Near-miss:** a Mapbox **secret** `sk.` download token was sitting in tracked, non-gitignored `gradle.properties` and would have been pushed to GitHub. Caught pre-commit; never entered history; token since rotated. The Mapbox *public* `pk.` token lives in gitignored `secrets.properties` → `BuildConfig.MAPBOX_TOKEN`. **Check `git diff --cached` for `sk.`/`pk.`/`AIza` before every commit.**
 
 ## 2026-07-18 session — flight-2026-07-17 VALIDATED event sequencing; EKF replay harness; 4 new issues — COMMITTED + PUSHED, none flight-tested
 
