@@ -437,7 +437,8 @@ void UserInteraction::DisplayDataMenu() {
 		archive_.ReadEvent(i, FlightArchive::Statistic::MaxAltitudeM, apogee, valid_record);
 		uint32_t apogee_timestamp = 0;
 		archive_.ReadEvent(i, FlightArchive::Statistic::ApogeeTimestampMs, apogee_timestamp, valid_record);
-		export_line.WriteMany(archive_position, flight_date_time, Fmt(apogee, 11), Fmt(apogee_timestamp, 19), crlf_);
+		export_line.WriteMany(archive_position, flight_date_time, Fmt(apogee, 11, 1),
+				Fmt(apogee_timestamp / 1000.0f, 19, 1), crlf_);
 //    }
 	}
 	export_line.WriteMany(data_guidance_text_, crlf_);
