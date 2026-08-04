@@ -1,4 +1,9 @@
-# ADR-0015: Native iOS port — CoreBluetooth transport, and how Android/iOS stay in sync
+# ADR-0016: Native iOS port — CoreBluetooth transport, and how Android/iOS stay in sync
+
+> **Renumbered 2026-08-03: this ADR was originally filed as ADR-0015**, colliding with
+> [ADR-0015 (launch-detection drop rejection)](0015-launch-detection-drop-rejection.md), which was
+> filed two days earlier and keeps the number. Commit `4b6bb45` and any external reference calling
+> the iOS port "ADR-0015" mean this document. Nothing else changed.
 
 - **Status:** Accepted (approach + invariants); implementation **not started**
 - **Date:** 2026-07-19

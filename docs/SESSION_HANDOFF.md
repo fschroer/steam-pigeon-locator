@@ -20,7 +20,7 @@ Non-obvious things that cost real time — all captured in ADR-0014:
 
 **⛔ Release blocker — [#26](https://github.com/fschroer/steam-pigeon-locator/issues/26):** no wired tile provider permits permanent offline caching. Mapbox §2.9.1 requires their own Mobile SDK on mobile and §2.8.1 caps caching at 30 days; Esri and MapTiler Cloud restrict bulk caching. Wired providers are **evaluation-only**. Public-domain **NAIP** is the identified clean path (~3–4 days: GDAL pipeline + on-device MBTiles server). USGS `USGSImageryOnly` was evaluated and rejected — **z16 ceiling (~2 m/px)**, too coarse to spot a rocket. Cheapest next step: **ask Mapbox/MapTiler in writing** (both terms say "unless otherwise agreed in writing").
 
-### B. iOS port de-risked on real hardware ([ADR-0015](adr/0015-ios-port-corebluetooth-and-platform-parity.md))
+### B. iOS port de-risked on real hardware ([ADR-0016](adr/0016-ios-port-corebluetooth-and-platform-parity.md))
 
 Nothing implemented. The two unknowns that could have invalidated a native Swift port were probed and **both came back favorable**.
 

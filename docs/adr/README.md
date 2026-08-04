@@ -29,5 +29,9 @@ Write an ADR for a decision that is costly to reverse, or that future work must 
 | [0012](0012-app-ble-connection-health-probe.md) | App BLE connection health — probe the receiver before declaring a phantom link | Accepted |
 | [0013](0013-realtime-ekf-fpuless-covariance-heuristics.md) | Keep the EKF live on an FPU-less core — covariance sparsity/symmetry heuristics (amends 0005) | Accepted |
 | [0014](0014-maplibre-offline-satellite-maps.md) | MapLibre for the app map — offline satellite caching, and the tile-licensing constraint | Accepted (provider for release unresolved) |
-| [0015](0015-ios-port-corebluetooth-and-platform-parity.md) | Native iOS port — CoreBluetooth transport, and how Android/iOS stay in sync | Accepted (not implemented) |
 | [0015](0015-launch-detection-drop-rejection.md) | Launch-detection drop rejection — free-fall veto + sustained accel; keep the accel-only path | Accepted |
+| [0016](0016-ios-port-corebluetooth-and-platform-parity.md) | Native iOS port — CoreBluetooth transport, and how Android/iOS stay in sync | Accepted (not implemented) |
+| [0017](0017-gps-receiver-configuration-ownership.md) | GPS receiver configuration ownership — stale-fix recovery, phase-scheduled dynamic model, archived fix quality | Accepted |
+| [0018](0018-landing-detection-quiescence-window.md) | Landing detection — raw-baro quiescence, and the window between false landing and missed landing | Accepted |
+
+> **Numbering note (resolved 2026-08-03):** the iOS-port ADR and the launch-detection ADR were both filed as **0015**. Launch detection was filed first (2026-07-17) and keeps the number; the iOS port moved to **0016**. Commit `4b6bb45` and any external reference calling the iOS port "ADR-0015" mean [0016](0016-ios-port-corebluetooth-and-platform-parity.md) — a note in that file records the change. When picking the next number, check this table rather than the highest number you remember.
