@@ -750,15 +750,24 @@ With **Enable Speech** on (§2.8), the app announces:
 | Callout | When |
 |---|---|
 | "*Armed*" / "*Disarmed*" | When the arm state changes. |
-| "*[number] meters*" | Altitude, called out repeatedly through ascent and descent. |
+| "*[number] meters*" | Altitude, every 100 m as the rocket coasts to apogee. |
+| "*Apogee, [number] meters*" | Apogee detected. |
 | "*Drogue charge*" | The drogue primary charge has been fired. |
 | "*Drogue backup charge*" | The drogue backup charge has been fired. |
 | "*Main charge*" | The main primary charge has been fired. |
 | "*Main backup charge*" | The main backup charge has been fired. |
 | "*Drogue deployed*" | The locator has *detected the parachute actually taking hold* — a change in descent rate. |
 | "*Main deployed*" | Same, for the main. |
+| "*Descent warning, [number] meters per second…*" | Descending faster than **50 m/s** — fast enough that no chute is holding. Repeated at most every 10 s, with the distance and direction from the launch point when the rocket has a GPS fix. |
+| "*Landing…*" | Touchdown, with the distance and direction from the launch point. Said once. If the link died on the way down, the app works out when the rocket must have reached the ground from the last altitude and descent rate it heard, and calls the landing then — you get the callout even though nothing was received for the last part of the descent. |
+| "*GPS fix lost*" / "*GPS fix restored*" | The locator is still being heard but has stopped (or resumed) reporting a good fix. |
+| "*Telemetry lost*" / "*Telemetry restored*" | More than 3 s with no valid message from the locator (see §8.4), and its recovery. |
 
 ⚡ **"Charge" and "deployed" are two different things.** "*Main charge*" means the locator energized the channel. "*Main deployed*" means it then detected the rocket slowing down. Hearing the charge but not the deployment is exactly the signature of a charge that fired but didn't open the bay — worth knowing in real time.
+
+📍 **A spoken distance always means a real GPS fix.** Any callout that quotes a distance and direction only does so when the locator reports a good fix and a real launch position was captured. When either is missing the app says "*location unknown*" or simply omits the distance — it will never read out a position it does not have.
+
+🔆 **The screen stays on** for as long as the app is in the foreground, so a flight spent watching the sky doesn't end with a blanked phone. It also means the app will not let the display sleep — back out of it, or lock the phone, when you're done.
 
 ## 8.3 The live screens
 
@@ -781,6 +790,10 @@ Normal causes:
 - **Your body.** Receiver in a pocket, or you standing between it and the rocket.
 
 **What to do: nothing.** Keep the receiver up and vertical, keep watching the sky. Don't start disconnecting and reconnecting — the app maintains its own link health and will recover on its own. The **last known position is retained**, and that's what you'll walk toward.
+
+**The app tells you, once.** After 3 s with no valid message it says "*Telemetry lost*" — with the last known distance and direction if the rocket was in the air — and then stays quiet rather than repeating. When packets start arriving again you get "*Telemetry restored*". A dropout of a few seconds is routine; hearing it is information, not an instruction to do anything.
+
+**Once it has called the landing, it stops narrating the flight.** Losing the link on the way down and getting it back after the rocket is on the ground used to produce a burst of callouts describing things that had already happened — "*main charge*", "*main deployed*" — over a rocket lying in a field. If the app has concluded the rocket is down, the only thing you'll hear when the signal comes back is "*Telemetry restored*". Live status like the GPS fix still gets called out, because that is what you need while walking in.
 
 ## 8.5 Landing
 
@@ -954,6 +967,7 @@ This gives you everything the locator recorded, at full rate, for analysis in a 
 | App never finds the receiver | Receiver powered? Bluetooth on? Phone permissions granted? (§3.8) |
 | App says "No Locator" but the receiver is connected | Normal when the locator is off (§3.8). Otherwise: locator off, out of range, or on a different channel (§2.5). |
 | App asks for a password | First contact with a locator it doesn't know (§2.6). |
+| App opened while the locator was already armed | Supported: armed telemetry identifies itself, so the app picks up a locator it already knows and shows live data straight away. If it still reads "No Locator", that locator has never been connected on this phone — **disarm it once** so the app can prompt for its password (§2.6). |
 | "Another locator is transmitting on this channel" | Someone else is on your channel. Change **Locator Settings → channel** (§2.5). |
 | Receiver's new name won't show up | Bluetooth name cache. "Forget" the receiver in your phone's Bluetooth settings, then reconnect (§2.7). |
 | Bluetooth seems to keep dropping | Silence is not a dropped link (§3.8). If it's genuinely reconnecting, check the receiver's battery. |
