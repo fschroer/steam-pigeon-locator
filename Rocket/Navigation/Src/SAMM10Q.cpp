@@ -45,6 +45,10 @@ static constexpr uint32_t CFG_I2COUTPROT_NMEA   = 0x10720002;
 static constexpr uint32_t CFG_UART1OUTPROT_UBX  = 0x10740001;
 static constexpr uint32_t CFG_UART1OUTPROT_NMEA = 0x10740002;
 
+// Navigation engine: dynamic platform model.  Verified against the M10
+// interface description (UBX-21035062), CFG-NAVSPG-DYNMODEL, type E1.
+static constexpr uint32_t CFG_NAVSPG_DYNMODEL = 0x20110021;
+
 // Measurement/navigation rate
 static constexpr uint32_t CFG_RATE_MEAS = 0x30210001;
 static constexpr uint32_t CFG_RATE_NAV  = 0x30210002;
@@ -70,10 +74,23 @@ bool SAMM10Q::init(float sample_rate_hz) {
     if (m_sample_rate_hz < 1.0f) m_sample_rate_hz = 1.0f;
     if (m_sample_rate_hz > 20.0f) m_sample_rate_hz = 20.0f;
 
+    // Boot into the ascent model.  The receiver sits on the pad in Airborne4g,
+    // which costs a little position precision there but guarantees the model is
+    // already correct at launch — no transition to miss.
+    m_dyn_model         = DynModel::Airborne4g;
+    m_dyn_model_resends = 0;
+
     m_rxlen = 0;
     m_seen_ack = false;
     m_seen_nak = false;
     m_seen_nav_pvt = false;
+
+    // Seed the staleness clock so a long boot does not read as an outage the
+    // moment recovery is enabled.
+    m_last_pvt_ms      = HAL_GetTick();
+    m_last_recovery_ms = m_last_pvt_ms;
+    m_stale_nmea_seen  = false;
+    m_stream_class     = StreamClass::Unknown;
 
     if (!waitForBoot(1000)) {
         m_status.error_count++;
@@ -100,8 +117,14 @@ bool SAMM10Q::readSample(GpsSample& out) {
 
 	if (!readFifo(tmp, chunk)) {
 			m_status.health = SensorHealth::Warning;
+			serviceStaleRecovery(HAL_GetTick());
 			return false;
 	}
+
+	m_stream_class = classifyStream(tmp, chunk);
+
+	// After the FIFO read transaction has completed, so the two never overlap.
+	servicePendingDynModel();
 
   if (!appendToRxBuffer(tmp, chunk)) {
   	return false;
@@ -109,6 +132,8 @@ bool SAMM10Q::readSample(GpsSample& out) {
 
 	if (parseNavPvtFromBuffer(out)) {
 		m_last = out;
+		m_last_pvt_ms = HAL_GetTick();
+		m_stale_nmea_seen = false;
 		m_status.last_update_ms = out.timestamp_ms;
 		m_status.data_valid = out.position_valid || out.velocity_valid;
 		m_status.data_fresh = true;
@@ -116,8 +141,179 @@ bool SAMM10Q::readSample(GpsSample& out) {
 		return true;
 	}
 
+	// Missing a parse on any single poll is normal — the receiver produces
+	// solutions at m_sample_rate_hz while this is called on its own cadence, so
+	// roughly half of all polls legitimately yield no complete NAV-PVT.  Only
+	// sustained absence means the fix has frozen, which is what the watchdog
+	// below distinguishes.
 	m_status.data_fresh = false;
+	serviceStaleRecovery(HAL_GetTick());
 	return false;
+}
+
+void SAMM10Q::setDynamicModel(DynModel model) {
+	if (model == m_dyn_model) return;
+	m_dyn_model = model;
+	m_dyn_model_resends = kDynModelResends;
+}
+
+// Builds a VALSET carrying only CFG-NAVSPG-DYNMODEL, so a mid-flight model change
+// costs one 17-byte write instead of re-sending the whole configuration block.
+bool SAMM10Q::buildValsetDynModel(uint8_t* out, uint16_t& out_len) {
+	uint8_t payload[16];
+	uint16_t p = 0;
+
+	payload[p++] = 0x00; // version
+	payload[p++] = 0x01; // RAM layer
+	payload[p++] = 0x00;
+	payload[p++] = 0x00;
+
+	if (!appendCfgItem(payload, sizeof(payload), p,
+	                   CfgItemE1{UbxCfgKey::CFG_NAVSPG_DYNMODEL, static_cast<uint8_t>(m_dyn_model)})) {
+		out_len = 0;
+		return false;
+	}
+
+	const uint16_t len = p;
+
+	out[0] = 0xB5;
+	out[1] = 0x62;
+	out[2] = 0x06;
+	out[3] = 0x8A;
+	out[4] = static_cast<uint8_t>(len & 0xFF);
+	out[5] = static_cast<uint8_t>((len >> 8) & 0xFF);
+
+	std::memcpy(&out[6], payload, len);
+
+	uint8_t ckA = 0;
+	uint8_t ckB = 0;
+	ubxChecksum(&out[2], static_cast<uint16_t>(4 + len), ckA, ckB);
+
+	out[6 + len] = ckA;
+	out[7 + len] = ckB;
+
+	out_len = static_cast<uint16_t>(8 + len);
+	return true;
+}
+
+// Drains the queued model change, one write per GPS poll.  Un-ACKed for the same
+// reason as the stale-fix recovery write: waitForAck() blocks for up to a second.
+void SAMM10Q::servicePendingDynModel() {
+	if (m_dyn_model_resends == 0) return;
+	--m_dyn_model_resends;
+
+	uint8_t msg[32];
+	uint16_t msg_len = 0;
+	if (!buildValsetDynModel(msg, msg_len)) return;
+
+	sendUbx(msg, msg_len, kRecoveryBudgetMs);
+}
+
+bool SAMM10Q::isFixStale() const {
+	if (!m_status.initialized) return true;
+	return (HAL_GetTick() - m_last_pvt_ms) >= kFixStaleMs;
+}
+
+// ----------------------------------------------------------------------------
+// classifyStream — identify what the receiver is actually putting on the wire.
+//
+// Distinguishes the two failure modes that both present as "reads succeed, no
+// fix": a receiver that reset and came back at stock defaults (NMEA out,
+// NAV-PVT disabled) versus one that has gone silent altogether.
+// ----------------------------------------------------------------------------
+SAMM10Q::StreamClass SAMM10Q::classifyStream(const uint8_t* buf, uint16_t len) {
+	if (len == 0) return StreamClass::Unknown;
+
+	uint16_t filler = 0;
+	bool nmea = false;
+	bool ubx  = false;
+
+	for (uint16_t i = 0; i < len; ++i) {
+		if (buf[i] == 0xFF) ++filler;
+		if ((i + 1u) < len) {
+			if (buf[i] == 0xB5 && buf[i + 1] == 0x62) ubx = true;
+			// Every NMEA sentence the receiver emits opens "$G.." (talker) or
+			// "$P.." (proprietary).
+			if (buf[i] == '$' && (buf[i + 1] == 'G' || buf[i + 1] == 'P')) nmea = true;
+		}
+	}
+
+	if (nmea) return StreamClass::Nmea;
+	if (ubx)  return StreamClass::Ubx;
+	// The DDC FIFO reads back 0xFF once drained, so an essentially all-filler
+	// read means the receiver queued nothing at all.
+	if (filler >= static_cast<uint16_t>(len - (len / 16u))) return StreamClass::Idle;
+	return StreamClass::Unknown;
+}
+
+// ----------------------------------------------------------------------------
+// serviceStaleRecovery — in-flight watchdog for a frozen fix.
+//
+// Without this, losing the RAM-layer configuration is permanent: init() runs
+// once at boot, so nothing ever re-asserts CFG_MSGOUT_UBX_NAV_PVT_I2C and the
+// archived/telemetered position stays latched at its last value until the
+// locator is power-cycled.
+// ----------------------------------------------------------------------------
+void SAMM10Q::serviceStaleRecovery(uint32_t now) {
+	if (!isFixStale()) return;
+
+	if (m_stream_class == StreamClass::Nmea) m_stale_nmea_seen = true;
+
+	// Report the truth to every consumer.  Previously this path left health
+	// untouched, so a frozen position kept reporting SensorHealth::Ok and the
+	// app plotted it as a live fix.
+	m_status.data_valid = false;
+	m_status.health     = SensorHealth::Stale;
+
+	if (!m_recovery_enabled) return;
+	if ((now - m_last_recovery_ms) < kRecoveryPeriodMs) return;
+	m_last_recovery_ms = now;
+
+	// Re-assert the whole RAM-layer configuration, NAV-PVT msgout included, as a
+	// single VALSET.  Deliberately un-ACKed: waitForAck() blocks for up to a
+	// second, which would blow the 50 ms super-loop budget and trip the IWDG.  If
+	// the write lands, the next poll simply starts parsing NAV-PVT again; if it
+	// does not, the next attempt is kRecoveryPeriodMs away.  Re-sending the port
+	// and protocol items too (not just the message rate) silences the default
+	// NMEA output, which matters because the FIFO drain budget has only ~28%
+	// headroom over a NAV-PVT-only stream.
+	uint8_t msg[128];
+	uint16_t msg_len = 0;
+	if (!buildValsetInitialConfig(msg, msg_len, m_sample_rate_hz, 1)) return;
+
+	++m_recovery_attempts;
+	sendUbx(msg, msg_len, kRecoveryBudgetMs);
+}
+
+// ----------------------------------------------------------------------------
+// archiveFixSvByte — pack fix quality and satellite count into one byte.
+//
+//   bits 0-2  gps_code : 0-5 = live u-blox fixType (a NAV-PVT parsed recently)
+//                        6   = fix stale, NMEA seen on the wire (receiver reset
+//                              to defaults — its configuration was lost)
+//                        7   = fix stale, anything else (receiver silent, or
+//                              UBX present but yielding no NAV-PVT)
+//   bits 3-7  num_sv   : satellites used, saturated at 31
+//
+// u-blox only defines fixType 0-5, so 6 and 7 are free to carry the stale
+// classification without displacing any real value.  One byte is the entire
+// budget available: FlightSample is size-locked at 80 B and growing it to 84 B
+// would add ~375 KB of chunk stride across the 10-record region, against ~200 KB
+// of headroom.
+// ----------------------------------------------------------------------------
+uint8_t SAMM10Q::archiveFixSvByte() const {
+	uint8_t code;
+	if (!isFixStale()) {
+		code = static_cast<uint8_t>(m_last.fix_type);
+		if (code > 5u) code = 5u;
+	} else {
+		code = m_stale_nmea_seen ? 6u : 7u;
+	}
+
+	uint8_t sv = m_last.num_sv;
+	if (sv > 31u) sv = 31u;
+
+	return static_cast<uint8_t>(code | static_cast<uint8_t>(sv << 3));
 }
 
 bool SAMM10Q::powerUp() {
@@ -156,7 +352,9 @@ bool SAMM10Q::configureReceiverValset(float sample_rate_hz) {
     uint8_t msg[128];
     uint16_t msg_len = 0;
 
-    if (!buildValsetInitialConfig(msg, msg_len, sample_rate_hz)) {
+    // NAV-PVT stays off for this first VALSET so nothing competes with the
+    // UBX-ACK-ACK being verified; the second VALSET below turns it on.
+    if (!buildValsetInitialConfig(msg, msg_len, sample_rate_hz, 0)) {
         return false;
     }
 
@@ -171,7 +369,7 @@ bool SAMM10Q::configureReceiverValset(float sample_rate_hz) {
     	return false;
 }
 
-bool SAMM10Q::buildValsetInitialConfig(uint8_t* out, uint16_t& out_len, float sample_rate_hz) {
+bool SAMM10Q::buildValsetInitialConfig(uint8_t* out, uint16_t& out_len, float sample_rate_hz, uint8_t nav_pvt_rate) {
     if (sample_rate_hz < 1.0f) sample_rate_hz = 1.0f;
     if (sample_rate_hz > 20.0f) sample_rate_hz = 20.0f;
 
@@ -205,13 +403,21 @@ bool SAMM10Q::buildValsetInitialConfig(uint8_t* out, uint16_t& out_len, float sa
     ok &= appendCfgItem(payload, sizeof(payload), p, CfgItemL{UbxCfgKey::CFG_UART1OUTPROT_UBX, false});
     ok &= appendCfgItem(payload, sizeof(payload), p, CfgItemL{UbxCfgKey::CFG_UART1OUTPROT_NMEA, false});
 
+    // Dynamic platform model for the current flight regime.  Carried in this
+    // VALSET rather than only in the standalone one so the stale-fix watchdog,
+    // which re-sends this whole block, restores the model the flight is actually
+    // in — a receiver that reset mid-descent must not come back in Airborne4g.
+    ok &= appendCfgItem(payload, sizeof(payload), p,
+                        CfgItemE1{UbxCfgKey::CFG_NAVSPG_DYNMODEL, static_cast<uint8_t>(m_dyn_model)});
+
     // Rate configuration
     ok &= appendCfgItem(payload, sizeof(payload), p, CfgItemU2{UbxCfgKey::CFG_RATE_MEAS, measRateMs});
     ok &= appendCfgItem(payload, sizeof(payload), p, CfgItemU2{UbxCfgKey::CFG_RATE_NAV, 1});
     ok &= appendCfgItem(payload, sizeof(payload), p, CfgItemE1{UbxCfgKey::CFG_RATE_TIMEREF, 1});
 
-    // Disable UBX-NAV-PVT output on I2C/DDC to mitigate conflicts when verifying UBX-ACK-ACK.
-    ok &= appendCfgItem(payload, sizeof(payload), p, CfgItemU1{UbxCfgKey::CFG_MSGOUT_UBX_NAV_PVT_I2C, 0});
+    // UBX-NAV-PVT output rate on I2C/DDC.  0 during init (see caller), 1 when the
+    // stale-fix watchdog re-asserts the whole configuration in one shot.
+    ok &= appendCfgItem(payload, sizeof(payload), p, CfgItemU1{UbxCfgKey::CFG_MSGOUT_UBX_NAV_PVT_I2C, nav_pvt_rate});
 
     if (!ok) {
         out_len = 0;
@@ -296,9 +502,14 @@ bool SAMM10Q::sendUbxAndWaitAck(const uint8_t* msg, uint16_t len, uint8_t cls, u
     return waitForAck(cls, id, timeout_ms);
 }
 
-bool SAMM10Q::sendUbx(const uint8_t* msg, uint16_t len) {
+bool SAMM10Q::sendUbx(const uint8_t* msg, uint16_t len, uint32_t budget_ms) {
   constexpr uint32_t kByteTimeoutMs = kSensorBusTimeoutMs;
   constexpr uint32_t kStopTimeoutMs = kSensorBusTimeoutMs;
+
+  const uint32_t call_start = HAL_GetTick();
+  const auto over_budget = [&]() {
+      return (budget_ms != 0u) && ((HAL_GetTick() - call_start) >= budget_ms);
+  };
 
   i2cReset();
 
@@ -314,6 +525,7 @@ bool SAMM10Q::sendUbx(const uint8_t* msg, uint16_t len) {
       while (!LL_I2C_IsActiveFlag_TXIS(m_hi2c->Instance)) {
           if (LL_I2C_IsActiveFlag_NACK(m_hi2c->Instance)) return false;
           if ((HAL_GetTick() - t0) >= kByteTimeoutMs) { i2cReset(); return false; }
+          if (over_budget()) { i2cReset(); return false; }
       }
       LL_I2C_TransmitData8(m_hi2c->Instance, msg[i]);
   }
@@ -322,6 +534,7 @@ bool SAMM10Q::sendUbx(const uint8_t* msg, uint16_t len) {
       const uint32_t t0 = HAL_GetTick();
       while (!LL_I2C_IsActiveFlag_STOP(m_hi2c->Instance)) {
           if ((HAL_GetTick() - t0) >= kStopTimeoutMs) { i2cReset(); return false; }
+          if (over_budget()) { i2cReset(); return false; }
       }
   }
   LL_I2C_ClearFlag_STOP(m_hi2c->Instance);

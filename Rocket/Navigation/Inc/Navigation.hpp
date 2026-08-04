@@ -97,6 +97,26 @@ public:
         return m_gps.raw();
     }
 
+    // Packed fix-quality / satellite-count / stream-classification byte archived
+    // with every flight sample; see gps_fix_sv in ArchiveTypes.hpp.
+    uint8_t getGpsArchiveFixSvByte() const { return m_gps.archiveFixSvByte(); }
+
+    // Arm/disarm the GPS stale-fix watchdog.  Driven by setPhase() on every state
+    // transition, and indirectly by FlightManager::ResetFlight() — which returns
+    // the state machine to WaitingLaunch without a setPhase() call, so a re-arm
+    // after landing would otherwise leave the watchdog armed on the pad.
+    void setGpsRecoveryEnabled(bool enabled) { m_gps.setRecoveryEnabled(enabled); }
+
+    // Restore the pad configuration after a flight, for the same reason: a re-arm
+    // reaches WaitingLaunch without passing through setPhase().  The dynamic model
+    // matters here because a locator re-armed after landing would otherwise sit on
+    // the pad in Pedestrian, whose 20 m/s vertical limit is exceeded before launch
+    // detect fires and restores Airborne4g.
+    void resetGpsForPad() {
+        setGpsRecoveryEnabled(false);
+        m_gps.setDynamicModel(SAMM10Q::DynModel::Airborne4g);
+    }
+
     void MS5611OCCallback();
     void SetD1Converted();
 

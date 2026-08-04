@@ -687,7 +687,10 @@ void UserInteraction::ExportData(uint16_t archive_position) {
 						Fmt(sample_buffer[i].quat_q15[0] / 32767.0f, 0, 4), ",",   // q_w
 						Fmt(sample_buffer[i].quat_q15[1] / 32767.0f, 0, 4), ",",   // q_x
 						Fmt(sample_buffer[i].quat_q15[2] / 32767.0f, 0, 4), ",",   // q_y
-						Fmt(sample_buffer[i].quat_q15[3] / 32767.0f, 0, 4), crlf_);// q_z
+						Fmt(sample_buffer[i].quat_q15[3] / 32767.0f, 0, 4), ",",   // q_z
+						// GPS fix quality / satellite count — see export_header_text_.
+						static_cast<uint32_t>(FlightArchive::GpsFixTypeOf(sample_buffer[i].gps_fix_sv)), ",",
+						static_cast<uint32_t>(FlightArchive::GpsNumSvOf(sample_buffer[i].gps_fix_sv)), crlf_);
 		    }
 		    start += got;
 		}

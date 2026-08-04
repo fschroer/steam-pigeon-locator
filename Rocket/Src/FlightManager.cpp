@@ -673,6 +673,11 @@ void FlightManager::UpdateFlightState() {
         const GpsSample gps_raw = nav_.getRawGps();
         s.lat_rad = gps_raw.lat_rad;
         s.lon_rad = gps_raw.lon_rad;
+        // Fix quality, satellite count, and — once the fix goes stale — what the
+        // receiver is actually emitting.  lat/lon above latch at their last parsed
+        // value, so without this a frozen position is indistinguishable in the
+        // record from a stationary rocket.
+        s.gps_fix_sv = nav_.getGpsArchiveFixSvByte();
         // fused_altitude_agl / fused_vertical_speed_mps are left as BuildSample set
         // them — the EKF's fused solution (nav_solution.altitude_agl_m /
         // vertical_speed_mps).  The EKF is retired from the real-time authority
@@ -765,6 +770,11 @@ void FlightManager::DeployIfClear(uint8_t channel) {
 
 void FlightManager::ResetFlight() {
     flight_state_           = FlightStates::WaitingLaunch;
+    // Back to the pad: stand the GPS stale-fix watchdog down and return the
+    // receiver to the ascent dynamic model.  This path sets flight_state_ directly
+    // rather than going through nav_.setPhase(), so without this a re-arm after
+    // landing would keep the watchdog armed and leave the receiver in Pedestrian.
+    nav_.resetGpsForPad();
     deployment_ch1_stats_   = 0;
     deployment_ch2_stats_   = 0;
     deployment_ch3_stats_   = 0;

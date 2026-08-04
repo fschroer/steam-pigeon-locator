@@ -13,7 +13,13 @@ extern "C" {
 #include "Deployment.hpp"
 #include "PasswordKdf.hpp"
 
-#define UART_LINE_MAX_LENGTH 255
+// Longest single WriteMany() a UART screen emits.  StaticString<N> holds N-1
+// characters plus a terminator, and AppendMany() silently discards the overflow
+// (its false return is not checked at any call site), so this must have real
+// headroom over the widest line.  The binding case is the CSV export header —
+// clear_screen_ + export_header_text_ + crlf_ in one call — which is guarded by
+// a static_assert below; data rows run ~180 characters.
+#define UART_LINE_MAX_LENGTH 320
 #define USER_INPUT_MAX_LENGTH 15
 #define DATE_STRING_LENGTH 23
 #define ALTIMETER_STRING_LENGTH 7
@@ -121,7 +127,26 @@ private:
   // fused_agl_m / fused_vspeed_mps are the EKF fused solution (retired from the
   // real-time authority per ADR-0005 but still computed every cycle and logged here
   // for offline observation, ADR-0004).  tilt_deg / q_* are the NFR-9 strapdown.
-  const char* export_header_text_ = "time_ms,raw_baro_agl_m,fused_agl_m,raw_baro_vel_mps,fused_vspeed_mps,accel_x_g,accel_y_g,accel_z_g,gyro_x_dps,gyro_y_dps,gyro_z_dps,lat_deg,lon_deg,flight_state,oc_start_us,oc_end_us,process_start_us,process_dur_us,tilt_deg,q_w,q_x,q_y,q_z\0";
+  // fix_type: 0-5 = live u-blox fixType; 6 = fix stale with NMEA on the wire
+  // (receiver reset to defaults); 7 = fix stale otherwise.  Any value >= 6 means
+  // lat_deg/lon_deg on that row are latched, not live.  New columns are appended
+  // rather than inserted so existing analysis spreadsheets keep working.
+  //
+  // Declared as an array rather than a pointer so its length is a compile-time
+  // constant the static_assert below can check.  Adding fix_type,num_sv pushed
+  // this to 255 characters, and with clear_screen_ (5) and crlf_ (2) the single
+  // WriteMany() that emits it needed 262 against 254 usable — the 2026-08-02
+  // export stopped at "fix_type," and lost both num_sv and its line ending, so
+  // the first data row ran onto the header line.
+  static constexpr char export_header_text_[] = "time_ms,raw_baro_agl_m,fused_agl_m,raw_baro_vel_mps,fused_vspeed_mps,accel_x_g,accel_y_g,accel_z_g,gyro_x_dps,gyro_y_dps,gyro_z_dps,lat_deg,lon_deg,flight_state,oc_start_us,oc_end_us,process_start_us,process_dur_us,tilt_deg,q_w,q_x,q_y,q_z,fix_type,num_sv";
+
+  // clear_screen_ ("\x1b[2J\r") + crlf_ ("\r\n") share the header's line buffer.
+  static constexpr size_t kExportHeaderOverheadChars = 5u + 2u;
+  static_assert(sizeof(export_header_text_) - 1u + kExportHeaderOverheadChars
+                    <= UART_LINE_MAX_LENGTH - 1u,
+                "CSV export header + clear-screen + CRLF exceeds the UART line buffer. "
+                "AppendMany() truncates silently, so raise UART_LINE_MAX_LENGTH before "
+                "adding columns.");
 
   const char* test_menu_intro_ = "Rocket Locator Test Menu\r\n\r\n\0";
   const char* test_deploy1_text_ = "1) Test Deployment Channel 1\r\n\0";

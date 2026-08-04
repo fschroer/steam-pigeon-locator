@@ -224,6 +224,31 @@ bool Navigation::Init(const uint16_t output_rate_hz) {
 void Navigation::setPhase(FlightStates state) {
     m_ekf.setPhase(state);
 
+    // Arm the GPS stale-fix watchdog from launch onward, including Landed — a
+    // frozen position hurts most during the recovery walk-out, which is exactly
+    // when the locator cannot be power-cycled to clear it.  It stays off in
+    // WaitingLaunch, where a stalled fix is visible on the pad and a restart is
+    // free.
+    setGpsRecoveryEnabled(state != FlightStates::WaitingLaunch);
+
+    // GPS dynamic platform model, matched to the regime.  The receiver invalidates
+    // its position solution when the active model's velocity/altitude sanity check
+    // fails, so this is not a tuning nicety: the factory-default Portable model
+    // caps vertical velocity at 50 m/s and cost the 2026-08-02 flight its fix for
+    // 7.75 s of ascent.  Landed is tested first because it also satisfies the
+    // "past drogue backup" comparison below.
+    if (state == FlightStates::Landed) {
+        m_gps.setDynamicModel(SAMM10Q::DynModel::Pedestrian);
+    } else if (state > FlightStates::DrogueBackupEvent) {
+        // Under the main canopy — inside Portable's limits, and its tighter model
+        // reports a lower position deviation than the airborne ones.
+        m_gps.setDynamicModel(SAMM10Q::DynModel::Portable);
+    } else {
+        // Pad, ascent, and drogue descent, where vertical speed can exceed what
+        // every non-airborne model will accept.
+        m_gps.setDynamicModel(SAMM10Q::DynModel::Airborne4g);
+    }
+
     switch (state) {
         case FlightStates::WaitingLaunch:
         case FlightStates::Landed:

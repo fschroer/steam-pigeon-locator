@@ -71,7 +71,19 @@ namespace FlightArchive
 		//   q_{w,x,y,z}= quat_q15[i] / 32767.0      (Y-reflected strapdown quaternion)
 		int16_t  tilt_cdeg;        // tilt-from-vertical, 0.01°/LSB (0..18000)            (offset 69, +2)
 		int16_t  quat_q15[4];      // strapdown quaternion w,x,y,z, q × 32767             (offset 71, +8 = 79)
-		uint8_t  _pad[1];          // pad struct size to a multiple of 4                  (offset 79, +1 = 80)
+		// ── GPS fix quality + stream classification ──────────────────────────────
+		// Was _pad[1].  Repurposing the reserved byte rather than growing the struct
+		// is deliberate: at 84 B the chunk stride gains 24 B across 1600 chunks × 10
+		// records ≈ 375 KB, against the ~200 KB of headroom noted below.  Offsets are
+		// unchanged and the byte previously read back as 0, so ARCHIVE_VERSION is NOT
+		// bumped — bumping it fails ValidateHeaderForConfig and would orphan every
+		// record already on the device.  Records written before this change decode as
+		// fix_type 0 / num_sv 0.
+		//   bits 0-2  0-5 = live u-blox fixType (NAV-PVT parsed within 3 s)
+		//             6   = fix stale, NMEA on the wire (receiver reset to defaults)
+		//             7   = fix stale, otherwise (receiver silent, or no NAV-PVT)
+		//   bits 3-7  satellites used, saturated at 31
+		uint8_t  gps_fix_sv;       //                                                     (offset 79, +1 = 80)
 	};
 
 #pragma pack(pop)
@@ -82,6 +94,12 @@ namespace FlightArchive
     // drops samples/chunk and can overflow the region (Archive::Init() would then
     // fail and disable recording) — and changes the wire format the app parses.
     static_assert(sizeof(FlightSample) == 80, "FlightSample layout changed — re-check flash capacity AND the app archive parser, and bump ARCHIVE_VERSION.");
+
+    // Decoders for FlightSample::gps_fix_sv.
+    inline constexpr uint8_t GpsFixTypeOf(uint8_t gps_fix_sv) { return static_cast<uint8_t>(gps_fix_sv & 0x07u); }
+    inline constexpr uint8_t GpsNumSvOf(uint8_t gps_fix_sv)   { return static_cast<uint8_t>(gps_fix_sv >> 3); }
+    // True when the sample's position is a latched value, not a live fix.
+    inline constexpr bool    GpsFixStale(uint8_t gps_fix_sv)  { return GpsFixTypeOf(gps_fix_sv) >= 6u; }
 
     using ExampleEventStats = EventStatTraits<Statistic, 8u>;
 }
