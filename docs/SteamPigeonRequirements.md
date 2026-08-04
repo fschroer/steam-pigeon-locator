@@ -1,7 +1,7 @@
 # Steam Pigeon — Requirements
 
-- **Version:** 2.3.5
-- **Date:** 2026-07-05
+- **Version:** 2.3.7
+- **Date:** 2026-08-04
 - **Supersedes:** the prose outline in `Steam Pigeon Requirements.docx` (this markdown is now the maintained source).
 - **Status key:** each requirement carries a stable ID (`FR-*` functional, `NFR-*` non-functional, `HW-*` hardware). **IDs are append-only, opaque labels — never renumbered.** The historical `FR-P#` numbers embed the priority a requirement was *created* at; as of v2.1 that coupling is retired — the **`Pri` column is the authoritative ranking** (it changes when priorities are reordered) and the **`Status` column** is *Active*, *Deferred*, or *Withdrawn*. A new requirement takes the next free ID regardless of its priority (e.g. `FR-P13` enters at Pri 3).
 
@@ -135,6 +135,7 @@ The original outline's ranked goals were captured as `FR-P1…FR-P12` with the I
 
 | Version | Date | Change |
 |---------|------|--------|
+| 2.3.7 | 2026-08-04 | No requirement text change — **FR-L6** already says the locator authenticates "its broadcasts", and this makes that literally true. `TelemetryData` now carries the same `locator_id` + `auth_tag` pair as `PreLaunchData`, so an **armed** locator can be recognised: previously an app started while the locator was armed had nothing to authenticate and displayed "No Locator" for the whole flight. **Breaking wire change — locator and receiver must be flashed together.** Airtime measurement and the reversal of the original "leave telemetry unchanged" reasoning in [ADR-0006](adr/0006-locator-connect-password.md). |
 | 2.3.6 | 2026-07-05 | Extended **FR-L4**: the locator must be re-flyable after a landing without a power cycle (disarm→arm resets the flight state machine + per-flight state and opens a new record). Implements [ADR-0007](adr/0007-prelaunch-ring-monotonic-clock.md) Decision 4 (`FlightManager::PrepareForArm`), pairing with the [ADR-0010](adr/0010-archive-flash-robustness.md) record-reuse lifecycle. Also records that the ADR-0007 pre-launch-ring + monotonic-clock code was implemented (host suite 638/638, incl. Test 5). No priority or wire-format change; bench validation folds into **[#19](https://github.com/fschroer/steam-pigeon-locator/issues/19)**. |
 | 2.3.5 | 2026-07-05 | Added **NFR-11** (app BLE link resilience: keep an idle receiver connection alive through locator silence; verify liveness by probing the receiver rather than treating GATT silence as a dead link) and extended **FR-R2** (the receiver must answer receiver-info requests regardless of locator activity, which NFR-11 depends on). App-only behavior change (`BluetoothConnectionManager` health-probe watchdog); no wire-format change. Rationale in [ADR-0012](adr/0012-app-ble-connection-health-probe.md); fixes the disconnect/reconnect loop reported when no locator is transmitting. Bench-confirmed. |
 | 2.3.4 | 2026-07-05 | Extended **FR-L2**: a deployment channel may be left **unused** (excluded from the firing schedule), now settable from the locator's USB-C config menu as well as the app. No priority changes; no wire-format change (`DeployMode::Unused` already existed). Routine UI-parity change — no ADR. |

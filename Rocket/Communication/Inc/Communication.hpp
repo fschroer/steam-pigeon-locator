@@ -368,22 +368,33 @@ private:
 		return crc;
 	}
 
-	// Password-seeded authentication tag for PreLaunchData.  Independent of the
-	// packet_header.crc (which stays 0xFFFF-seeded so the receiver can validate
-	// and re-wrap the frame without knowing the password).  Computed over the
-	// whole PreLaunchData struct with packet_header.crc AND auth_tag zeroed, using
-	// two CRC-16 passes seeded from the low/high halves of the password key.  The
-	// app reproduces this byte-for-byte over the received base region (see
-	// LocatorAuth.authTag).  key == 0 means "open" (no password set).
-	inline uint32_t ComputePasswordAuthTag(const PreLaunchData &msg, uint32_t key) {
-		PreLaunchData tmp = msg;
+	// Password-seeded authentication tag for the locator's unsolicited broadcasts
+	// — PreLaunchData while disarmed, TelemetryData while armed.  Independent of
+	// the packet_header.crc (which stays 0xFFFF-seeded so the receiver can validate
+	// and re-wrap the frame without knowing the password).  Computed over the whole
+	// message struct with packet_header.crc AND auth_tag zeroed, using two CRC-16
+	// passes seeded from the low/high halves of the password key.  The app
+	// reproduces this byte-for-byte over the received base region (see
+	// LocatorAuth.expectedAuthTag).  key == 0 means "open" (no password set).
+	//
+	// Templated over the message type rather than duplicated: the two structs are
+	// authenticated by exactly the same rule, and a second hand-written copy is a
+	// standing invitation for them to drift apart.  Requires `auth_tag` to be the
+	// final member, which the app relies on too.
+	template<typename Msg>
+	inline uint32_t ComputePasswordAuthTag(const Msg &msg, uint32_t key) {
+		Msg tmp = msg;
 		tmp.packet_header.crc = 0;
 		tmp.auth_tag = 0;
 		const uint8_t *bytes = reinterpret_cast<const uint8_t*>(&tmp);
-		const uint16_t lo = Crc16Continue(static_cast<uint16_t>(key & 0xFFFFu), bytes, sizeof(PreLaunchData));
-		const uint16_t hi = Crc16Continue(static_cast<uint16_t>(key >> 16), bytes, sizeof(PreLaunchData));
+		const uint16_t lo = Crc16Continue(static_cast<uint16_t>(key & 0xFFFFu), bytes, sizeof(Msg));
+		const uint16_t hi = Crc16Continue(static_cast<uint16_t>(key >> 16), bytes, sizeof(Msg));
 		return (static_cast<uint32_t>(hi) << 16) | lo;
 	}
+	static_assert(offsetof(PreLaunchData, auth_tag) + sizeof(uint32_t) == sizeof(PreLaunchData),
+			"auth_tag must be the last field of PreLaunchData");
+	static_assert(offsetof(TelemetryData, auth_tag) + sizeof(uint32_t) == sizeof(TelemetryData),
+			"auth_tag must be the last field of TelemetryData");
 
 	inline bool ValidateCRC(const uint8_t *data, std::size_t len) {
 		if (len < sizeof(PacketHeader))

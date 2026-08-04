@@ -144,6 +144,15 @@ void Communication::SendTelemetryData() {
 	msg.q_bn = nav_.getStrapdownQuat();
 	msg.flight_state = flight_.GetFlightState();
 
+	// Same identity/authenticator pair, and same order of operations, as
+	// SendPreLaunchData: tag computed with crc and auth_tag zeroed, then the CRC
+	// taken over the final bytes so link integrity still covers the whole frame.
+	// An armed locator sends only this message, so this is the app's sole means of
+	// recognising it between arming and landing (ADR-0006).
+	msg.locator_id = deviceUID_.getUID();
+	msg.auth_tag = 0;
+	msg.auth_tag = ComputePasswordAuthTag(msg, archive_.GetPasswordKey());
+
 	msg.packet_header.crc = ComputeMessageCrc(msg);
 	RgbLed(RgbColor::Blue); // Blink LoRa transmit LED for visual validation
 	radio_->Send(reinterpret_cast<uint8_t*>(&msg), sizeof(TelemetryData));

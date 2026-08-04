@@ -143,6 +143,18 @@ struct TelemetryData {
 	Vec3f vel_ned_mps;    // fused NED velocity (north, east, down) m/s
 	Quaternionf q_bn;     // body-to-NED attitude quaternion (w, x, y, z)
 	FlightStates flight_state;
+	// Identity + authenticator, mirroring PreLaunchData's trailing pair and
+	// computed the same way (ADR-0006).  Carried here too so the app can
+	// recognise an ARMED locator: an armed locator sends nothing but
+	// TelemetryData, so without these the app has no way to tell whose telemetry
+	// it is holding — it either shows an unauthenticated stream or, as it did,
+	// shows nothing at all until the locator is disarmed.
+	//
+	// auth_tag MUST remain the last field: both firmwares and the app compute the
+	// tag over the base struct with packet_header.crc and the trailing 4 bytes
+	// zeroed, and locate it by offset from the end.
+	uint32_t locator_id;   // cleartext STM MPU UID (== DeviceUID::getUID())
+	uint32_t auth_tag;     // password-seeded checksum; 0 while computing
 };
 
 struct FlightMetadataRecord {
@@ -248,7 +260,7 @@ static_assert(kPayloadSize                           == 239, "FlightData payload
 static_assert(sizeof(StartupMessage)                 ==  74, "StartupMessage size changed");
 static_assert(sizeof(VersionInfoMessage)             ==  70, "VersionInfoMessage size changed");
 static_assert(sizeof(PreLaunchData)                  == 115, "PreLaunchData size changed (app payload 109 = 101 + locator_id 4 + auth_tag 4)");
-static_assert(sizeof(TelemetryData)                  ==  68, "TelemetryData size changed (app payload 62 + rssi 2 = 64)");
+static_assert(sizeof(TelemetryData)                  ==  76, "TelemetryData size changed (app payload 70 = 62 + locator_id 4 + auth_tag 4; + rssi 2 = 72)");
 static_assert(sizeof(FlightMetadataRecord)           ==  10, "FlightMetadataRecord size changed");
 static_assert(sizeof(FlightMetadata)                 == 106, "FlightMetadata size changed (app payload 100)");
 static_assert(kFlightEventCount                      ==  11, "FlightEvent count changed — sync app FlightEventIndex");
