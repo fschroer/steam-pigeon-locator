@@ -210,12 +210,21 @@ private:
     uint8_t m_burnout_count_ = 0;
 
     // Landing detection threshold and debounce
-    static constexpr float    kLandedSpeedMps          = 0.25f;  // |fused vert speed| at rest
+    static constexpr float    kLandedSpeedMps          = 0.25f;  // |fused vert speed| at rest — UNUSED, fused term retired (ADR-0005)
+    // These two are a tuned PAIR ([ADR-0018](../../docs/adr/0018-landing-detection-quiescence-window.md)) — never change one
+    // without re-validating both against the recorded flights.  A main-canopy
+    // inflation plateau also reaches ~0 m/s, so velocity alone cannot separate it
+    // from a landed rocket; only sustained duration can.  Validated window at
+    // 1.0 m/s is 13-28 samples: above the 12-sample canopy plateau of 2026-08-01
+    // (false landing at 66 m AGL, which 20 @ 2.0 m/s fired on), at or below the
+    // 28-sample ground quiescence of the tightest real landing on record.  20 is
+    // centred in that window; 40 would have MISSED a landing that actually happened.
     static constexpr uint8_t  kLandedConfirmSamples    = 20;     // 1.0 s sustained quiescence
-    // Raw baro backup: used when EKF has accumulated an offset from deployment shock.
     // AGL threshold removed — landing may be on terrain higher than the pad, so an
     // absolute AGL ceiling would prevent detection on uphill landing sites.
-    static constexpr float    kLandedRawBaroSpeedMps   = 2.0f;   // m/s on raw baro (10-sample window)
+    static constexpr float    kLandedRawBaroSpeedMps   = 1.0f;   // m/s on raw baro (velocity is a 10-sample/500 ms
+                                                                 // average — VelocityEstimator<10> in MS5611.hpp —
+                                                                 // which is independent of the confirm count above)
     // Maximum recordable flight duration; matches archive minutesPerRecord=8.
     // When reached, the flight is force-closed so the landing timestamp can never
     // exceed the span of the recorded data.
