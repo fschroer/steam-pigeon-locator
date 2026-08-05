@@ -800,6 +800,8 @@ Normal causes:
 - **Orientation.** The rocket's antenna sweeping away from you.
 - **Your body.** Receiver in a pocket, or you standing between it and the rocket.
 
+💡 The signal readout tells you which of these you're looking at. Under the dBm figure the app will say *"Interference on this channel"* only when the signal is arriving **strong but noisy** — the fingerprint of another transmitter. A weak, noisy signal is just distance, and the app stays quiet about it, because that is what every healthy flight looks like at apogee. **So no interference note during a dropout means range, not congestion — and the answer to range is to wait.** See §2.5 for what to do about a note that does appear.
+
 **What to do: nothing.** Keep the receiver up and vertical, keep watching the sky. Don't start disconnecting and reconnecting — the app maintains its own link health and will recover on its own. The **last known position is retained**, and that's what you'll walk toward.
 
 **The app tells you, once.** After 3 s with no valid message it says "*Telemetry lost*" — with the last known distance and direction if the rocket was in the air — and then stays quiet rather than repeating. When packets start arriving again you get "*Telemetry restored*". A dropout of a few seconds is routine; hearing it is information, not an instruction to do anything.
@@ -982,6 +984,8 @@ This gives you everything the locator recorded, at full rate, for analysis in a 
 | "Another locator … is not being displayed" | Someone else is on your channel — change **Locator Settings → channel** (§2.5). Or one of your *own* spare locators is powered up near the receiver, in which case the channel is irrelevant: move it away (§2.5). To switch to that locator on purpose, tap **Connect** (§2.6). |
 | App shows a locator that isn't on your channel | A powered locator within a few feet of the receiver gets in regardless of channel (§2.5, Appendix G). Move it away. |
 | Telemetry patchy on the pad or the flight line | Check for another powered locator near the receiver — it deafens the receiver every time it transmits (§2.5). |
+| "Interference on this channel" under the signal reading | Something other than your rocket is transmitting in your channel. Move to another channel (§2.5), or find and move the nearby transmitter. Appears only when the signal is strong *and* noisy (§8.4). |
+| "Channel is busy, but your link is clean" | Informational. Other traffic is present but isn't hurting you. No action needed. |
 | Receiver's new name won't show up | Bluetooth name cache. "Forget" the receiver in your phone's Bluetooth settings, then reconnect (§2.7). |
 | Bluetooth seems to keep dropping | Silence is not a dropped link (§3.8). If it's genuinely reconnecting, check the receiver's battery. |
 | Few satellites / poor accuracy | Get the fix in the open before installing (§4.5). Antenna view obstructed (§1.7, §4.7). |

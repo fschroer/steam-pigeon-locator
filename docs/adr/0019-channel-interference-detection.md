@@ -1,0 +1,76 @@
+# ADR-0019: Channel interference detection — report SNR and noise floor, classify in the app
+
+- **Status:** Accepted
+- **Date:** 2026-08-04
+- **Deciders:** fschroer
+- **Related issues:** see also [ADR-0006](0006-locator-connect-password.md) (identity gate, and the near-field RF numbers), [ADR-0009](0009-flight-data-transfer-reliability.md) (the half-duplex safe window this reuses), [ADR-0011](0011-locator-lora-channel-from-app.md) (the channel-change machinery a channel recommendation would drive)
+
+## Context
+
+The app can currently tell the user *nothing* about why a link is poor. It sees packet RSSI and packet loss, and both look the same whether the rocket is far away, the antenna is obstructed, or another device is sitting in the channel. The user's request: warn when the current channel is degraded, and ideally point at a cleaner one.
+
+Interference has two sources, and only one of them is addressed by the identity gate added in [ADR-0006](0006-locator-connect-password.md):
+
+- **Other locators**, on this channel or — at close range — on any channel at all. The near-field capture mechanism and its numbers are in ADR-0006's "One connection at a time" addendum and the user manual's Appendix G.
+- **Non-locator devices** in 902–928 MHz. This band is shared with a great deal of unlicensed traffic, and nothing in the protocol can identify or exclude it.
+
+Four facts constrain the design.
+
+**1. The SNR is already measured and already discarded.** `Communication::OnRadioRxDone` receives `int8_t LoraSnr_FskCfo` and stores it into `LoraSnr_FskCfo_`, which nothing reads. The measurement has been arriving on every packet and being thrown away.
+
+**2. SNR alone is a false-alarm generator.** At SF7 the LoRa demodulator works down to about **−7.5 dB** SNR, and a healthy flight *ends* near that floor: apogee at several miles is exactly when SNR is worst. An alert keyed on low SNR would fire on every good flight, which is worse than no alert — it trains the user to dismiss the banner. Distance and interference are only separable by looking at RSSI and SNR **together**:
+
+| Packet RSSI | SNR | Interpretation | Alert |
+|---|---|---|---|
+| Weak | Low | Far away — normal at apogee | **No** |
+| Weak | High | Clean, quiet, distant | No |
+| Strong | High | Healthy close link | No |
+| **Strong** | **Low** | Another emitter is in the channel | **Yes** |
+
+In a clean channel the two are tied: SNR tracks `RSSI − noise floor` until it saturates at the modem's reported ceiling. A packet arriving *loud but dirty* is the interference signature.
+
+**3. Only the noise floor sees non-LoRa interferers.** Packet-derived SNR describes frames that were successfully received; it says nothing about a channel too busy to receive in. The instantaneous RSSI read (`Radio.Rssi()`, exposed by the SubGHz PHY) sampled while idle in RX measures the channel's occupancy directly and is agnostic to what is producing it. **CAD is the wrong instrument here** — `StartCad()` detects LoRa preambles at a matching spreading factor and is blind to every non-LoRa emitter, which is precisely the case being asked about.
+
+**4. Anything the receiver does off-channel costs packets.** The locator broadcasts at ~1 Hz with 138.5 ms of airtime ([ADR-0006](0006-locator-connect-password.md)), so there is ~860 ms of idle time per second — genuinely enough to scan in. But a receiver that is off-channel when the locator transmits loses that frame outright, and [ADR-0011](0011-locator-lora-channel-from-app.md) invariant 2 forbids changing frequency between `Send()` and TxDone.
+
+**Scope.** Interference is a **pre-flight** problem in practice. Typically one rocket is airborne at a time, and rockets land far apart, so the crowded moment is on the ground before launch. More decisively: locator configuration — including the channel — is accepted only while **Disarmed**, so *nothing can be done about in-flight interference even if it is detected*. In-flight measurement is therefore diagnostic-only, for the next flight. (Note the premise is not universally true — a locator at altitude has line-of-sight to far more distant ISM traffic than one on the pad, so non-locator interference plausibly *rises* during a flight. The conclusion survives anyway, because the response is unavailable in flight either way.)
+
+## Decision
+
+**1. The receiver reports two new measurements; the app decides what they mean.** Firmware measures, the app classifies. Thresholds are then tunable without reflashing two devices, and the app has the packet history needed to compare against a baseline.
+
+**2. Both fields are receiver-appended, so the locator does not change.** `snr` (`int8_t`, mirroring the callback's type) and `noise_floor` (`int16_t` dBm, mirroring the existing `rssi`) are appended to `PreLaunchMessageExtended` and `TelemetryMessageExtended`. These sit **outside the authenticated region** ([ADR-0006](0006-locator-connect-password.md) Decision 2), so `auth_tag` is unaffected and **locator firmware is untouched**. This is a **receiver + app** change, not a three-repo one.
+
+Sizes: `PreLaunchMessageExtended` 140 → 143 (app payload 134 → 137); `TelemetryMessageExtended` 78 → 81 (app payload 72 → 75). The extended structs were previously *not* size-pinned even though the app parses them by hand-computed offsets; `static_assert`s are added for both, closing a real gap rather than only serving this change.
+
+**3. The noise floor is sampled inside the existing safe idle window.** [ADR-0009](0009-flight-data-transfer-reliability.md)'s collision-avoidance model already establishes `[kPostPrelaunchMinMs = 50, kPostPrelaunchMaxMs = 700)` ms after each periodic locator packet as the interval in which the locator is known to be listening rather than transmitting. Sampling there — rather than inventing a second timing model — guarantees the receiver is not measuring the locator's own carrier. Samples are also suppressed for `kPostTxRxGuardMs` after the receiver's own TX.
+
+**4. Report the maximum over the reporting interval, not the mean.** Interference is bursty; a mean over 1 s buries a 50 ms burst that is destroying packets. The maximum is the pessimistic statistic and is the one that correlates with packet loss.
+
+**5. The alert fires on the conjunction, never on SNR alone.** Two independent signals with distinct messages:
+
+- Floor elevated, SNR healthy → *"channel is busy, your link is fine."* Informational, no call to action.
+- Floor elevated **and** SNR degraded at strong RSSI → *"interference is degrading your link."* Recommend a channel change.
+- Floor quiet, SNR low, RSSI weak → distance. **Silent.**
+
+The baseline for "elevated" is the **minimum floor observed this session**, not a hardcoded dBm constant: SX126x RSSI near the noise floor is uncalibrated and varies unit to unit, so a self-referencing baseline is the only honest comparison.
+
+**6. The channel survey (tier 3) is deferred to its own issue,** not because it is large but because its output is uninterpretable without tiers 1–2 — "channel 12 reads −95 dBm" means nothing until a quiet channel's reading on this hardware is known. When built it must: run **on demand while Disarmed only**; dwell per channel (a single instantaneous sample is worthless against bursty interference), making a 64-channel sweep ~0.6–1.3 s; return to the home channel; **rank channels relatively rather than presenting absolute dBm as truth**; and detect the all-channels-hot case and report *"a transmitter is probably next to you"* rather than *"no clean channel exists"* — the failure mode that would otherwise give confidently wrong advice in exactly the situation that prompted this work.
+
+## Consequences
+
+- The app can finally distinguish "far away" from "jammed", which is the question users actually ask when telemetry gets patchy.
+- **Breaking wire change between receiver and app — flash the receiver and update the app together.** The receiver length-validates each frame by message type, so a mismatched pair drops every broadcast, and the symptom looks exactly like a range or antenna failure ([ADR-0006](0006-locator-connect-password.md) records the same hazard). The **locator is unaffected and need not be reflashed.**
+- Extended-struct `static_assert`s now pin what the app's manual offsets assume, in both firmware copies.
+- Sampling adds a `Rssi()` call to `IRadio`. The interface gains a method, so the test mocks must implement it — deliberate, since a silent default would let the sampling path go untested.
+- The noise floor is measured **at the receiver only**. A channel that is quiet at the flight line is not necessarily quiet at the rocket, and no receiver-side measurement can say otherwise. Any future channel recommendation must not imply it predicts the flight environment.
+- **Revisit if:** the locator's periodic broadcast cadence or the ADR-0009 safe window changes materially (sampling would move with it); the modem's SF/BW changes (the −7.5 dB demod floor and the RSSI/SNR relationship both shift); or in-flight channel changes ever become possible, which would make in-flight detection actionable rather than diagnostic.
+
+## Alternatives considered
+
+- **Alert on low SNR alone.** Rejected — fires at apogee on every healthy flight (fact 2). This is the version most likely to be built by accident, and it is worse than shipping nothing.
+- **Channel Activity Detection (`StartCad()`).** Rejected as the primary instrument: LoRa-preamble-specific and blind to non-LoRa emitters, which is the stated case. Still potentially useful as a *supplement* to distinguish "another LoRa system" from "unidentified energy".
+- **Classify in the receiver, send a status enum.** Rejected: bakes thresholds into firmware, so tuning requires reflashing, and discards the raw numbers the app needs to compare against a session baseline.
+- **Continuous background scanning.** Rejected: every hop risks losing a 1 Hz broadcast, and there is no user need for continuous scanning when the decision it informs (channel choice) is made once, on the ground.
+- **Locator-side noise floor reported in its broadcasts.** Deferred, then dropped for now: it would measure the environment that actually matters at altitude, but channel changes are Disarmed-only, so it could never be acted on in flight — and it would cost locator firmware and authenticated-region bytes for a diagnostic-only reading.
+- **`IsChannelFree()` for the current channel.** Rejected for tier 2: it answers a boolean against a threshold, discarding the magnitude the app needs. It remains the natural primitive for the tier-3 sweep.
