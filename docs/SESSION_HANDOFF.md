@@ -1,6 +1,28 @@
-# Session Handoff — 2026-07-19
+# Session Handoff — 2026-08-05
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
+
+## 2026-08-05 session — six flight observations fixed; armed telemetry now authenticated — COMMITTED + PUSHED, PARTLY FLIGHT-CONFIRMED
+
+Six issues raised from flight testing of the locator/receiver/app together, plus a wire-format change that came out of one of them. Locator `967ac7c` + receiver `4cfcd89` + app `3f50212` are three halves of one change and **must be flashed together** — grep `967ac7c` across the repos to find the set. Manual refresh in locator `4f2e96a`.
+
+**CONFIRMED ON HARDWARE (user, 2026-08-05):**
+- **Armed startup.** Opening the app while the locator is already armed now shows the locator, its name and live telemetry immediately. Before, it showed **"No Locator"** for the whole flight while announcing "Armed" — an armed locator sends only `TelemetryData`, which carried no identity, so the recognition gate dropped every packet. `TelemetryData` now carries the same `locator_id` + `auth_tag` pair as `PreLaunchData` (`sizeof` 68 → 76). See [ADR-0006](adr/0006-locator-connect-password.md), which this **supersedes Decision 1 / premise 3 of** — the "telemetry range is precious" argument was retired on measurement: at SF7/125 kHz/CR 4/5 the pair costs **+15.4 ms per second against ~877 ms of dead air** (duty 12.3 % → 13.9 %), and telemetry goes out at **1 Hz** (`rocket_service_count == 2` in the 20 Hz loop), not the multi-hertz rate the original reasoning assumed. Payload length does not move the link budget at all — sensitivity is set by SF/BW/CR.
+- **Screen stays on** while the app is in the foreground (`FLAG_KEEP_SCREEN_ON`, window-scoped).
+- **Dark theme** regardless of the system setting.
+
+**NOT YET CONFIRMED — the whole rest of this session is untested in flight:**
+- **Voice gating on a real fix.** Every spoken distance now goes through one nullable phrase, non-null only when the locator reports a good fix *and* both ends of the vector are real coordinates. The "12 million meters" callout was a launch point captured with **no GPS lock, sitting at 0,0** — the great-circle distance to null island, read out as a recovery bearing.
+- **Landing callout + stale-event suppression.** The landing announcement required the rocket to already be below 30 m or 3 s from the ground *at the last packet*, so losing the link at 300 m — the normal way a descent ends — meant it never fired. It now dead-reckons the touchdown from the last altitude and descent rate (300 m at 5 m/s → ~60 s later), with a 5 s floor so a routine dropout cannot conclude a flight. Once the rocket is down, event announcements stop: a link returning post-landing used to deliver the whole flight in one burst ("main charge", "main deployed") over a rocket already in a field. Direct cause was a confirmed `Landed` state being handled *after* the per-event checks; it is handled first now.
+- **New health callouts**, edge-triggered: "GPS fix lost/restored" (only while messages are arriving — with none, the last-sent `gpsStatus` is stale) and "Telemetry lost/restored" at 3 s.
+- **Descent warnings** 30 → 50 m/s, minimum gap 4 → 10 s.
+- **Flight-path reset** now fires on any grounded → airborne transition. **Read this before relitigating it:** the old narrow rule was *not* defeated by losing a packet or two — the locator reports `Launched` for the whole boost and any one of those packets fired the reset. It needed the entire boost window lost. The stale path actually seen in the field was the recognition gate above dropping all telemetry, so nothing ever cleared the path restored from disk at startup. This rule is hardening, not that fix. Two traps closed, both pinned by tests: `NoSignal` is `FlightStates.fromUByte`'s fallback for **any** unrecognised state byte, so counting it as grounded would erase an in-flight track; and an app restarted mid-flight must not read its first packet as a launch.
+
+**Two defects the wire change exposed and fixed:** `requestConnectToConflict` could verify a typed password against a *different* locator's frame (latent before; reachable now that armed locators raise conflicts too), and a recognised armed locator had no name to display, since the status panel reads it from config and config rides on `PreLaunchData` only.
+
+Also removed: an interim provisional-recognition fallback (a persisted last-authorised locator id restored at startup). It widened the soft gate to trust an unauthenticated stream; authenticating the stream directly does not. `user_prefs` field 7 is **reserved, not reused** — installed apps may hold a value written under that number.
+
+App: 111 unit tests pass (new `LandingCalloutTest`, `NewFlightResetTest`; extended `LocatorAuthTest`, `WireLayoutTest`). Both firmwares link clean. **No GitHub issue tracks any of this** — the six observations came in directly and were fixed in one session.
 
 ## 2026-07-19 session — app map migrated to MapLibre + offline satellite; iOS port de-risked on hardware — COMMITTED + PUSHED
 
