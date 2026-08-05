@@ -22,7 +22,9 @@ Six issues raised from flight testing of the locator/receiver/app together, plus
 
 Also removed: an interim provisional-recognition fallback (a persisted last-authorised locator id restored at startup). It widened the soft gate to trust an unauthenticated stream; authenticating the stream directly does not. `user_prefs` field 7 is **reserved, not reused** — installed apps may hold a value written under that number.
 
-App: 111 unit tests pass (new `LandingCalloutTest`, `NewFlightResetTest`; extended `LocatorAuthTest`, `WireLayoutTest`). Both firmwares link clean. **No GitHub issue tracks any of this** — the six observations came in directly and were fixed in one session.
+App: 111 unit tests pass at `3f50212` (new `LandingCalloutTest`, `NewFlightResetTest`; extended `LocatorAuthTest`, `WireLayoutTest`). Both firmwares link clean. **No GitHub issue tracks any of this** — the six observations came in directly and were fixed in one session, so the confirmations are recorded in [ADR-0006](adr/0006-locator-connect-password.md) and here rather than closed out on the tracker.
+
+**Superseded in part, same day.** The ADR-0019 interference work and the one-connection-at-a-time fix landed on top of this session: locator `84b7543`/`63d3c40`, receiver `8014bd2`, app `0d1e99e` (authorization is a set, connection is one held element — corrects Decision 5 of ADR-0006), `1023a3d`, `bae661c`. The armed-startup path here feeds straight into that rework: an armed locator can now be *authorized* from telemetry alone, which was impossible when only `PreLaunchData` carried identity. Read ADR-0006's two 2026-08-04 addenda together — they were written a day apart and the second corrects a conflation the first inherited.
 
 ## 2026-07-19 session — app map migrated to MapLibre + offline satellite; iOS port de-risked on hardware — COMMITTED + PUSHED
 
