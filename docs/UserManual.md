@@ -321,17 +321,28 @@ The receiver's copy of the control looks like this:
 
 💡 At a busy launch, pick an uncontested channel *before* you power up on the pad. The app will warn you if it hears another locator on your channel (§2.6).
 
+⚠️ **A different channel does not protect you at arm's length. Keep spare locators well away from the receiver.** A powered locator sitting within a few feet of the receiver will be heard *whatever channel either one is set to* — at that distance it arrives billions of times stronger than the rocket you're tracking, and no radio can filter that out. Two consequences:
+
+- Your app may show packets from the nearby locator. It won't display the wrong rocket's data (§2.6), but you'll get a conflicting-traffic banner.
+- **More importantly, every transmission from the close-in locator deafens the receiver to your actual rocket.** During a flight that is real telemetry loss.
+
+**Rule: only the locator you're flying stays near the receiver. Spares go in the car, or stay switched off.** A few tens of feet of separation is enough. See Appendix G for why.
+
 ## 2.6 Connection password and locator recognition
 
 Each locator identifies itself with a permanent hardware ID and, optionally, a password.
 
 **What the password does:** the app only *recognizes* — displays, controls, arms — locators it is authorized for. If it hears an unknown locator, it asks you for that locator's password before it will do anything with it.
 
+**Authorized and connected are not the same thing.** The app can be authorized for any number of locators — most people who own two are authorized for both — but it displays and commands exactly **one** at a time. Once it connects to a locator, that connection is held: another locator turning up on the air, even one you're authorized for, does **not** take over the screen. This matters at close range, where you can hear a locator that isn't on your channel at all (§2.5).
+
 **How you'll experience it:**
 
 - **First time the app hears your locator**, it prompts for the password. Enter it once; the app remembers that locator.
-- **If someone else's locator is transmitting on your channel**, the app warns you: *"Another locator (ID …) is transmitting on this channel. Consider switching to an uncontested channel."*
-- **If you set no password**, the locator is open and any *Wherezit?* app will pick it up.
+- **If another locator is on the air and isn't the one you're watching**, the app warns you: *"Another locator (ID …) is on the air and is not being displayed. Connect to switch to it, or move to an uncontested channel."* Its data is not shown.
+- **To deliberately switch to that other locator**, tap **Connect** on the banner. If you're already authorized for it, the app switches immediately; if not, it asks for its password first.
+- **The connection releases on its own** if your locator goes quiet for about 15 seconds — long enough to ride out a fade, so a moment's dropout never hands the display to a different rocket.
+- **If you set no password**, the locator is open and any *Wherezit?* app will pick it up. Note that "open" means *authorized*, not *connected* — two open locators still can't fight over the display.
 
 > 📱 **Screenshot needed — `images/app-08-password-dialog.png`:** the locator password prompt. Requires a locator with a password set, being heard for the first time.
 
@@ -968,7 +979,9 @@ This gives you everything the locator recorded, at full rate, for analysis in a 
 | App says "No Locator" but the receiver is connected | Normal when the locator is off (§3.8). Otherwise: locator off, out of range, or on a different channel (§2.5). |
 | App asks for a password | First contact with a locator it doesn't know (§2.6). |
 | App opened while the locator was already armed | Supported: armed telemetry identifies itself, so the app picks up a locator it already knows and shows live data straight away. If it still reads "No Locator", that locator has never been connected on this phone — **disarm it once** so the app can prompt for its password (§2.6). |
-| "Another locator is transmitting on this channel" | Someone else is on your channel. Change **Locator Settings → channel** (§2.5). |
+| "Another locator … is not being displayed" | Someone else is on your channel — change **Locator Settings → channel** (§2.5). Or one of your *own* spare locators is powered up near the receiver, in which case the channel is irrelevant: move it away (§2.5). To switch to that locator on purpose, tap **Connect** (§2.6). |
+| App shows a locator that isn't on your channel | A powered locator within a few feet of the receiver gets in regardless of channel (§2.5, Appendix G). Move it away. |
+| Telemetry patchy on the pad or the flight line | Check for another powered locator near the receiver — it deafens the receiver every time it transmits (§2.5). |
 | Receiver's new name won't show up | Bluetooth name cache. "Forget" the receiver in your phone's Bluetooth settings, then reconnect (§2.7). |
 | Bluetooth seems to keep dropping | Silence is not a dropped link (§3.8). If it's genuinely reconnecting, check the receiver's battery. |
 | Few satellites / poor accuracy | Get the fix in the open before installing (§4.5). Antenna view obstructed (§1.7, §4.7). |
@@ -1257,6 +1270,23 @@ The locator-to-receiver link operates in the **902–928 MHz** band. Channel 0 i
 This band is licence-free for low-power devices in the United States and in other ITU Region 2 countries that follow the same allocation. **It is not licence-free everywhere** — in Europe, Japan and many other regions, 902–928 MHz is allocated to other services and operating in it is not permitted.
 
 **If you are flying outside a region where this band is licence-free, check your local regulations before transmitting.**
+
+## Why a nearby locator gets through on the wrong channel
+
+If you've ever had a locator sitting next to the receiver and seen its packets arrive on a channel the receiver wasn't set to, nothing is broken. The numbers make it unavoidable.
+
+The link uses a **125 kHz** wide signal, and channels are spaced **200 kHz** apart. That's less than two channel-widths of separation, which is fine at any normal distance — the receiver's filtering rejects an adjacent channel by a factor of several hundred thousand.
+
+But signal strength falls off with distance, and at short range the numbers get absurd. The locator transmits at **22 dBm** (about a sixth of a watt). At **one metre** the receiver hears it at roughly **−10 dBm**. The receiver's usable sensitivity is about **−123 dBm**. That is a gap of **113 dB — a factor of about 200 billion.**
+
+So the neighbouring locator is arriving some 200 billion times stronger than the faint rocket the receiver is straining to hear, and the channel filter only knocks down a few hundred thousand of that. What's left over is *still* a strong, perfectly decodable signal. On top of that, a signal that loud simply overwhelms the receiver's input stage, which then leaks energy across all channels regardless of filtering.
+
+Two practical points follow:
+
+- **Changing channels doesn't help at close range.** Separation in *distance* is what helps. A few tens of feet is plenty — the same 113 dB advantage collapses fast as the locator moves away.
+- **Nothing downstream can tell.** The receiver stamps its own channel onto every packet it relays, so neither it nor the app can report that a packet arrived off-channel. The app identifies the sender by its locator ID instead, which is what keeps the wrong rocket's data off your screen (§2.6).
+
+The practical rule is in §2.5: only the locator you're flying stays near the receiver.
 
 ---
 
