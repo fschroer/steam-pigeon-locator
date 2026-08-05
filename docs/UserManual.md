@@ -800,7 +800,12 @@ Normal causes:
 - **Orientation.** The rocket's antenna sweeping away from you.
 - **Your body.** Receiver in a pocket, or you standing between it and the rocket.
 
-💡 The signal readout tells you which of these you're looking at. Under the dBm figure the app will say *"Interference on this channel"* only when the signal is arriving **strong but noisy** — the fingerprint of another transmitter. A weak, noisy signal is just distance, and the app stays quiet about it, because that is what every healthy flight looks like at apogee. **So no interference note during a dropout means range, not congestion — and the answer to range is to wait.** See §2.5 for what to do about a note that does appear.
+💡 **The signal readout tells you which of these you're looking at.** It shows two numbers, and they mean different things:
+
+- **dBm** — how *loud* the rocket is. Mostly a function of distance, orientation and obstructions. Green near, red far.
+- **SNR** — how *clean* it is: how much margin is left before packets start dropping. It falls naturally as the rocket gets further away, and going amber or orange near apogee is **normal, not a fault**. Red means you're close to losing packets — which at apogee is simply what maximum range looks like.
+
+Under those numbers the app will say *"Interference on this channel"* only when the signal is arriving **strong but noisy** — the fingerprint of another transmitter, since a strong signal has no business being noisy. A weak, noisy signal is just distance, and the app stays quiet about it, because that is what every healthy flight looks like at apogee. **So no interference note during a dropout means range, not congestion — and the answer to range is to wait.** See §2.5 for what to do about a note that does appear.
 
 **What to do: nothing.** Keep the receiver up and vertical, keep watching the sky. Don't start disconnecting and reconnecting — the app maintains its own link health and will recover on its own. The **last known position is retained**, and that's what you'll walk toward.
 
