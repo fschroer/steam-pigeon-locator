@@ -148,6 +148,16 @@ The test to apply to any new detector: **assume the condition is fully present, 
 
 **Diagnose from the device, not from inference.** Three consecutive rounds were diagnosed by reasoning from a symptom, and two of those diagnoses were wrong — including one where the fix was applied to a `Debug` build while the hardware ran `Release`. The console traces added for the survey and for bad frames ended each of those loops in a single test.
 
+### Tier 3, item 3: decoded frames, not power (2026-08-06)
+
+The survey's last acceptance criterion — *a known interferer on one channel shows up as that channel's peak* — cannot be met with RSSI, for the reason this ADR keeps running into: a locator within a few feet raises the level on **every** channel at once, so power reports "busy" everywhere and distinguishes nothing. There is no threshold that separates "a locator is using this channel" from "a locator near me is loud on all of them".
+
+The receiver is a LoRa receiver on the same SF and bandwidth, so it can simply *decode*. **A frame that decodes during a confirm dwell was transmitted on the channel being dwelt** — off-channel bleed does not survive the demodulator however loud it is. That is occupancy as fact rather than as inference, and it is the same reframing as the foreign-`locator_id` signal above: the decisive evidence is a decoded packet, not a power measurement.
+
+`confirmed_frames[5]` rides alongside `confirmed_channel[5]`; a channel with a non-zero count is never suggested, whatever its level. The asymmetry is deliberate and load-bearing: **non-zero excludes, zero proves nothing.** The dwell is one broadcast period, so a sparser emitter still slips through, and a non-locator device decodes nothing at all — which is exactly what the level measurements remain for. Frames and power answer different questions and neither replaces the other.
+
+Two things fall out. Frames are counted **and the packet dropped**, not relayed: during a sweep these are other people's broadcasts on channels the receiver is only visiting, and forwarding them put a stranger's `PreLaunchData` in front of the app mid-scan. And the home channel is excluded on its own evidence when it is shortlisted, because the locator transmitting on it is yours — correct, if for a reason worth knowing.
+
 ### Status
 
 Tiers 1 and 2 are bench-validated ([#32](https://github.com/fschroer/steam-pigeon-locator/issues/32), closed). Tier 3's sweep is validated except for the known-interferer case, which RSSI alone cannot establish ([#33](https://github.com/fschroer/steam-pigeon-locator/issues/33), open). Thresholds remain reasoned rather than fitted, and all of them are app-side so tuning needs no reflash.
