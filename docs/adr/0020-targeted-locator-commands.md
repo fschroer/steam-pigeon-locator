@@ -56,6 +56,12 @@ The receiver still sizes each command individually, but that is a per-type lengt
 - Command frames grow 4 bytes each. Irrelevant — they are ground-range, disarmed-state, and not periodic.
 - **This closes the gap between ADR-0006's stated purpose and its behaviour.** ADR-0006 remains correct about telemetry recognition; this ADR supplies the half it never had.
 - The locator gains a genuine notion of "commands for me", which is the precondition for any future hard gate (ADR-0006's "Triggers to revisit"). This ADR deliberately does **not** authenticate the target id — a spoofed id is a *hostile app* problem, still out of scope. This fixes accidents, which is the actual observed failure.
+- **Addressing commands does not make the app's derived state safe, and the distinction is worth stating.** Once commands are addressed, every *response* is implicitly addressed too: `FlightMetadata`, `FlightData`, `VersionInfo` and the deployment-test countdown can only arrive from the locator that was asked. **Unsolicited broadcasts are the exception** — `PreLaunchData` and `TelemetryData` arrive from every locator on the channel, so anything the app derives from them must be gated on the sender.
+
+  This was not hypothetical. With commands correctly addressed and only one locator arming, the app still flipped between armed and disarmed: `BluetoothService.computeExpectedPacketLength` derived armed state from the message *type* alone, in the framing path — before parsing, before authentication, before anything knew whose packet it was. The armed locator's `TelemetryData` and the bystander's `PreLaunchData` fought over the flag at the broadcast rate, while the device name and telemetry on screen, which *are* gated, stayed correctly on the connected locator. [ADR-0006](0006-locator-connect-password.md) named this watcher's type-only behaviour during the armed-startup work and did not fix it. Armed state is now derived inside the connected-locator gate in `RocketViewModel`.
+
+  **The rule for anything added later: state derived from an unsolicited broadcast must be gated on `locator_id`; state derived from a response need not be.**
+
 - **Revisit if:** a deliberate broadcast-to-all command is ever wanted (it would need its own MsgType, not a wildcard id — reusing 0 would reintroduce exactly this hazard); or if the threat model hardens to include a modified app, at which point the target id wants authenticating alongside the existing `auth_tag`.
 
 ## Alternatives considered
