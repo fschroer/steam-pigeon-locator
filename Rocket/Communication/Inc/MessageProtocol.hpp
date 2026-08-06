@@ -262,26 +262,13 @@ struct DeploymentTestRequest {
 	uint8_t channel;
 };
 
-// True for app→locator commands, which carry target_locator_id immediately after
-// the header (ADR-0020).  Shared by the locator, which enforces the address, and
-// the receiver, which sizes the frame.  Receiver-directed messages are absent
-// deliberately: they go point-to-point over BLE and are never relayed, so they
-// have no addressing problem to solve.
-constexpr bool IsAddressedCommand(MsgType t) {
-	switch (t) {
-	case MsgType::LocatorCfgChgRequest:
-	case MsgType::ArmRequest:
-	case MsgType::DisarmRequest:
-	case MsgType::FlightMetadataRequest:
-	case MsgType::FlightDataRequest:
-	case MsgType::FlightDataAck:
-	case MsgType::DeploymentTestRequest:
-	case MsgType::VersionRequest:
-		return true;
-	default:
-		return false;
-	}
-}
+// NOTE: there is deliberately no "is this command addressed?" predicate here.
+// The locator requires an address from EVERY frame it acts on (ADR-0020), because
+// every frame reaching it is an app command.  An allowlist would have to be
+// updated by hand for each new command, and forgetting would silently restore the
+// pre-ADR-0020 behaviour where one command reached every rocket on the channel.
+// The receiver still sizes each command individually — see its message_length_
+// table — but that is a per-type length, not a policy list.
 
 struct ParsedMessage {
     MsgType type;

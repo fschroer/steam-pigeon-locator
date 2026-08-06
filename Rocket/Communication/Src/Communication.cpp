@@ -286,17 +286,24 @@ void Communication::OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
 		// bench that rewrote a bystander locator's entire RocketPersistentSettings;
 		// the same path arms every disarmed locator on a shared launch channel.
 		//
+		// UNCONDITIONAL, deliberately.  Every frame that reaches here is an app
+		// command: locator→app messages never come back to us, and the receiver's
+		// startup string fails CRC well before this point.  An allowlist of
+		// "addressed" types would work today but has to be updated by hand for every
+		// new command, and forgetting would silently restore the broadcast
+		// behaviour.  Requiring an address from everything means a new command is
+		// protected by default, and the failure mode of forgetting anything is that
+		// it does nothing rather than that it reaches every rocket on the channel.
+		//
 		// 0 matches nothing. On a path that includes ArmRequest the failure
 		// direction must be "do nothing", so an unaddressed frame — an app build
 		// predating this — is discarded rather than obeyed.
-		if (IsAddressedCommand(parsed.type)) {
-			uint32_t target = 0;
-			if (size >= sizeof(PacketHeader) + sizeof(target))
-				std::memcpy(&target, payload + sizeof(PacketHeader), sizeof(target));
-			if (target == 0 || target != deviceUID_.getUID()) {
-				RgbLed(RgbColor::Off);
-				return;
-			}
+		uint32_t target = 0;
+		if (size >= sizeof(PacketHeader) + sizeof(target))
+			std::memcpy(&target, payload + sizeof(PacketHeader), sizeof(target));
+		if (target == 0 || target != deviceUID_.getUID()) {
+			RgbLed(RgbColor::Off);
+			return;
 		}
 		FlightStates flight_state = flight_.GetFlightState();
 		switch (parsed.type) {
