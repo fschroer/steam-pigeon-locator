@@ -103,3 +103,51 @@ Built as designed, with three implementation choices worth recording because the
 **App-side:** `ChannelSurvey.analyze()` is pure and unit-tested (`ChannelSurveyTest`). The all-channels-hot check runs *before* ranking and suppresses suggestions entirely — a locator near the receiver saturates every channel, and recommending whichever read lowest would be confidently wrong in exactly the scenario that started this work. Levels render as a relative bar with no dBm shown, and the panel carries a standing caveat that the sweep measures the receiver's location, not the rocket's. Picking a channel *stages* it for the existing Update button rather than sending directly, so the change still routes through ADR-0011's recognition arming, password challenge and revert-on-cancel instead of a second, parallel path.
 
 **Not yet bench-validated.** In particular the #33 acceptance item that matters — that broadcasts resume unaided after a sweep, which is what actually pins the RX re-arm rather than merely the channel register.
+
+## What the bench actually taught (2026-08-06) — the framing above was too narrow
+
+Everything in the Decision section is about **measuring power**: SNR, noise floor, thresholds. That framing came from the two interference sources in the Context, and it is correct for one of them — a non-locator emitter really does show up as elevated power and degraded SNR.
+
+It is close to useless for the other, which is the one users hit first.
+
+### Co-channel LoRa does not corrupt, it displaces
+
+LoRa capture is strong. When two locators overlap, the receiver locks onto the first preamble and demodulates *that* packet cleanly for its full airtime; the other transmission arrives while the receiver is already committed and is never heard. So:
+
+- **Nothing fails a CRC** — the wrong packet succeeded.
+- **SNR is pristine**, because the packet that arrived was pristine.
+- **The noise floor often stays quiet**, because the sampler and the interferer take turns.
+- The only trace is a gap where our broadcast should have been.
+
+Decision 5's discriminator table is built entirely on *degradation*. The dominant real case produces none. Four rounds of bench testing were spent adding measurements — SNR, floor, floor-vs-baseline, gap-based loss, hardware CRC error counting — and each failed to fire for the same underlying reason.
+
+### The decisive signal was already in hand
+
+Throughout all of it, the app was **receiving and identifying the interfering locator on every one of its broadcasts**, because the receiver relays every broadcast on the channel and each one carries a cleartext `locator_id` ([ADR-0006](0006-locator-connect-password.md)). That is not evidence of interference to be inferred from power. It *is* the interference, decoded, with a serial number on it.
+
+**A foreign `locator_id` on our channel now counts as channel occupancy directly**, ranking above every RSSI-derived signal. Severity still comes from whether we are also losing broadcasts: present *and* losing is interference; present without loss is congestion, which honestly describes sharing a channel and winning.
+
+The power measurements are kept, unchanged. They remain the only way to see a **non-locator** emitter, which is the case that motivated the ADR and which nothing else can detect. The correction is that they were never sufficient on their own.
+
+### The failure mode that recurred four times
+
+Each of these was a mechanism disabled by precisely the condition it existed to detect. They are listed because the pattern found them faster than reasoning did, and it will apply to whatever is added next:
+
+| Mechanism | Disabled by |
+|---|---|
+| Noise floor sampled only inside the post-broadcast safe window | packet loss — the window never reopens |
+| "Elevated" judged against the session's quietest reading | interference present at startup, which the baseline absorbs |
+| Coarse survey dwell of 12 ms | the 1 Hz emitter it was hunting, ~86% of the time idle |
+| Verdict computed only on packet arrival | a dropout, which is the absence of arrivals |
+
+The test to apply to any new detector: **assume the condition is fully present, and check the detector still runs.**
+
+### Two smaller lessons worth keeping
+
+**A sentinel is a wire constant.** `kNoiseFloorUnknown` is `INT16_MIN` in an `int16_t`, so it arrives as −32768 — not the app's `Int.MIN_VALUE`. The comparison never matched, "no sample" was read as a real floor, the baseline latched onto it, and every reading afterwards looked ~32000 dB elevated. The `static_assert`s and `WireLayoutTest` pinned every struct *size* and no *value*. Sentinels are now pinned too.
+
+**Diagnose from the device, not from inference.** Three consecutive rounds were diagnosed by reasoning from a symptom, and two of those diagnoses were wrong — including one where the fix was applied to a `Debug` build while the hardware ran `Release`. The console traces added for the survey and for bad frames ended each of those loops in a single test.
+
+### Status
+
+Tiers 1 and 2 are bench-validated ([#32](https://github.com/fschroer/steam-pigeon-locator/issues/32), closed). Tier 3's sweep is validated except for the known-interferer case, which RSSI alone cannot establish ([#33](https://github.com/fschroer/steam-pigeon-locator/issues/33), open). Thresholds remain reasoned rather than fitted, and all of them are app-side so tuning needs no reflash.
