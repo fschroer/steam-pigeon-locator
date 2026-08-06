@@ -1158,6 +1158,31 @@ AT THE FLIGHT LINE
 
 **Connection:** USB-C from the locator (or receiver) to a computer. Serial terminal at **921600 baud**.
 
+**Channel scan trace (receiver only).** While a channel scan is running (§2.5), the receiver prints a trace to its console. Nothing needs to be enabled — a scan is a deliberate, one-off action, so there is no background chatter. It is there so a scan that misbehaves can be diagnosed directly instead of by guesswork:
+
+```
+[survey] start home 0 0
+[survey] coarse done ms 771 0
+[survey] c0: -119 -121 -118 -120 -117 -122 -119 -120
+[survey] c8: -120 -118 -119 -121 -118 -120 -119 -117
+...
+[survey] shortlist 0 37
+[survey] shortlist 1 5
+[survey] confirm ch/level 37 -121
+[survey] confirm ch/level 5 -58
+[survey] done status/ms 0 6842
+[survey] restored channel 0
+```
+
+Reading it:
+
+- `start home N` — the channel the receiver was on, and must return to.
+- `coarse done ms` — how long the fast pass took, then the whole band eight channels per line. These are the *unreliable* numbers: a locator transmits ~14% of the time, so a channel in use can easily read quiet here.
+- `shortlist i ch` — the candidates picked for the long dwell, quietest first.
+- `confirm ch/level` — the trustworthy reading for each. A channel that looked quiet in the coarse table and loud here is a transmitter the fast pass missed, which is exactly what the confirm phase exists to catch.
+- `done status/ms` — status 0 completed, 1 refused (locator armed), 2 refused (transfer in progress, or the scan hit its 12-second limit). Then total elapsed time.
+- `restored channel N` — the radio went back where it started. **If this line is missing the scan did not finish cleanly**, and a `DEADLINE` line above it names the phase and channel it stalled on.
+
 **Top-level commands** — type the word and press Enter:
 
 | Command | Opens |
