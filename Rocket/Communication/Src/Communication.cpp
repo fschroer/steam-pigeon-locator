@@ -278,6 +278,26 @@ void Communication::OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
 
 	ParsedMessage parsed { };
 	if (ParseLoraFrame(payload, size, system_id, parsed) == ParseResult::Ok) {
+		// ADR-0020 (#34): every app→locator command is addressed, and anything not
+		// for us is discarded HERE — before the switch, before any state change.
+		//
+		// The receiver relays commands over LoRa, which is a broadcast medium, so
+		// without this every locator on the channel obeys every command. On the
+		// bench that rewrote a bystander locator's entire RocketPersistentSettings;
+		// the same path arms every disarmed locator on a shared launch channel.
+		//
+		// 0 matches nothing. On a path that includes ArmRequest the failure
+		// direction must be "do nothing", so an unaddressed frame — an app build
+		// predating this — is discarded rather than obeyed.
+		if (IsAddressedCommand(parsed.type)) {
+			uint32_t target = 0;
+			if (size >= sizeof(PacketHeader) + sizeof(target))
+				std::memcpy(&target, payload + sizeof(PacketHeader), sizeof(target));
+			if (target == 0 || target != deviceUID_.getUID()) {
+				RgbLed(RgbColor::Off);
+				return;
+			}
+		}
 		FlightStates flight_state = flight_.GetFlightState();
 		switch (parsed.type) {
 
@@ -301,7 +321,10 @@ void Communication::OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
 			// Defer the settings flash write to Process() (main loop).  Doing it
 			// here in the radio ISR could preempt a navigation SPI2 transaction
 			// and corrupt both (flash and IMU/baro share SPI2).
-			std::memcpy(&pending_cfg_settings_, payload + sizeof(PacketHeader), sizeof(pending_cfg_settings_));
+			// Settings now sit after the header AND the target id (ADR-0020).
+			std::memcpy(&pending_cfg_settings_,
+					payload + sizeof(PacketHeader) + sizeof(uint32_t),
+					sizeof(pending_cfg_settings_));
 			pending_cfg_save_ = true;
 			break;
 		}
@@ -363,7 +386,8 @@ void Communication::OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
 
 		case MsgType::DeploymentTestRequest: {
 			if (flight_state == FlightStates::WaitingLaunch) {
-				uint8_t channel = payload[sizeof(PacketHeader)];
+				// Channel sits after the header AND the target id (ADR-0020).
+				uint8_t channel = payload[sizeof(PacketHeader) + sizeof(uint32_t)];
 				if (channel >= 1 && channel <= 4) {
 					deploy_.ResetTestDeployment();
 					deploy_.SetActiveDeploymentChannel(channel);
@@ -827,7 +851,11 @@ ParseResult Communication::ParseLoraFrame(const uint8_t *data, std::size_t len, 
 	case MsgType::DisarmRequest:
 	case MsgType::FlightMetadataRequest:
 	case MsgType::VersionRequest:
-		if (len != sizeof(PacketHeader))
+		// Formerly header-only; each now carries target_locator_id (ADR-0020).
+		// A frame that is still header-sized comes from an app build predating the
+		// change and is rejected here — the same fail-closed direction the address
+		// check itself takes, since this set includes ArmRequest.
+		if (len != sizeof(TargetedRequest))
 			return ParseResult::LengthMismatch;
 		out.type = hdr.msg_type;
 		return ParseResult::Ok;

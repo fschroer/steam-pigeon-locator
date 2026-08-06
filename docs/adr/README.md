@@ -34,5 +34,6 @@ Write an ADR for a decision that is costly to reverse, or that future work must 
 | [0017](0017-gps-receiver-configuration-ownership.md) | GPS receiver configuration ownership — stale-fix recovery, phase-scheduled dynamic model, archived fix quality | Accepted |
 | [0018](0018-landing-detection-quiescence-window.md) | Landing detection — raw-baro quiescence, and the window between false landing and missed landing | Accepted |
 | [0019](0019-channel-interference-detection.md) | Channel interference detection — report SNR and noise floor, classify in the app | Accepted |
+| [0020](0020-targeted-locator-commands.md) | Address app→locator commands to a locator, so a broadcast command cannot arm somebody else's rocket | Accepted |
 
 > **Numbering note (resolved 2026-08-03):** the iOS-port ADR and the launch-detection ADR were both filed as **0015**. Launch detection was filed first (2026-07-17) and keeps the number; the iOS port moved to **0016**. Commit `4b6bb45` and any external reference calling the iOS port "ADR-0015" mean [0016](0016-ios-port-corebluetooth-and-platform-parity.md) — a note in that file records the change. When picking the next number, check this table rather than the highest number you remember.

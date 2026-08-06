@@ -347,6 +347,8 @@ Each locator identifies itself with a permanent hardware ID and, optionally, a p
 
 **What the password does:** the app only *recognizes* — displays, controls, arms — locators it is authorized for. If it hears an unknown locator, it asks you for that locator's password before it will do anything with it.
 
+**Commands only reach the locator you're connected to.** Arm, disarm, configuration changes and deployment tests are addressed to that specific locator by its hardware ID. Another locator on the same channel — yours or anyone else's — ignores them completely. You can share a channel with other fliers without your commands touching their rockets, or theirs touching yours.
+
 **Authorized and connected are not the same thing.** The app can be authorized for any number of locators — most people who own two are authorized for both — but it displays and commands exactly **one** at a time. Once it connects to a locator, that connection is held: another locator turning up on the air, even one you're authorized for, does **not** take over the screen. This matters at close range, where you can hear a locator that isn't on your channel at all (§2.5).
 
 **How you'll experience it:**

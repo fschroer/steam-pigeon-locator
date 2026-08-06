@@ -210,13 +210,33 @@ struct FlightDataPacket {
 	uint8_t payload[kPayloadSize]; // Compressed payload bytes
 };
 
+// ── Addressed app→locator commands (ADR-0020, #34) ──────────────────────────
+//
+// The receiver relays these over LoRa, which is a broadcast medium, so without a
+// target EVERY locator on the channel in an accepting state obeys them.  On the
+// bench that rewrote a bystander locator's whole RocketPersistentSettings —
+// deployment modes, deploy delays, main altitudes — and the same applies to
+// ArmRequest, which would arm every disarmed locator on a shared launch channel.
+//
+// target_locator_id is the MCU UID the app already receives in every broadcast
+// (ADR-0006), so no new identity concept is introduced.  It sits immediately
+// after the header on every command, so the locator reads it at one fixed offset.
+// **0 matches nothing** — on a path that includes Arm the failure direction must
+// be "do nothing", so an unaddressed frame from an old app is discarded.
+struct TargetedRequest {          // ArmRequest, DisarmRequest,
+	PacketHeader packet_header;   // FlightMetadataRequest, VersionRequest
+	uint32_t target_locator_id;
+};
+
 struct LocatorSettings {
 	PacketHeader header;
+	uint32_t target_locator_id;
 	RocketPersistentSettings settings;
 };
 
 struct FlightDataAck {
 	PacketHeader header;
+	uint32_t target_locator_id;
 
 	uint16_t transfer_id;
 	uint16_t packet_count;
@@ -232,13 +252,36 @@ struct DeploymentTestCountdownMessage {
 
 struct FlightDataRequest {
 	PacketHeader packet_header;
+	uint32_t target_locator_id;
 	uint8_t record;
 };
 
 struct DeploymentTestRequest {
 	PacketHeader packet_header;
+	uint32_t target_locator_id;
 	uint8_t channel;
 };
+
+// True for app→locator commands, which carry target_locator_id immediately after
+// the header (ADR-0020).  Shared by the locator, which enforces the address, and
+// the receiver, which sizes the frame.  Receiver-directed messages are absent
+// deliberately: they go point-to-point over BLE and are never relayed, so they
+// have no addressing problem to solve.
+constexpr bool IsAddressedCommand(MsgType t) {
+	switch (t) {
+	case MsgType::LocatorCfgChgRequest:
+	case MsgType::ArmRequest:
+	case MsgType::DisarmRequest:
+	case MsgType::FlightMetadataRequest:
+	case MsgType::FlightDataRequest:
+	case MsgType::FlightDataAck:
+	case MsgType::DeploymentTestRequest:
+	case MsgType::VersionRequest:
+		return true;
+	default:
+		return false;
+	}
+}
 
 struct ParsedMessage {
     MsgType type;
@@ -274,10 +317,11 @@ static_assert(kFlightEventCount                      ==  11, "FlightEvent count 
 static_assert(sizeof(FlightEventsMessage)            ==  66, "FlightEventsMessage size changed (app payload 60)");
 static_assert(sizeof(FlightDataPacket)               == 255, "FlightDataPacket size changed (max LoRa frame 255)");
 static_assert(sizeof(RocketPersistentSettings)       ==  34, "RocketPersistentSettings size changed");
-static_assert(sizeof(LocatorSettings)                ==  40, "LocatorSettings size changed");
-static_assert(sizeof(FlightDataAck)                  ==  42, "FlightDataAck size changed (app FLIGHT_DATA_ACK_SIZE)");
+static_assert(sizeof(TargetedRequest)                ==  10, "TargetedRequest size changed (ADR-0020) — sync receiver + app");
+static_assert(sizeof(LocatorSettings)                ==  44, "LocatorSettings size changed — sync receiver + app");
+static_assert(sizeof(FlightDataAck)                  ==  46, "FlightDataAck size changed (app FLIGHT_DATA_ACK_SIZE)");
 static_assert(sizeof(DeploymentTestCountdownMessage) ==   7, "DeploymentTestCountdownMessage size changed");
-static_assert(sizeof(FlightDataRequest)              ==   7, "FlightDataRequest size changed");
-static_assert(sizeof(DeploymentTestRequest)          ==   7, "DeploymentTestRequest size changed");
+static_assert(sizeof(FlightDataRequest)              ==  11, "FlightDataRequest size changed");
+static_assert(sizeof(DeploymentTestRequest)          ==  11, "DeploymentTestRequest size changed");
 
 } // namespace Communication
