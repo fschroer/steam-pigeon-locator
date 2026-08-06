@@ -47,7 +47,14 @@ enum class MsgType : uint8_t {
 	DeploymentTest = 14, // Deployment test countdown sent from the locator to the app via the receiver.
 	VersionRequest = 17, // Request from the app, via the receiver, for both firmware versions.
 	VersionInfo = 18,    // Response: locator version forwarded through receiver, which appends its own version.
-	FlightEvents = 19    // Per-record flight event summary sent alongside a FlightData transfer.
+	FlightEvents = 19,   // Per-record flight event summary sent alongside a FlightData transfer.
+	// Reserved, never sent or parsed here.  The channel survey (ADR-0019 tier 3)
+	// is app<->receiver only and the locator plays no part in it — but the MsgType
+	// space is shared across all three copies, so the values are claimed here to
+	// stop a future locator message silently colliding with them on the wire.
+	// Adding these changes no behaviour: an already-flashed locator stays compatible.
+	ChannelSurveyRequest = 20,
+	ChannelSurvey = 21
 };
 
 // Flight event summary indices.  One entry per archived event timestamp; the

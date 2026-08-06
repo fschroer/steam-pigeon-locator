@@ -55,7 +55,7 @@ Sizes: `PreLaunchMessageExtended` 140 → 143 (app payload 134 → 137); `Teleme
 
 The baseline for "elevated" is the **minimum floor observed this session**, not a hardcoded dBm constant: SX126x RSSI near the noise floor is uncalibrated and varies unit to unit, so a self-referencing baseline is the only honest comparison.
 
-**6. The channel survey (tier 3) is deferred to its own issue,** not because it is large but because its output is uninterpretable without tiers 1–2 — "channel 12 reads −95 dBm" means nothing until a quiet channel's reading on this hardware is known. When built it must: run **on demand while Disarmed only**; dwell per channel (a single instantaneous sample is worthless against bursty interference), making a 64-channel sweep ~0.6–1.3 s; **restore the radio fully afterward — modem, channel *and* RX state, not just the channel** (the obvious primitive, `IsChannelFree()`, switches to FSK and leaves the radio in standby; returning only the channel would leave the link dead in a way that looks like a receiver failure); **rank channels relatively rather than presenting absolute dBm as truth**; and detect the all-channels-hot case and report *"a transmitter is probably next to you"* rather than *"no clean channel exists"* — the failure mode that would otherwise give confidently wrong advice in exactly the situation that prompted this work.
+**6. The channel survey (tier 3) is deferred to its own issue** *(implemented 2026-08-05 — see the tier-3 note at the end)*, not because it is large but because its output is uninterpretable without tiers 1–2 — "channel 12 reads −95 dBm" means nothing until a quiet channel's reading on this hardware is known. When built it must: run **on demand while Disarmed only**; dwell per channel (a single instantaneous sample is worthless against bursty interference), making a 64-channel sweep ~0.6–1.3 s; **restore the radio fully afterward — modem, channel *and* RX state, not just the channel** (the obvious primitive, `IsChannelFree()`, switches to FSK and leaves the radio in standby; returning only the channel would leave the link dead in a way that looks like a receiver failure); **rank channels relatively rather than presenting absolute dBm as truth**; and detect the all-channels-hot case and report *"a transmitter is probably next to you"* rather than *"no clean channel exists"* — the failure mode that would otherwise give confidently wrong advice in exactly the situation that prompted this work.
 
 ## Consequences
 
@@ -82,3 +82,24 @@ The baseline for "elevated" is the **minimum floor observed this session**, not 
   By contrast `Radio.Rssi()` is a single `SUBGRF_ReadCommand(RADIO_GET_RSSIINST, …)`: a pure read, no mode change, no retune, no register writes. That is why tier 2 uses it, and it is the property that makes a false "channel busy" verdict a display-only event with no path back into reception.
 
   `IsChannelFree()` remains reasonable for the **tier-3 sweep**, which retunes deliberately and runs Disarmed-only — but whoever builds it must restore modem, channel *and* RX state afterward, not merely the channel. See Decision 6.
+
+## Tier 3 implemented (2026-08-05, #33)
+
+Built as designed, with three implementation choices worth recording because the obvious alternatives are each wrong in a way that is invisible until it bites.
+
+**The sweep stays in LoRa RX and only retunes.** Decision 6 warned that `IsChannelFree()` leaves the radio in FSK and standby. Rather than use it and undo the damage, `ServiceChannelSurvey()` retunes with `SetChannel()` — a bare `SUBGRF_SetRfFrequency`, the same call ADR-0011 already makes at runtime — and samples with `Rssi()`. The modem is never touched, so the restore shrinks to channel plus an `Rx()` re-arm. `IsChannelFree()` also turned out to be doubly wrong here: it returns a boolean, and ranking needs magnitude.
+
+**The sweep is time-sliced, not a loop.** A full sweep is ~1 s (64 channels × 15 ms dwell). Running it inside one `Service()` call would stall BLE servicing and the forwarding windows for that whole second. Instead one slice advances per main-loop call. Sampling within a dwell is unthrottled — bursty interference is exactly what a sparse sample set misses.
+
+**Three things are suppressed while a sweep is active**, and the third is the one that would have been easy to miss:
+- noise-floor sampling (it would attribute other channels' levels to the home channel);
+- `ServicePendingTx()` — **a queued forward would otherwise transmit on whatever channel the sweep is parked on**, so the locator would not hear it and whoever owns that channel would. The message simply waits; the poll resumes when the sweep ends;
+- the sweep itself aborts if the locator arms mid-scan, since finishing would keep the receiver deaf through the first seconds of a live flight.
+
+**Refusal is enforced in the receiver, not just the app.** The app gate is soft (ADR-0006), so `BeginChannelSurvey()` independently refuses while armed (`RefusedArmed`) or during a flight-data transfer (`RefusedBusy`), tracking armed state from which periodic message type last arrived. A refusal returns a status byte rather than silence, so the app can explain *why* rather than showing a failed scan.
+
+**Wire format:** `ChannelSurveyRequest` (header only) and `ChannelSurveyResponse` (73 bytes: status, channel_count, home_channel, `int8_t level[64]`), MsgTypes 20/21. Receiver↔app only. The locator **reserves both MsgType values without implementing them** — the enum space is shared across all three copies, so claiming them stops a future locator message colliding on the wire. That change is behaviour-free: an already-flashed locator remains compatible and need not be reflashed.
+
+**App-side:** `ChannelSurvey.analyze()` is pure and unit-tested (`ChannelSurveyTest`). The all-channels-hot check runs *before* ranking and suppresses suggestions entirely — a locator near the receiver saturates every channel, and recommending whichever read lowest would be confidently wrong in exactly the scenario that started this work. Levels render as a relative bar with no dBm shown, and the panel carries a standing caveat that the sweep measures the receiver's location, not the rocket's. Picking a channel *stages* it for the existing Update button rather than sending directly, so the change still routes through ADR-0011's recognition arming, password challenge and revert-on-cancel instead of a second, parallel path.
+
+**Not yet bench-validated.** In particular the #33 acceptance item that matters — that broadcasts resume unaided after a sweep, which is what actually pins the RX re-arm rather than merely the channel register.

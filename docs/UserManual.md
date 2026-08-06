@@ -328,6 +328,19 @@ The receiver's copy of the control looks like this:
 
 **Rule: only the locator you're flying stays near the receiver. Spares go in the car, or stay switched off.** A few tens of feet of separation is enough. See Appendix G for why.
 
+### Finding a clean channel
+
+**Receiver Settings → *Find a clean channel*** asks the receiver to listen to all 64 channels in turn and rank them from quietest to busiest. It takes about a second. Tap **Use** next to a suggestion to stage that channel, then press **Update** as usual.
+
+A few things to know about the result:
+
+- **It ranks, it doesn't measure.** You get an ordering, not signal levels. The hardware's readings near the noise floor aren't accurate enough to quote as numbers, but they're perfectly good for comparing one channel against another in the same scan.
+- **It scans where the receiver is standing.** A channel that's quiet at the flight line may be busier a mile up, where the rocket can hear far more of the world. Use it to pick a good starting channel, not as a forecast.
+- **If it says every channel is loud, believe it.** That almost always means a transmitter is within a few feet — usually a spare locator someone left switched on. Changing channel won't help; moving the transmitter will.
+- **It won't run while the locator is armed.** Scanning stops the receiver hearing your rocket for about a second, and you can't change channel while armed anyway. Disarm first.
+
+💡 The natural time to do this is during bench prep or when you arrive at the field — before you power up on the pad.
+
 ## 2.6 Connection password and locator recognition
 
 Each locator identifies itself with a permanent hardware ID and, optionally, a password.
@@ -991,6 +1004,8 @@ This gives you everything the locator recorded, at full rate, for analysis in a 
 | Telemetry patchy on the pad or the flight line | Check for another powered locator near the receiver — it deafens the receiver every time it transmits (§2.5). |
 | "Interference on this channel" under the signal reading | Something other than your rocket is transmitting in your channel. Move to another channel (§2.5), or find and move the nearby transmitter. Appears only when the signal is strong *and* noisy (§8.4). |
 | "Channel is busy, but your link is clean" | Informational. Other traffic is present but isn't hurting you. No action needed. |
+| Channel scan says every channel is loud | A transmitter is very close to the receiver — usually a spare locator left switched on. Move it; don't change channel (§2.5). |
+| Channel scan refuses to run | The locator is armed, or a flight data transfer is in progress. Disarm or wait (§2.5). |
 | Receiver's new name won't show up | Bluetooth name cache. "Forget" the receiver in your phone's Bluetooth settings, then reconnect (§2.7). |
 | Bluetooth seems to keep dropping | Silence is not a dropped link (§3.8). If it's genuinely reconnecting, check the receiver's battery. |
 | Few satellites / poor accuracy | Get the fix in the open before installing (§4.5). Antenna view obstructed (§1.7, §4.7). |
