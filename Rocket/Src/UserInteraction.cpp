@@ -49,6 +49,7 @@ void UserInteraction::ProcessChar(uint8_t uart_char, DeviceState &device_state) 
 					main_primary_deploy_altitude_ = locator_settings.main_primary_deploy_altitude;
 					main_backup_deploy_altitude_ = locator_settings.main_backup_deploy_altitude;
 					lora_channel_ = locator_settings.lora_channel;
+					nose_axis_ = locator_settings.nose_axis;
 					std::memcpy(device_name_, locator_settings.device_name, device_name_length);
 					DisplayConfigSettingsMenu();
 				} else if (StrCmp(user_input_, data_command_, char_pos)) {
@@ -87,6 +88,7 @@ void UserInteraction::ProcessChar(uint8_t uart_char, DeviceState &device_state) 
 			locator_settings.main_primary_deploy_altitude = main_primary_deploy_altitude_;
 			locator_settings.main_backup_deploy_altitude = main_backup_deploy_altitude_;
 			locator_settings.lora_channel = lora_channel_;
+			locator_settings.nose_axis = nose_axis_;
 			std::memcpy(locator_settings.device_name, device_name_, device_name_length);
 			archive_.SaveLocatorSettings(locator_settings);
 			comm_.SetChannel(lora_channel_);
@@ -148,6 +150,12 @@ void UserInteraction::ProcessChar(uint8_t uart_char, DeviceState &device_state) 
 			user_interaction_state_ = UserInteractionState::EditDeviceName;
 			uart_line_len = MakeLine(uart_line_, text_edit_guidance_text_);
 			break;
+		case 'n': // n = Edit nose axis (how the locator is mounted; ADR-0021 #36)
+		case 'N':
+			user_interaction_state_ = UserInteractionState::EditNoseAxis;
+			uart_line_len = MakeLine(uart_line_, nose_axis_edit_text_, num_edit_guidance_text_,
+					NoseAxisString(nose_axis_));
+			break;
 		case 'p': // p = Edit password (stored locally; never sent over the air)
 		case 'P':
 			user_interaction_state_ = UserInteractionState::EditPassword;
@@ -185,6 +193,9 @@ void UserInteraction::ProcessChar(uint8_t uart_char, DeviceState &device_state) 
 		break;
 	case UserInteractionState::EditDeviceName:
 		AdjustConfigTextSetting(uart_char, device_name_);
+		break;
+	case UserInteractionState::EditNoseAxis:
+		AdjustNoseAxis(uart_char);
 		break;
 	case UserInteractionState::EditPassword:
 		AdjustPasswordSetting(uart_char);
@@ -414,6 +425,8 @@ void UserInteraction::DisplayConfigSettingsMenu() {
 	HAL_UART_Transmit(&huart2_, (uint8_t*) uart_line_, uart_line_len, uart_timeout);
 	uart_line_len = MakeLine(uart_line_, device_name_text_, device_name_, crlf_);
 	HAL_UART_Transmit(&huart2_, (uint8_t*) uart_line_, uart_line_len, uart_timeout);
+	uart_line_len = MakeLine(uart_line_, nose_axis_text_, NoseAxisString(nose_axis_), crlf_);
+	HAL_UART_Transmit(&huart2_, (uint8_t*) uart_line_, uart_line_len, uart_timeout);
 	uart_line_len = MakeLine(uart_line_, password_text_,
 			archive_.GetPassword()[0] != 0 ? archive_.GetPassword() : password_unset_text_);
 	HAL_UART_Transmit(&huart2_, (uint8_t*) uart_line_, uart_line_len, uart_timeout);
@@ -454,6 +467,48 @@ void UserInteraction::DisplayTestMenu() {
 	HAL_UART_Transmit(&huart2_, (uint8_t*) test_deploy4_text_, strlen(test_deploy4_text_), uart_timeout);
 	uart_line_len = MakeLine(uart_line_, test_guidance_text_, crlf_);
 	HAL_UART_Transmit(&huart2_, (uint8_t*) uart_line_, uart_line_len, uart_timeout);
+}
+
+const char* UserInteraction::NoseAxisString(NoseAxis nose_axis_value) {
+	switch (nose_axis_value) {
+	case NoseAxis::XPlus:  return nose_axis_x_plus_text_;
+	case NoseAxis::XMinus: return nose_axis_x_minus_text_;
+	case NoseAxis::YPlus:  return nose_axis_y_plus_text_;
+	case NoseAxis::YMinus: return nose_axis_y_minus_text_;
+	case NoseAxis::ZPlus:  return nose_axis_z_plus_text_;
+	case NoseAxis::ZMinus: return nose_axis_z_minus_text_;
+	case NoseAxis::Auto:
+	default:               return nose_axis_auto_text_;
+	}
+}
+
+// Cycles Auto → +X → -X → +Y → -Y → +Z → -Z → Auto.  NoseAxis is contiguous
+// 0..6 (unlike DeployMode, whose Unused = 7 leaves a gap), so this wraps
+// arithmetically instead of enumerating every transition by hand.
+void UserInteraction::AdjustNoseAxis(uint8_t uart_char) {
+	constexpr uint8_t kNoseAxisCount = static_cast<uint8_t>(NoseAxis::ZMinus) + 1u;
+	int uart_line_len = 0;
+	switch (uart_char) {
+	case 13: // Enter key
+	case 27: // Esc key
+		user_interaction_state_ = UserInteractionState::ConfigHome;
+		DisplayConfigSettingsMenu();
+		break;
+	case 91: { // [ = previous value
+		const uint8_t v = static_cast<uint8_t>(nose_axis_);
+		nose_axis_ = static_cast<NoseAxis>((v + kNoseAxisCount - 1u) % kNoseAxisCount);
+		uart_line_len = MakeLine(uart_line_, cr_, NoseAxisString(nose_axis_));
+		HAL_UART_Transmit(&huart2_, (uint8_t*) uart_line_, uart_line_len, uart_timeout);
+		break;
+	}
+	case 93: { // ] = next value
+		const uint8_t v = static_cast<uint8_t>(nose_axis_);
+		nose_axis_ = static_cast<NoseAxis>((v + 1u) % kNoseAxisCount);
+		uart_line_len = MakeLine(uart_line_, cr_, NoseAxisString(nose_axis_));
+		HAL_UART_Transmit(&huart2_, (uint8_t*) uart_line_, uart_line_len, uart_timeout);
+		break;
+	}
+	}
 }
 
 const char* UserInteraction::DeployModeString(DeployMode deploy_mode_value) {
@@ -677,7 +732,14 @@ void UserInteraction::ExportData(uint16_t archive_position) {
 						Fmt(sample_buffer[i].gyro.z * RAD2DEG, 0, 1), ",",
 						Fmt(sample_buffer[i].lat_rad * RAD2DEG, 0, 7), ",",
 						Fmt(sample_buffer[i].lon_rad * RAD2DEG, 0, 7), ",",
-						static_cast<uint32_t>(sample_buffer[i].flight_state), ",",
+						// Split the packed byte back out (ADR-0021 Decision 4, #36):
+						// flight_state stays a plain enum so existing analysis is
+						// unaffected, and armed becomes its own column.  Without
+						// the mask a disarmed sample would export as state 128+.
+						static_cast<uint32_t>(sample_buffer[i].flight_state
+								& ~FlightArchive::FlightSample::kArmedBit), ",",
+						static_cast<uint32_t>((sample_buffer[i].flight_state
+								& FlightArchive::FlightSample::kArmedBit) ? 1u : 0u), ",",
 						static_cast<uint32_t>(sample_buffer[i].oc_start_us), ",",
 						static_cast<uint32_t>(sample_buffer[i].oc_end_us), ",",
 						static_cast<uint32_t>(sample_buffer[i].process_start_us), ",",

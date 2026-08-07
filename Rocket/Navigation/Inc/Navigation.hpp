@@ -38,6 +38,43 @@ public:
     // re-initialises the EKF once the window completes.
     void triggerMountingCalibration();
 
+    // Compact representation of a 90°-multiple body←sensor rotation.
+    // body_axis[i] = sign[i] * sensor_axis[src[i]]
+    // All six valid cases are proper rotations (det = +1).
+    struct MountingFrame {
+        uint8_t src[3];   // which sensor axis feeds each body axis (0=X,1=Y,2=Z)
+        int8_t  sign[3];  // +1 or -1
+    };
+
+    // Which raw sensor axis points at the nose (ADR-0021 Decision 6, #36).
+    // Auto keeps the detect-on-arm behaviour; anything else makes the mounting
+    // frame deterministic and tilt-from-vertical measurable at any time.
+    // Applies the frame immediately on a CHANGE, so a configured axis takes
+    // effect without waiting for an arm or a pad trigger.  Called every cycle
+    // from Factory, hence the guard: without it this would re-seed the EKF and
+    // strapdown 20 times a second.
+    void setNoseAxis(NoseAxis axis) {
+        if (axis == m_nose_axis_)
+            return;
+        m_nose_axis_ = axis;
+        if (axis != NoseAxis::Auto)
+            commitMountingFrame(Vec3f{});   // configured: the accel arg is unused
+    }
+    NoseAxis getNoseAxis() const { return m_nose_axis_; }
+
+    // Angle between the rocket's nose axis and straight up, from the raw
+    // accelerometer.  Meaningful ONLY while the locator is near-stationary — it
+    // reads the gravity vector, so any sustained linear acceleration corrupts it.
+    // Returns false when the nose axis is Auto (nothing to measure against) or
+    // the accel reading is unusable.
+    bool getPadTiltFromVerticalRad(float& tilt_rad_out) const;
+
+    // True when the rocket is standing near-vertical and still: the condition
+    // that says a prepped rocket is on the pad.  Shared by the #36 mounting
+    // re-calibration trigger and the #37 disarmed-alert gate so both agree on
+    // what "on the pad" means.
+    bool isVerticalAndStationary() const;
+
     // Set EKF phase parameters (Q/R) and baro LPF alpha.
     // Call from FlightManager::UpdateFlightState() at each state transition.
     void setPhase(FlightStates state);
@@ -134,13 +171,8 @@ private:
     bool IsStationary(const ImuSample& imu, const BaroSample& baro) const;
 
     // ── Cardinal mounting detection ──────────────────────────────────────────
-    // Compact representation of a 90°-multiple body←sensor rotation.
-    // body_axis[i] = sign[i] * sensor_axis[src[i]]
-    // All six valid cases are proper rotations (det = +1).
-    struct MountingFrame {
-        uint8_t src[3];   // which sensor axis feeds each body axis (0=X,1=Y,2=Z)
-        int8_t  sign[3];  // +1 or -1
-    };
+    // MountingFrame is declared in the public section (the configured-nose-axis
+    // mapping helper needs it).
 
     // Remap a single 3-component vector from sensor frame to body frame.
     Vec3f remapVec(const Vec3f& v) const;
@@ -151,7 +183,10 @@ private:
     // Inspect avg_raw_accel (averaged in sensor frame), determine the dominant
     // gravity axis, set m_mounting, then re-initialise the EKF.
     void commitMountingFrame(const Vec3f& avg_raw_accel);
+    // Shared tail of a commit (EKF re-init, strapdown re-seed, FIFO flush).
+    void FinishMountingCommit();
 
+    NoseAxis       m_nose_axis_           = NoseAxis::Auto;
     MountingFrame  m_mounting             = {{0,1,2},{1,1,1}}; // identity (standard)
     bool           m_mounting_cal_active  = false;
     uint8_t        m_mounting_cal_count   = 0;
@@ -163,6 +198,11 @@ private:
     bool           m_bias_frozen          = false;
 
     static constexpr uint8_t kMountingCalSamples = 64; // 3.2 s at 20 Hz
+    // Tilt within which the rocket counts as standing vertical (ADR-0021
+    // Decision 5 names ~20° as a starting point, to be validated on the pad —
+    // it is not a measured value).  Generous relative to typical 5–10° rail
+    // angles so a normally-canted rail still reads as on-the-pad.
+    static constexpr float kPadVerticalTolRad = 0.349f;  // 20°
 
     // Maximum allowed deviation from 1 g for a sample to count toward the
     // mounting-calibration average.  Samples outside [1 ± this] g (motor

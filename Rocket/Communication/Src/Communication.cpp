@@ -94,6 +94,7 @@ void Communication::SendPreLaunchData(bool armed) {
 	msg.main_backup_deploy_altitude = rocket_settings.main_backup_deploy_altitude;
 	std::memcpy(msg.device_name, rocket_settings.device_name, device_name_length);
 	msg.battery_voltage_mvolt = power_.readBatteryMillivolts();
+	msg.nose_axis = rocket_settings.nose_axis;
 	// Stated, never implied by the message type (ADR-0021 Decision 3).  This is
 	// always 0 today — only a disarmed locator sends PreLaunchData — but stating
 	// it keeps the app off the inference entirely, so nothing here has to change

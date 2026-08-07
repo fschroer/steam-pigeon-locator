@@ -95,7 +95,87 @@ void Navigation::applyMountingFrame(ImuSample& imu) const {
 //
 // All six are proper rotations (determinant = +1).
 // ---------------------------------------------------------------------------
+// Map a configured nose axis straight onto the six cardinal frames below.
+// Returns false for Auto, leaving the caller to detect as it always has.
+static bool MountingFrameForNoseAxis(NoseAxis axis, Navigation::MountingFrame& out) {
+    switch (axis) {
+        case NoseAxis::XPlus:  out = {{0,1,2},{ 1, 1, 1}}; return true;
+        case NoseAxis::XMinus: out = {{0,1,2},{-1, 1,-1}}; return true;
+        case NoseAxis::YPlus:  out = {{1,2,0},{ 1, 1, 1}}; return true;
+        case NoseAxis::YMinus: out = {{1,2,0},{-1, 1,-1}}; return true;
+        case NoseAxis::ZPlus:  out = {{2,0,1},{ 1,-1,-1}}; return true;
+        case NoseAxis::ZMinus: out = {{2,0,1},{-1, 1,-1}}; return true;
+        case NoseAxis::Auto:
+        default:               return false;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// getPadTiltFromVerticalRad
+// Angle between the configured nose axis and up, taken straight from the raw
+// accelerometer.  Distinct from getTiltFromVerticalRad(), which is the NFR-9
+// strapdown's tilt-from-LAUNCH-vertical: that one is seeded from an assumed
+// on-pad attitude and so cannot answer "is it vertical yet?" without circularity.
+// This one measures gravity against a configured axis and therefore can.
+// ---------------------------------------------------------------------------
+bool Navigation::getPadTiltFromVerticalRad(float& tilt_rad_out) const {
+    MountingFrame frame{};
+    if (!MountingFrameForNoseAxis(m_nose_axis_, frame))
+        return false;   // Auto — no stated nose axis to measure against
+
+    const ImuSample imu = m_imu.raw();
+    if (!imu.low_g_valid && !imu.high_g_valid)
+        return false;
+
+    const Vec3f a = imu.accel_selected_mps2;
+    const float mag = RocketNav::Math::norm(a);
+    // Reject readings that are not dominated by gravity: free fall, or a
+    // transient that would make the angle meaningless.
+    if (mag < 0.5f * G0_F || mag > 1.5f * G0_F)
+        return false;
+
+    // Component of the raw accel along the nose axis.  At rest nose-up this is
+    // +1 g (the accelerometer reads the reaction to gravity).
+    const float src[3] = { a.x, a.y, a.z };
+    const float along  = static_cast<float>(frame.sign[0]) * src[frame.src[0]];
+
+    float c = along / mag;
+    if (c >  1.0f) c =  1.0f;
+    if (c < -1.0f) c = -1.0f;
+    tilt_rad_out = std::acos(c);
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// isVerticalAndStationary
+// "A prepped rocket is standing on the pad."  Shared by #36 (mounting
+// re-calibration) and #37 (disarmed alert) so the two cannot drift apart.
+// Deliberately requires BOTH near-vertical and at-rest: a rocket being carried
+// upright swings, and committing a mounting frame off a moving gravity vector
+// is exactly the error the configured nose axis exists to prevent.
+// ---------------------------------------------------------------------------
+bool Navigation::isVerticalAndStationary() const {
+    float tilt_rad = 0.0f;
+    if (!getPadTiltFromVerticalRad(tilt_rad))
+        return false;
+    if (tilt_rad > kPadVerticalTolRad)
+        return false;
+    return IsStationary(m_imu.raw(), m_baro.raw());
+}
+
 void Navigation::commitMountingFrame(const Vec3f& avg_raw_accel) {
+    // A configured nose axis is a stated fact about the installation and beats
+    // any inference from a single gravity reading (ADR-0021 Decision 6, #36).
+    // It also fixes a latent failure in the detect path: arming with the rocket
+    // not yet vertical committed whichever axis happened to be down, silently
+    // recording the whole flight through the wrong frame.
+    MountingFrame configured{};
+    if (MountingFrameForNoseAxis(m_nose_axis_, configured)) {
+        m_mounting = configured;
+        FinishMountingCommit();
+        return;
+    }
+
     const float ax = std::fabs(avg_raw_accel.x);
     const float ay = std::fabs(avg_raw_accel.y);
     const float az = std::fabs(avg_raw_accel.z);
@@ -124,6 +204,12 @@ void Navigation::commitMountingFrame(const Vec3f& avg_raw_accel) {
         }
     }
 
+    FinishMountingCommit();
+}
+
+// Shared tail of a mounting-frame commit: everything that must follow m_mounting
+// changing, whether the frame was detected or taken from configuration.
+void Navigation::FinishMountingCommit() {
     // Re-initialise the EKF with the current sensor reading remapped through
     // the new mounting frame, so the initial attitude is correct from frame 1.
     ImuSample imu = m_imu.raw();

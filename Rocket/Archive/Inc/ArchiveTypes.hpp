@@ -59,7 +59,19 @@ namespace FlightArchive
 		Vec3f gyro;
 		double lat_rad;
 		double lon_rad;
-		uint8_t  flight_state;     // FlightStates enum value at time of sample        (offset 60, +1)
+		// FlightStates enum value in bits 0-6, ARMED in bit 7               (offset 60, +1)
+		//
+		// ADR-0021 Decision 4 (#36): a disarmed flight is now recorded like any
+		// other, so the record must say which it was — otherwise "no deployment
+		// events" is indistinguishable from "deployment failed", which is the
+		// exact confusion that would follow a forgotten arm.
+		//
+		// Packed into the spare bits rather than added as a Statistic: statSlotCount
+		// is derived from Statistic::Count, so a new stat changes record geometry
+		// and makes every previously archived flight unreadable.  FlightStates only
+		// reaches 8, so bits 3-7 were free and ARCHIVE_VERSION need not change.
+		uint8_t  flight_state;
+		static constexpr uint8_t kArmedBit = 0x80u;
 		uint16_t oc_start_us;      // TIM2->CNT lower 16 bits at first OCCallback entry (offset 61, +2)
 		uint16_t oc_end_us;        // TIM2->CNT lower 16 bits at second OCCallback exit (offset 63, +2)
 		uint16_t process_start_us; // TIM2->CNT lower 16 bits at ProcessRocketEvents entry (offset 65, +2)

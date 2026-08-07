@@ -195,7 +195,7 @@ bool Archive::SetPassword(const char* password) {
 
 FlightArchive::FlightSample Archive::BuildSample(uint32_t flight_time_ms, const NavSolution &nav_solution,
 		const float raw_baro_altitude_agl, const float raw_baro_velocity, FlightStates flight_state,
-		const TimingDiag &timing, float tilt_rad, const Quaternionf &strapdown_quat) {
+		const TimingDiag &timing, float tilt_rad, const Quaternionf &strapdown_quat, bool armed) {
 	FlightArchive::FlightSample s { };
 	s.timestamp_ms = flight_time_ms;
 	s.raw_baro_altitude_agl = raw_baro_altitude_agl;
@@ -206,7 +206,9 @@ FlightArchive::FlightSample Archive::BuildSample(uint32_t flight_time_ms, const 
 	s.gyro = nav_solution.body_rates_rps;
 	s.lat_rad = nav_solution.pos.lat_rad;
 	s.lon_rad = nav_solution.pos.lon_rad;
-	s.flight_state = static_cast<uint8_t>(flight_state);
+	// State in bits 0-6, arm state in bit 7 (ADR-0021 Decision 4, #36).
+	s.flight_state = static_cast<uint8_t>(flight_state)
+	               | (armed ? FlightArchive::FlightSample::kArmedBit : 0u);
 	s.oc_start_us      = timing.oc_start_us;
 	s.oc_end_us        = timing.oc_end_us;
 	s.process_start_us = timing.process_start_us;
@@ -222,9 +224,9 @@ FlightArchive::FlightSample Archive::BuildSample(uint32_t flight_time_ms, const 
 
 bool Archive::WriteData(uint32_t flight_time_ms, const NavSolution &nav_solution, const float raw_baro_altitude_agl,
 		const float raw_baro_velocity, FlightStates flight_state, const TimingDiag &timing,
-		float tilt_rad, const Quaternionf &strapdown_quat) {
+		float tilt_rad, const Quaternionf &strapdown_quat, bool armed) {
 	const FlightArchive::FlightSample s = BuildSample(flight_time_ms, nav_solution, raw_baro_altitude_agl,
-			raw_baro_velocity, flight_state, timing, tilt_rad, strapdown_quat);
+			raw_baro_velocity, flight_state, timing, tilt_rad, strapdown_quat, armed);
 	return archive_.WriteFlightDataSample(record_id_, s);
 }
 

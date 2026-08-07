@@ -97,6 +97,22 @@ private:
 	int flight_stats_delay_count_ = 0;
 
 	bool datestamp_saved_ = false;
+
+	// ── Pad-settle detection (ADR-0021 Decision 6, #36) ──────────────────────
+	// Mounting calibration used to run ONLY on arm, which silently assumed the
+	// rocket was vertical at that moment.  It now also runs once the rocket has
+	// stood vertical and still for kPadSettleCycles, so a flight the operator
+	// never armed is still recorded through the right body frame and with the
+	// strapdown seeded at the pad orientation rather than wherever the locator
+	// was lying at power-on.
+	//
+	// Latched: fires once per settle, and re-arms only when the rocket is moved
+	// or tilted away again.  Requires a configured nose axis — with NoseAxis::Auto
+	// isVerticalAndStationary() is always false, so this never fires and the
+	// pre-#36 arm-only behaviour is preserved exactly.
+	uint16_t pad_settle_count_ = 0;
+	bool     pad_calibrated_   = false;
+	static constexpr uint16_t kPadSettleCycles = SAMPLES_PER_SECOND * 10u;  // ~10 s
 	bool altimeter_archive_closed_ = false;
 	bool accelerometer_archive_closed_ = false;
 	bool ready_to_send_ = true;

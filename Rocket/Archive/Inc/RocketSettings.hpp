@@ -5,6 +5,11 @@
 #include <type_traits>
 #include <cstring>
 
+// DeployMode and NoseAxis.  No cycle: Types.hpp pulls only Constants.hpp.
+// (DeployMode was previously relied on being declared by whoever included this
+// header first — see the commented-out copy below.)
+#include "Types.hpp"
+
 constexpr std::size_t device_name_length = 20;
 
 //enum class DeployMode : uint8_t
@@ -36,6 +41,11 @@ struct RocketPersistentSettings
     uint8_t lora_channel = 0;
 
     char device_name[device_name_length] = {0};
+
+    // Which raw sensor axis points toward the nose (ADR-0021 Decision 6, #36).
+    // Appended AFTER device_name so every existing field keeps its offset; only
+    // the struct size changes.  Default Auto = pre-#36 behaviour.
+    NoseAxis nose_axis = NoseAxis::Auto;
 };
 
 struct RocketRuntimeMetadata

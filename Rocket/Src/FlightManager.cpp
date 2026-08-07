@@ -666,7 +666,8 @@ void FlightManager::UpdateFlightState() {
         const BaroSample baro_raw = nav_.getRawBaro();
         FlightArchive::FlightSample s = Archive::BuildSample(
             m_flight_clock_ms_, nav_solution, baro_raw.altitude_m_agl, baro_raw.velocity,
-            flight_state_, m_timing_diag_, nav_.getTiltFromVerticalRad(), nav_.getStrapdownQuat());
+            flight_state_, m_timing_diag_, nav_.getTiltFromVerticalRad(), nav_.getStrapdownQuat(),
+            m_armed_);
         // #13: archive RAW GPS position (ADR-0005 raw-primary), not the retired EKF's
         // nav_solution.pos — that stayed frozen at the pad in the record even though
         // the live telemetry path (raw GPS) showed the real moving track.

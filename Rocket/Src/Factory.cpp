@@ -107,6 +107,14 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 	FlightStates flight_state = flight_.GetFlightState();
 	navigation_.SetD1Converted();
 
+	// Push the configured nose axis into Navigation every cycle (ADR-0021
+	// Decision 6, #36).  GetLocatorSettings() is an in-RAM accessor, so this is a
+	// byte copy.  Done here rather than at each of the two save paths (USB-C
+	// console and the app's LocatorCfgChgRequest) so a third path added later
+	// cannot silently leave Navigation on a stale axis — which would not fail
+	// loudly, it would just quietly go back to guessing the frame from gravity.
+	navigation_.setNoseAxis(archive_.GetLocatorSettings().nose_axis);
+
 	if (device_state_ != prev_device_state_) {
 		if (device_state_ == DeviceState::Armed) {
 			BuzzerReset();
@@ -212,7 +220,24 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 				BuzzerStop();
 		}
 
+		// ── Pad settle → mounting calibration (ADR-0021 Decision 6, #36) ──────
+		// Only meaningful before launch; in flight the accelerometer is measuring
+		// thrust and drag, not gravity, so verticality is unreadable.
+		if (flight_state == FlightStates::WaitingLaunch && navigation_.isVerticalAndStationary()) {
+			if (pad_settle_count_ < kPadSettleCycles)
+				++pad_settle_count_;
+			if (pad_settle_count_ >= kPadSettleCycles && !pad_calibrated_) {
+				navigation_.triggerMountingCalibration();
+				pad_calibrated_ = true;
+			}
+		} else {
+			// Moved, tilted, or launched — re-arm for the next settle.
+			pad_settle_count_ = 0;
+			pad_calibrated_   = false;
+		}
+
 		flight_.SetTimingDiag(m_timing_diag_);
+		flight_.SetArmed(device_state_ == DeviceState::Armed);
 		Diag::begin(Diag::Seg::FlightState);
 		flight_.UpdateFlightState();
 		Diag::end(Diag::Seg::FlightState);

@@ -128,6 +128,11 @@ struct PreLaunchData {
 	uint16_t main_backup_deploy_altitude;
 	char device_name[device_name_length];
 	uint16_t battery_voltage_mvolt;
+	// Nose axis (ADR-0021 Decision 6, #36).  Broadcast because the app builds its
+	// LocatorConfig from THIS message and sends the whole struct back on any
+	// config change — a setting the app cannot see is a setting it silently
+	// resets to Auto the next time the user edits anything else.
+	NoseAxis nose_axis;
 	// Explicit arm state (ADR-0021 Decision 3, #35).  Carried here as well as in
 	// TelemetryData so the app never has to infer arm state from WHICH message
 	// arrived — the inference it used to make, and which ADR-0021 breaks: once
@@ -310,16 +315,16 @@ static_assert(sizeof(PacketHeader)                   ==   6, "PacketHeader size 
 static_assert(kPayloadSize                           == 239, "FlightData payload size changed");
 static_assert(sizeof(StartupMessage)                 ==  74, "StartupMessage size changed");
 static_assert(sizeof(VersionInfoMessage)             ==  70, "VersionInfoMessage size changed");
-static_assert(sizeof(PreLaunchData)                  == 116, "PreLaunchData size changed (app payload 110 = 101 + armed 1 + locator_id 4 + auth_tag 4)");
+static_assert(sizeof(PreLaunchData)                  == 117, "PreLaunchData size changed (app payload 111 = 101 + nose_axis 1 + armed 1 + locator_id 4 + auth_tag 4)");
 static_assert(sizeof(TelemetryData)                  ==  77, "TelemetryData size changed (app payload 71 = 62 + armed 1 + locator_id 4 + auth_tag 4; + rssi 2 = 73)");
 static_assert(sizeof(FlightMetadataRecord)           ==  10, "FlightMetadataRecord size changed");
 static_assert(sizeof(FlightMetadata)                 == 106, "FlightMetadata size changed (app payload 100)");
 static_assert(kFlightEventCount                      ==  11, "FlightEvent count changed — sync app FlightEventIndex");
 static_assert(sizeof(FlightEventsMessage)            ==  66, "FlightEventsMessage size changed (app payload 60)");
 static_assert(sizeof(FlightDataPacket)               == 255, "FlightDataPacket size changed (max LoRa frame 255)");
-static_assert(sizeof(RocketPersistentSettings)       ==  34, "RocketPersistentSettings size changed");
+static_assert(sizeof(RocketPersistentSettings)       ==  35, "RocketPersistentSettings size changed");
 static_assert(sizeof(TargetedRequest)                ==  10, "TargetedRequest size changed (ADR-0020) — sync receiver + app");
-static_assert(sizeof(LocatorSettings)                ==  44, "LocatorSettings size changed — sync receiver + app");
+static_assert(sizeof(LocatorSettings)                ==  45, "LocatorSettings size changed — sync receiver + app");
 static_assert(sizeof(FlightDataAck)                  ==  46, "FlightDataAck size changed (app FLIGHT_DATA_ACK_SIZE)");
 static_assert(sizeof(DeploymentTestCountdownMessage) ==   7, "DeploymentTestCountdownMessage size changed");
 static_assert(sizeof(FlightDataRequest)              ==  11, "FlightDataRequest size changed");

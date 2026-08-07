@@ -21,6 +21,11 @@ public:
     // ProcessRocketEvents call.  The values are written into the next archived
     // FlightSample via archive_.WriteData().
     void SetTimingDiag(const TimingDiag &t) { m_timing_diag_ = t; }
+    // Arm state, stamped into every recorded sample (ADR-0021 Decision 4, #36).
+    // Pushed in from Factory each cycle rather than read here: FlightManager has
+    // no view of DeviceState, and now that it runs disarmed too (#36) it cannot
+    // assume it is armed just because it is recording.
+    void SetArmed(bool armed) { m_armed_ = armed; }
 
     // GPS-PPS-disciplined monotonic millisecond clock, supplied each cycle by the
     // C interface (Factory_C_Interface.cpp).  Used as the absolute capture time of
@@ -124,6 +129,7 @@ private:
     bool     m_record_origin_set_ = false;
 
     TimingDiag   m_timing_diag_         { };
+    bool         m_armed_               = false;
     FlightStates flight_state_          = FlightStates::WaitingLaunch;
     uint32_t     flight_time_ms         = 0;
     uint8_t      deployment_ch1_stats_  = 0;

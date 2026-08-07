@@ -28,13 +28,13 @@ public:
 	bool WriteEvent(FlightArchive::Statistic stat_id, const TValue &value);
 	bool WriteData(uint32_t flight_time_ms, const NavSolution &nav_solution, const float raw_baro_altitude_agl,
 			const float raw_baro_velocity, FlightStates flight_state, const TimingDiag &timing,
-			float tilt_rad, const Quaternionf &strapdown_quat);
+			float tilt_rad, const Quaternionf &strapdown_quat, bool armed);
 	// Pack a FlightSample from the per-cycle inputs WITHOUT writing it.  Shared by
 	// WriteData() and the FlightManager pre-launch ring producer so the on-flash
 	// layout is defined in exactly one place.
 	static FlightArchive::FlightSample BuildSample(uint32_t flight_time_ms, const NavSolution &nav_solution,
 			const float raw_baro_altitude_agl, const float raw_baro_velocity, FlightStates flight_state,
-			const TimingDiag &timing, float tilt_rad, const Quaternionf &strapdown_quat);
+			const TimingDiag &timing, float tilt_rad, const Quaternionf &strapdown_quat, bool armed);
 	// Write an already-built sample (e.g. drained from the pre-launch ring).
 	bool WriteBuiltSample(const FlightArchive::FlightSample &sample) {
 		return archive_.WriteFlightDataSample(record_id_, sample);

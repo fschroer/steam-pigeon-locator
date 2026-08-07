@@ -41,6 +41,7 @@ enum UserInteractionState
   EditMainBackupDeployAltitude,
   EditLoraChannel,
   EditDeviceName,
+  EditNoseAxis,
   EditPassword,
   DataHome,
   TestHome,
@@ -98,6 +99,14 @@ private:
   const char* main_backup_deploy_altitude_text_ = "7) Main Backup Deploy Altitude (m):\t\0";
   const char* lora_channel_text_ = "8) Lora Channel (0-63):\t\t\t\0";
   const char* device_name_text_ = "9) Device Name:\t\t\t\t\0";
+  const char* nose_axis_text_ = "n) Sensor Axis Toward Nose:\t\t\0";
+  const char* nose_axis_auto_text_ = "Auto (detect on arm)\0";
+  const char* nose_axis_x_plus_text_ = "+X\0";
+  const char* nose_axis_x_minus_text_ = "-X\0";
+  const char* nose_axis_y_plus_text_ = "+Y\0";
+  const char* nose_axis_y_minus_text_ = "-Y\0";
+  const char* nose_axis_z_plus_text_ = "+Z\0";
+  const char* nose_axis_z_minus_text_ = "-Z\0";
   const char* password_text_ = "p) Password:\t\t\t\t\0";
   const char* password_set_text_ = "(set)\0";
   const char* password_unset_text_ = "(not set)\0";
@@ -110,6 +119,7 @@ private:
   const char* main_primary_deploy_altitude_edit_text_ = "Edit Main Primary Deploy Altitude (m):\r\n\0";
   const char* main_backup_deploy_altitude_edit_text_ = "Edit Main Backup Deploy Altitude (m):\r\n\0";
   const char* lora_channel_edit_text_ = "Edit Lora Channel (0-63):\r\n\0";
+  const char* nose_axis_edit_text_ = "Edit Sensor Axis Toward Nose:\r\n\0";
   //const char* device_name_edit_text_ = "Edit Device Name:\r\n\0";
 
   const char* data_menu_intro_ = "Rocket Locator Data Menu\r\n\r\n\0";
@@ -138,7 +148,7 @@ private:
   // WriteMany() that emits it needed 262 against 254 usable — the 2026-08-02
   // export stopped at "fix_type," and lost both num_sv and its line ending, so
   // the first data row ran onto the header line.
-  static constexpr char export_header_text_[] = "time_ms,raw_baro_agl_m,fused_agl_m,raw_baro_vel_mps,fused_vspeed_mps,accel_x_g,accel_y_g,accel_z_g,gyro_x_dps,gyro_y_dps,gyro_z_dps,lat_deg,lon_deg,flight_state,oc_start_us,oc_end_us,process_start_us,process_dur_us,tilt_deg,q_w,q_x,q_y,q_z,fix_type,num_sv";
+  static constexpr char export_header_text_[] = "time_ms,raw_baro_agl_m,fused_agl_m,raw_baro_vel_mps,fused_vspeed_mps,accel_x_g,accel_y_g,accel_z_g,gyro_x_dps,gyro_y_dps,gyro_z_dps,lat_deg,lon_deg,flight_state,armed,oc_start_us,oc_end_us,process_start_us,process_dur_us,tilt_deg,q_w,q_x,q_y,q_z,fix_type,num_sv";
 
   // clear_screen_ ("\x1b[2J\r") + crlf_ ("\r\n") share the header's line buffer.
   static constexpr size_t kExportHeaderOverheadChars = 5u + 2u;
@@ -206,6 +216,7 @@ private:
   int main_backup_deploy_altitude_;
   int lora_channel_;
   char device_name_[device_name_length];
+  NoseAxis nose_axis_;
 
   int MakeLine(char *target, const char *source1);
   int MakeLine(char *target, const char *source1, const char *source2);
@@ -218,6 +229,8 @@ private:
   void DisplayConfigSettingsMenu();
   const char* DeployModeString(DeployMode deploy_mode_value);
   void AdjustDeploymentChannelMode(uint8_t uart_char, DeployMode *deploy_mode);
+  const char* NoseAxisString(NoseAxis nose_axis_value);
+  void AdjustNoseAxis(uint8_t uart_char);
   void AdjustConfigNumericSetting(uint8_t uart_char, int *config_mode_setting, int max_setting_value, bool tenths);
   void AdjustConfigTextSetting(uint8_t uart_char, char *config_mode_setting);
   void AdjustPasswordSetting(uint8_t uart_char);

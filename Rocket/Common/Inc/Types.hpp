@@ -60,6 +60,31 @@ enum class ImuAccelSource : uint8_t {
     Auto
 };
 
+// Which RAW SENSOR axis points toward the rocket's nose — a static property of
+// how the locator is mounted in the airframe, so it is configuration, not
+// something to infer (ADR-0021 Decision 6, #36).
+//
+// Mounting calibration detects which sensor axis gravity lies along and calls
+// that "up".  That is only the nose axis if the rocket happens to be vertical
+// when it runs, which is why it was tied to arming — you arm at the pad.  It
+// makes verticality undetectable at any other time: a rocket lying flat on the
+// prep table also has gravity along a cardinal axis, just a different one, and
+// nothing in the IMU distinguishes the two cases.  Stating the nose axis breaks
+// that circularity — tilt-from-vertical becomes the angle between measured
+// gravity and a known axis, measurable whenever the locator is powered.
+//
+// Auto keeps the pre-#36 behaviour (detect on each arm) and is the default, so
+// a locator whose mounting has not been configured behaves exactly as before.
+enum class NoseAxis : uint8_t {
+    Auto = 0,   // detect the gravity axis on each arm; verticality unavailable
+    XPlus,      // sensor +X toward the nose (the identity mounting frame)
+    XMinus,
+    YPlus,
+    YMinus,
+    ZPlus,
+    ZMinus
+};
+
 struct Vec3f {
     float x;
     float y;
