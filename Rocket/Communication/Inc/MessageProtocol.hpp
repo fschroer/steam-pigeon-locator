@@ -54,7 +54,13 @@ enum class MsgType : uint8_t {
 	// stop a future locator message silently colliding with them on the wire.
 	// Adding these changes no behaviour: an already-flashed locator stays compatible.
 	ChannelSurveyRequest = 20,
-	ChannelSurvey = 21
+	ChannelSurvey = 21,
+	// Suppress the prepped-and-disarmed alert for a bounded time (#37).  A
+	// rocket assembled vertically with charges wired is physically identical to
+	// one standing on the pad, so no sensor can tell them apart — this is the
+	// operator saying "still prepping". Addressed like every other command
+	// (ADR-0020): snoozing somebody else's rocket would be a safety hole.
+	PadAlertSnoozeRequest = 22
 };
 
 // Flight event summary indices.  One entry per archived event timestamp; the
@@ -291,6 +297,17 @@ struct DeploymentTestRequest {
 	uint8_t channel;
 };
 
+// Bounded suppression of the #37 alert.  Duration is carried rather than fixed
+// so the policy lives in the app, and it is BOUNDED on purpose — a snooze that
+// never expires is just an off switch, and would reintroduce the forgotten arm
+// this whole ADR exists to catch.  RAM-only on the locator: a power cycle
+// clears it, which fails in the safe direction.
+struct PadAlertSnoozeRequest {
+	PacketHeader packet_header;
+	uint32_t target_locator_id;
+	uint8_t minutes;       // 0 cancels an active snooze
+};
+
 // NOTE: there is deliberately no "is this command addressed?" predicate here.
 // The locator requires an address from EVERY frame it acts on (ADR-0020), because
 // every frame reaching it is an app command.  An allowlist would have to be
@@ -339,5 +356,6 @@ static_assert(sizeof(FlightDataAck)                  ==  46, "FlightDataAck size
 static_assert(sizeof(DeploymentTestCountdownMessage) ==   7, "DeploymentTestCountdownMessage size changed");
 static_assert(sizeof(FlightDataRequest)              ==  11, "FlightDataRequest size changed");
 static_assert(sizeof(DeploymentTestRequest)          ==  11, "DeploymentTestRequest size changed");
+static_assert(sizeof(PadAlertSnoozeRequest)          ==  11, "PadAlertSnoozeRequest size changed — sync receiver + app");
 
 } // namespace Communication

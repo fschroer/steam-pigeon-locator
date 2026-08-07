@@ -57,7 +57,7 @@ void Communication::SendGenericPacket(const uint8_t *data, size_t len) {
 //  Pre-launch / telemetry packets
 // ============================================================================
 
-void Communication::SendPreLaunchData(bool armed, bool pad_alert) {
+void Communication::SendPreLaunchData(bool armed, uint8_t pad_alert) {
 	PreLaunchData msg;
 	// ADR-0005: telemetry is raw-primary (no getFused()). Position from raw GPS,
 	// AGL from raw baro, accel/rates from raw IMU.
@@ -100,7 +100,7 @@ void Communication::SendPreLaunchData(bool armed, bool pad_alert) {
 	// it keeps the app off the inference entirely, so nothing here has to change
 	// if a later state ever sends this message while armed.
 	msg.armed = armed ? 1 : 0;
-	msg.pad_alert = pad_alert ? 1 : 0;
+	msg.pad_alert = pad_alert;
 
 	// Cleartext identity (app looks the locator up by this) and the password-seeded
 	// auth_tag the app verifies to "recognise" this locator.  The auth_tag is
@@ -413,6 +413,22 @@ void Communication::OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
 					deploy_.SetActiveDeploymentChannel(channel);
 					device_state = DeviceState::Test;
 				}
+			}
+			break;
+		}
+
+		case MsgType::PadAlertSnoozeRequest: {
+			// Minutes sits after the header AND the target id (ADR-0020).
+			const uint8_t minutes = payload[sizeof(PacketHeader) + sizeof(uint32_t)];
+			if (minutes == 0u) {
+				pad_alert_snooze_until_ms_ = 0u;   // explicit cancel
+			} else {
+				// Clamped: a snooze long enough to outlast a prep session is an
+				// off switch by another name, and would hand back the forgotten
+				// arm this exists to catch.
+				const uint32_t capped = minutes > kMaxPadAlertSnoozeMinutes
+				                      ? kMaxPadAlertSnoozeMinutes : minutes;
+				pad_alert_snooze_until_ms_ = HAL_GetTick() + capped * 60000u;
 			}
 			break;
 		}
@@ -867,6 +883,14 @@ ParseResult Communication::ParseLoraFrame(const uint8_t *data, std::size_t len, 
 		return decode_message<MsgType::FlightDataRequest>(data, len, out);
 	case MsgType::DeploymentTestRequest:
 		return decode_message<MsgType::DeploymentTestRequest>(data, len, out);
+	case MsgType::PadAlertSnoozeRequest:
+		// Payload read directly from the frame in the handler (target id +
+		// minutes), so no ParsedMessage member is needed — only the length has
+		// to be right for the address check ahead of it to have found the id.
+		if (len != sizeof(PadAlertSnoozeRequest))
+			return ParseResult::LengthMismatch;
+		out.type = hdr.msg_type;
+		return ParseResult::Ok;
 	case MsgType::ArmRequest:
 	case MsgType::DisarmRequest:
 	case MsgType::FlightMetadataRequest:

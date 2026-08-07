@@ -107,7 +107,7 @@ public:
 	// ADR-0021 makes the two no longer interchangeable with arm state (#35/#36).
 	// pad_alert is the locator's prepped-and-disarmed verdict (#37), computed in
 	// Factory at 20 Hz and broadcast so the app does not re-derive it at 1 Hz.
-	void SendPreLaunchData(bool armed, bool pad_alert);
+	void SendPreLaunchData(bool armed, uint8_t pad_alert);
 	void SendTelemetryData(bool armed);
 	void SendTestCountdownMessage(uint16_t test_deploy_count);
 	void SendFlightProfileMetadata(DeviceState &device_state);
@@ -140,7 +140,24 @@ public:
 	}
 #endif
 
+	// ── Pad-alert snooze (#37) ───────────────────────────────────────────────
+	// The operator saying "still prepping". A rocket assembled vertically with
+	// charges wired is physically identical to one standing on the pad, so no
+	// sensor separates them — this is explicit intent instead of a heuristic.
+	//
+	// BOUNDED and RAM-only, both deliberately: it expires on its own, and a
+	// power cycle clears it. A snooze that outlived either would be an off
+	// switch, and would hand back exactly the forgotten arm ADR-0021 exists to
+	// catch. There is no "snooze indefinitely".
+	bool IsPadAlertSnoozed() const {
+		return pad_alert_snooze_until_ms_ != 0u
+		    && static_cast<int32_t>(pad_alert_snooze_until_ms_ - HAL_GetTick()) > 0;
+	}
+	static constexpr uint32_t kMaxPadAlertSnoozeMinutes = 30u;
+
 private:
+
+	uint32_t pad_alert_snooze_until_ms_ = 0u;   // 0 = not snoozed
 
 	DeviceUID            &deviceUID_;
 	FlightManager        &flight_;

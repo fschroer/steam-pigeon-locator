@@ -189,13 +189,18 @@ bool Navigation::getPadTiltFromVerticalRad(float& tilt_rad_out) const {
 // upright swings, and committing a mounting frame off a moving gravity vector
 // is exactly the error the configured nose axis exists to prevent.
 // ---------------------------------------------------------------------------
-bool Navigation::isVerticalAndStationary() const {
+bool Navigation::isVertical() const {
     float tilt_rad = 0.0f;
     if (!getPadTiltFromVerticalRad(tilt_rad))
-        return false;
-    if (tilt_rad > kPadVerticalTolRad)
-        return false;
-    return IsStationary(m_imu.raw(), m_baro.raw());
+        return false;   // Auto, or the accel reading is not gravity-dominated
+    return tilt_rad <= kPadVerticalTolRad;
+}
+
+bool Navigation::isVerticalAndStationary() const {
+    // Stillness on top of verticality.  Only the mounting-frame commit needs
+    // this — it is about to trust the gravity vector, so a moving one is
+    // disqualifying.  The #37 alert uses isVertical() instead; see the header.
+    return isVertical() && IsStationary(m_imu.raw(), m_baro.raw());
 }
 
 void Navigation::commitMountingFrame(const Vec3f& avg_raw_accel) {

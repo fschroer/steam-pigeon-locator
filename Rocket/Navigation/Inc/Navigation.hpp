@@ -75,11 +75,23 @@ public:
     // the accel reading is unusable.
     bool getPadTiltFromVerticalRad(float& tilt_rad_out) const;
 
-    // True when the rocket is standing near-vertical and still: the condition
-    // that says a prepped rocket is on the pad.  Shared by the #36 mounting
-    // re-calibration trigger and the #37 disarmed-alert gate so both agree on
-    // what "on the pad" means.
+    // True when the rocket is standing near-vertical and STILL.  Used by the #36
+    // mounting re-calibration trigger, which needs a trustworthy gravity vector
+    // before it commits a frame.
+    //
+    // Deliberately NOT used by the #37 alert any more.  IsStationary wants
+    // within 0.15 g and 5 °/s — a rocket on a rod in the 20 mph wind that
+    // launches are permitted in breaks that continuously, so the alert's settle
+    // counter would reset forever and it would never fire. That is a false
+    // negative on exactly the windy, distracting day it is most needed.
     bool isVerticalAndStationary() const;
+
+    // True when the rocket is merely near-vertical, whatever it is doing.  This
+    // is what the #37 alert gates on: a bobbing rocket on a rail is still a
+    // rocket standing on a rail. Handling and free fall are already excluded by
+    // getPadTiltFromVerticalRad's gravity-magnitude sanity check, and Factory
+    // integrates this over a window so transient excursions do not matter.
+    bool isVertical() const;
 
     // Set EKF phase parameters (Q/R) and baro LPF alpha.
     // Call from FlightManager::UpdateFlightState() at each state transition.
@@ -208,7 +220,14 @@ private:
     // Decision 5 names ~20° as a starting point, to be validated on the pad —
     // it is not a measured value).  Generous relative to typical 5–10° rail
     // angles so a normally-canted rail still reads as on-the-pad.
-    static constexpr float kPadVerticalTolRad = 0.349f;  // 20°
+    // Tilt within which the rocket counts as standing vertical.  ADR-0021
+    // Decision 5 named ~20° as a starting point; that turned out to be exactly
+    // the NAR-permitted maximum rail/rod angle, so a legally canted rocket sat
+    // ON the boundary and any measurement error (accel bias, mounting slop,
+    // rail flex) pushed it outside — the alert would have gone quiet precisely
+    // when the rail was legal. The gate needs headroom ABOVE the limit, not
+    // equal to it: 35° = the 20° rule plus 15° of slop.
+    static constexpr float kPadVerticalTolRad = 0.611f;  // 35°
 
     // Maximum allowed deviation from 1 g for a sample to count toward the
     // mounting-calibration average.  Samples outside [1 ± this] g (motor

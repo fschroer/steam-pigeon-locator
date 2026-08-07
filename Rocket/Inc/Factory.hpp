@@ -123,12 +123,22 @@ private:
 	// discriminator that keeps this off bench work and off a locator standing in
 	// a drawer — without it this degrades into the flat nag ADR-0021 rejected.
 	//
-	// Escalates rather than repeating flatly.  It does NOT stop while the
+	// Escalates rather than repeating flatly, and does NOT stop while the
 	// condition holds: the operator has, by construction, already forgotten once,
-	// and an alarm that gives up is no use at the moment it matters.  If pad
-	// habituation is observed, cap this rather than removing the escalation.
+	// and an alarm that gives up is no use at the moment it matters.  Habituation
+	// is answered by the bounded snooze (Communication::IsPadAlertSnoozed), not by
+	// letting the alert tire itself out.
+	//
+	// LEAKY, not a reset-on-miss counter.  A rocket on a rod in the 20 mph wind
+	// that launches are permitted in bobs constantly and will spend a fraction
+	// of every second reading past the tilt gate.  A counter that reset on each
+	// miss would never reach the threshold, so the alert would go silent exactly
+	// on a windy, distracting launch day.  Counting up while vertical and down
+	// while not means transient excursions cost time instead of everything:
+	// steady bobbing at 70 % vertical still trips in ~25 s, and genuinely laying
+	// the rocket down clears it in ~10 s.
 	uint16_t disarmed_alert_count_ = 0;
-	static constexpr uint16_t kDisarmedAlertCycles = SAMPLES_PER_SECOND * 10u;   // fire at ~10 s
+	static constexpr uint16_t kDisarmedAlertCycles = SAMPLES_PER_SECOND * 10u;   // fire at ~10 s upright
 	static constexpr uint16_t kDisarmedUrgentCycles = SAMPLES_PER_SECOND * 60u;  // escalate at ~60 s
 	bool altimeter_archive_closed_ = false;
 	bool accelerometer_archive_closed_ = false;

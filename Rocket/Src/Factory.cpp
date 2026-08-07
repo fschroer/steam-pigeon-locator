@@ -213,26 +213,36 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 		// drawer.  DeploymentChannelContinuity() is already sampled while
 		// disarmed (it feeds PreLaunchData.deploy_status) and NFR-8 guarantees
 		// sensing it cannot energize a charge.
-		const bool prepped_and_disarmed = pad_settled
+		// Note isVertical(), NOT isVerticalAndStationary(): a rocket bobbing on a
+		// rod in permitted wind is still a rocket standing on a rod, and
+		// demanding stillness here would silence the alert on the windiest days.
+		const bool prepped_and_disarmed = flight_state == FlightStates::WaitingLaunch
 		                               && device_state_ == DeviceState::Disarmed
+		                               && navigation_.isVertical()
 		                               && DeploymentChannelContinuity() != 0u;
 		if (prepped_and_disarmed) {
 			if (disarmed_alert_count_ < kDisarmedUrgentCycles)
 				++disarmed_alert_count_;
-			if (disarmed_alert_count_ >= kDisarmedAlertCycles
-					&& buzzer_phase_ != BuzzerPhase::DisarmedAlert) {
+		} else if (disarmed_alert_count_ > 0u) {
+			--disarmed_alert_count_;   // leak down; see the header
+		}
+
+		// The counter keeps running while snoozed — only the SOUND is suppressed.
+		// So when the snooze expires the alert resumes immediately if the rocket
+		// is still standing there, rather than restarting a 10 s settle and
+		// giving back another quiet window.
+		const bool alert_due = disarmed_alert_count_ >= kDisarmedAlertCycles;
+		if (alert_due && !comm_.IsPadAlertSnoozed()) {
+			if (buzzer_phase_ != BuzzerPhase::DisarmedAlert) {
 				BuzzerReset();
 				buzzer_phase_ = BuzzerPhase::DisarmedAlert;
 			}
-		} else {
-			// Armed, moved, tilted, launched, or e-matches disconnected — re-arm
-			// the latch so the alert fires afresh on the next prepped settle.
-			disarmed_alert_count_ = 0;
-			if (buzzer_phase_ == BuzzerPhase::DisarmedAlert) {
-				BuzzerReset();
-				BuzzerStop();
-				buzzer_phase_ = BuzzerPhase::Idle;
-			}
+		} else if (buzzer_phase_ == BuzzerPhase::DisarmedAlert) {
+			// Armed, laid down, launched, or e-matches disconnected for long
+			// enough to drain the counter — go quiet and re-arm the latch.
+			BuzzerReset();
+			BuzzerStop();
+			buzzer_phase_ = BuzzerPhase::Idle;
 		}
 
 		// ── Buzzer ────────────────────────────────────────────────────────────
@@ -312,11 +322,18 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			                         || flight_state != FlightStates::WaitingLaunch;
 			const uint16_t t_tlm = Diag::Now();
 			Diag::begin(Diag::Seg::Telemetry);
-			if (send_telemetry)
+			if (send_telemetry) {
 				comm_.SendTelemetryData(device_state_ == DeviceState::Armed);
-			else
-				comm_.SendPreLaunchData(device_state_ == DeviceState::Armed,
-						buzzer_phase_ == BuzzerPhase::DisarmedAlert);
+			} else {
+				// 0 quiet / 1 alerting / 2 snoozed.  The snoozed state is reported
+				// rather than folded into "quiet" so the app can say the system is
+				// still watching — a silent locator that looks identical to a
+				// healthy one is the failure this whole ADR started from.
+				const uint8_t pad_alert_state =
+						buzzer_phase_ == BuzzerPhase::DisarmedAlert ? 1u
+						: (disarmed_alert_count_ >= kDisarmedAlertCycles ? 2u : 0u);
+				comm_.SendPreLaunchData(device_state_ == DeviceState::Armed, pad_alert_state);
+			}
 			Diag::end(Diag::Seg::Telemetry);
 			(void) t_tlm;
 			// Silence the transducer when nothing is playing — but NOT while the
