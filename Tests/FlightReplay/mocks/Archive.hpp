@@ -46,7 +46,8 @@ public:
             uint32_t flight_time_ms, const NavSolution& nav,
             const float raw_agl, const float raw_vel,
             FlightStates state, const TimingDiag& /*t*/,
-            float /*tilt_rad*/, const Quaternionf& /*quat*/) {
+            float /*tilt_rad*/, const Quaternionf& /*quat*/,
+            bool armed) {
         // Mirror the fields the real BuildSample fills that the harness relies on —
         // notably body accel, so the #7 launch-onset ring scan sees real thrust.
         FlightArchive::FlightSample s{};
@@ -57,7 +58,10 @@ public:
         s.gyro                  = nav.body_rates_rps;
         s.lat_rad               = nav.pos.lat_rad;
         s.lon_rad               = nav.pos.lon_rad;
-        s.flight_state          = static_cast<uint8_t>(state);
+        // State in bits 0-6, arm state in bit 7 (ADR-0021 Decision 4, #36) —
+        // mirrors the real BuildSample so the harness sees the same byte.
+        s.flight_state          = static_cast<uint8_t>(state)
+                                | (armed ? FlightArchive::FlightSample::kArmedBit : 0u);
         return s;
     }
 

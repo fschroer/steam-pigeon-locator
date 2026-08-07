@@ -36,6 +36,13 @@ public:
     bool  baroAglReferenceReady()   const { return m_baro_ref_ready; }
     Quaternionf getStrapdownQuat()  const { return m_quat; }
     float getTiltFromVerticalRad()  const { return m_tilt_rad; }
+
+    // Added to track the real Navigation surface FlightManager now calls.  Both
+    // are no-ops here: the harness drives FlightManager directly and has no GPS
+    // receiver to configure, but without them this suite does not compile —
+    // which is how it came to be silently unbuildable (see README).
+    uint8_t getGpsArchiveFixSvByte() const { return 0u; }
+    void    resetGpsForPad() {}
     bool  attitudeReady()           const { return m_attitude_ready; }
     uint32_t attitudeLastUpdateMs() const { return m_solution.timestamp_ms; }
 

@@ -44,6 +44,15 @@ apogee → drogue → main → landing):
 Requires a **host** `g++` (C++17) — not the ARM cross-compiler. On Windows use
 the MSYS2 / MinGW-w64 g++ (e.g. `C:\msys64\mingw64\bin`).
 
+**The mocks track the real interfaces and will not compile if they drift.**
+`mocks/Navigation.hpp` and `mocks/Archive.hpp` must expose every member
+`FlightManager.cpp` calls; when the firmware grows one and the mock does not,
+this suite stops building. That happened silently before 2026-08-07 — the
+`getGpsArchiveFixSvByte` / `resetGpsForPad` additions broke it, and the "97/97
+passing" figure in SESSION_HANDOFF went on being quoted from an older run. If
+this suite fails to compile, fix the mock rather than assuming the suite is
+obsolete.
+
 From an MSYS2/MinGW shell (with `g++` on `PATH`):
 
 ```sh
