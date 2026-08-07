@@ -258,7 +258,7 @@ The strapdown drives the orientation display correctly (pitch/roll/yaw track the
 - **Workflow:** GitHub issues = decision log; ADRs = durable rationale. `gh` authenticated (`fschroer`); `.claude/settings.local.json` allows `gh issue close/edit/comment` + `git push`.
 
 ## Git state
-> ⚠️ **The locator repo is CLEAN but UNPUSHED — `ed989d9` (ADR-0021 / requirements v2.4) plus this file's own docs commit are ahead of `origin/master`.** Receiver and app are **CLEAN and PUSHED**. (A handoff cannot record the hash of the commit containing it.)
+> **All three repos are CLEAN and PUSHED** (this file's own locator commit excepted — a handoff cannot record the hash of the commit containing it).
 >
 > **Current heads: locator `ed989d9`, receiver `71eba58`, app `262d449`** (plus this file's own docs commit). The newest locator commit is **ADR-0021 — arming gates pyro only (requirements v2.4)**, docs only: no firmware or app code changed, so receiver and app are untouched by it and no reflash is implied. Beneath it, the newest run across all three is the ADR-0019 / ADR-0020 work described in the 2026-08-06 section above — roughly 18 locator, 16 receiver and 21 app commits on top of `4f2e96a` / `4cfcd89` / `3f50212`.
 >
