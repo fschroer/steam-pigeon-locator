@@ -26,10 +26,12 @@ In [`Factory::ProcessRocketEvents`](../../Rocket/Src/Factory.cpp) the two states
 
 So a forgotten arm costs the flight its recovery deployment, **and** its black box, **and** its fused position, **and** the audible beacon that makes a landed rocket findable. Only the raw GPS pair in `PreLaunchData` survives. Three of those four losses are incidental to the safety interlock — they are consequences of hanging every subsystem off the same flag, not of anything arming is *for*.
 
-Two distinct problems follow, and they want different answers:
+**First, the part this ADR cannot fix.** A locator that does not fire its charges means the rocket does not separate and no parachute deploys. It comes down as an unpowered missile, nose-first and accelerating. Nothing below prevents that: **a forgotten arm destroys the airframe and endangers whatever is beneath it, and every decision in this ADR leaves that outcome intact.** Only *not forgetting* prevents it. Keep that in view when reading the rest — it is easy to mistake the recording and beacon work for mitigation, and it is not.
 
-1. **Make forgetting survivable.** Nothing in the recording, navigation, or beacon path needs the pyro interlock. Coupling them means a single operator slip removes every means of understanding or finding the flight.
-2. **Make forgetting less likely.** The current design signals armed-ness by *sound*: silent means disarmed, and a repeating ready-beep means armed (users are documented as launching on that beep). Silence is a poor alarm — it is indistinguishable from a flat battery, a failed buzzer, or a locator nobody switched on.
+Two distinct problems follow, and they want different answers — and they are **not** of equal weight:
+
+1. **Make forgetting less likely.** This is the only one that addresses the hazard. The current design signals armed-ness by *sound*: silent means disarmed, and a repeating ready-beep means armed (users are documented as launching on that beep). Silence is a poor alarm — it is indistinguishable from a flat battery, a failed buzzer, or a locator nobody switched on.
+2. **Make the aftermath diagnosable and the wreck findable.** Strictly secondary, and *not* survivability of the flight. Nothing in the recording, navigation, or beacon path needs the pyro interlock; coupling them means a single operator slip additionally removes every means of understanding what happened or finding the pieces. Worth fixing, but it is forensics and recovery — the rocket is broken either way.
 
 A third pressure has to be resisted rather than solved: the obvious "just arm it automatically on a launch signature" inverts the interlock, and is analysed under Alternatives.
 
@@ -75,7 +77,9 @@ Two triggers, doing different jobs:
 
 ## Consequences
 
-**Easier.** A forgotten arm costs the recovery deployment and nothing else: the flight is recorded, the fused solution stays valid, the GPS runs the correct dynamic model with its stale-fix watchdog armed, and the rocket beacons on the ground. The operator gets two independent chances to catch the mistake before it matters, one of which works with the phone in a pocket. The launch-detection machinery ([ADR-0015](0015-launch-detection-drop-rejection.md)) becomes useful in the disarmed case without ever being wired to an ignition path.
+**Easier.** The operator gets two independent chances to catch the mistake *before* it matters, one of which works with the phone in a pocket — this is the part that can actually prevent the loss. Failing that, a forgotten arm no longer also costs the investigation: the flight is recorded, the fused solution stays valid, the GPS runs the correct dynamic model with its stale-fix watchdog armed, and the wreck beacons on the ground. The launch-detection machinery ([ADR-0015](0015-launch-detection-drop-rejection.md)) becomes useful in the disarmed case without ever being wired to an ignition path.
+
+**What is NOT easier — the airframe is still lost.** A disarmed locator fires no charges, so the rocket does not separate, no parachute deploys, and it returns ballistic. Everything above describes finding and understanding that outcome, not avoiding it. Nothing in this ADR reduces the energy arriving at the ground.
 
 **Harder / riskier.**
 - **Flash wear and record churn.** Every launch-detected disarmed event opens and closes a record. Bench handling that trips launch detection now consumes records where it previously consumed none; [ADR-0010](0010-archive-flash-robustness.md)'s reuse lifecycle absorbs this, but the erase-cycle budget is no longer proportional to flights flown.
@@ -96,4 +100,4 @@ Two triggers, doing different jobs:
 - **Verticality alone as the prompt gate, without continuity.** Rejected: rockets stand vertical on stands and in racks for long periods during prep, and an alert that fires through all of it is the flat nag by another name. Continuity is what makes the gate specific, and it is already on the wire.
 - **App-side prompting only.** Rejected as the sole channel — it assumes the app is running, connected, and audible. The rocket is at the pad and already has a transducer; the phone-independent path is the one that works when the operator has walked away from their phone.
 - **Locator buzzer only, no app prompt.** Cheaper, and misses the case where the rocket is already racked and the operator is back at the flight line, out of earshot of the airframe.
-- **Leave the coupling and fix it procedurally (checklist).** A checklist is the correct *operational* control and should exist regardless, but it is the control that already failed here. It does not make the failure survivable, which is what Decision 1 buys.
+- **Fix it procedurally (checklist) instead of in firmware.** Rejected as a *substitute* for Decision 5, but **not** demoted — and an earlier draft of this ADR got that badly wrong, dismissing the checklist as "the control that already failed" and implying Decision 1 replaced it. Decision 1 replaces nothing: it makes the aftermath diagnosable, and the airframe is destroyed either way. **A pre-flight checklist remains the primary control against a ballistic flight, and the Decision 5 alert is its backstop, not its replacement.** The alert is worth building precisely because checklists are executed by tired people at the end of a prep session — but a reader who takes "firmware handles it now" from this ADR has read it wrong.
