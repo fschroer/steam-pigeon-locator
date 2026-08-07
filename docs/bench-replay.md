@@ -91,12 +91,45 @@ disarmed is the case that motivated the whole feature.
    the new `armed` CSV column reads 0 throughout.
 8. Repeat with the locator **armed** and confirm the armed path is unchanged.
 
+## Will this overwrite the record I am replaying?
+
+**It refuses to start if it would.** Worth understanding why the risk is real
+rather than theoretical.
+
+`GetNextAvailableArchiveRecord()` returns the first free slot — or, **once the
+archive is full, the oldest record**, which is then erased to make room. To have
+anything worth replaying the archive is usually full, so the default destination
+*is* the oldest flight, and the oldest flight is exactly what an operator reaches
+for. `B` also opens the destination *before* the replay's first read, so a
+collision would erase the source and the test would then read an empty slot.
+
+It would not have shown up on a first attempt, either: with the boot-opened
+record from [#36](https://github.com/fschroer/steam-pigeon-locator/issues/36),
+the first replay re-adopts that unflown slot and allocates nothing. Only after a
+replay closes a record does the next one allocate fresh and hit the oldest.
+
+So `B` refuses in two cases and prints the numbers:
+
+```
+DIAG|REPLAY: REFUSED — record 3 is the write target (next=3, open=7). Pick another, or 'c' to reclaim.
+DIAG|REPLAY: REFUSED — record 3 has no samples
+```
+
+The second guard exists because replaying an empty record looks like a working
+test that proves nothing — the state machine simply never leaves
+`WaitingLaunch`.
+
+To free a slot without losing the flight you want: use the Data menu's `c`
+(reclaim empty/unused records), or download and then erase what you no longer
+need. Check the destination it reports (`next=`) and pick a source that differs.
+
 ## Caveats
 
 - The replay **reads one archive record while writing another**. Both go through
-  the same flash driver on the shared SPI2 bus. This has not been exercised
-  heavily; if a replay produces a truncated or corrupt destination record,
-  suspect this before suspecting the recording path itself.
+  the same flash driver on the shared SPI2 bus. Slot collision is now refused
+  outright, but the concurrent read/write itself has not been exercised heavily;
+  if a replay produces a truncated destination record, suspect this before
+  suspecting the recording path.
 - Replayed samples drive the nav filters, but GPS, baro and IMU hardware are not
   actually moving. Anything that cross-checks live hardware against the replayed
   stream will disagree.
