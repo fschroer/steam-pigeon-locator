@@ -139,4 +139,14 @@ need. Check the destination it reports (`next=`) and pick a source that differs.
 - Replayed samples drive the nav filters, but GPS, baro and IMU hardware are not
   actually moving. Anything that cross-checks live hardware against the replayed
   stream will disagree.
+- **Any archived column the injector forgets to copy silently keeps its live
+  value**, which is the harness's most misleading failure. It first showed up as
+  replays stalling at `Burnout`: altitude was injected but raw baro *velocity*
+  was not, so it held the bench's ~0.2 m/s. Launch and burnout are accel-driven
+  and fired normally, while noseover and everything downstream — which key on
+  vertical velocity, and per [ADR-0018](adr/0018-landing-detection-quiescence-window.md)
+  landing keys on it *alone* — never fired, however high the replayed altitude
+  climbed. The result looks like a flight-logic bug rather than a harness gap.
+  If a replay stops partway, **check the exported CSV column that the next
+  transition depends on before suspecting the detector**.
 - The destination record consumes an archive slot per replay, like a real flight.

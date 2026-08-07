@@ -817,6 +817,14 @@ void Navigation::injectTestSample(ImuSample&  imu,  BaroSample& baro,
 //    baro.altitude_m_msl  = s.fused_altitude_agl + m_ekf.getPadAltitudeMsl();
     baro.altitude_m_agl  = s.raw_baro_altitude_agl;
     baro.altitude_m_msl  = s.raw_baro_altitude_agl + m_ekf.getPadAltitudeMsl();
+    // Raw baro VELOCITY, not just altitude.  Omitting this stalled every replay
+    // at Burnout: launch and burnout are accel-driven so they fired, but noseover
+    // and everything downstream key on vertical velocity — and ADR-0018 made raw
+    // baro velocity the SOLE landing criterion.  The field simply held whatever
+    // the live baro last measured (~0.2 m/s on a bench), so apogee never arrived
+    // however high the replayed altitude climbed.  The archive carries this
+    // column; it was just never copied across.
+    baro.velocity        = s.raw_baro_velocity;
     baro.timestamp_ms    = s.timestamp_ms;
     baro.valid           = true;
     baro_new             = true;
