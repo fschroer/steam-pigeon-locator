@@ -61,6 +61,12 @@ public:
 			UART_HandleTypeDef& huart2);
   void ProcessChar(uint8_t uart_char, DeviceState& device_state);
   void SetUserInteractionState(UserInteractionState user_interaction_state);
+  // True when no menu is open, i.e. ProcessChar is only accumulating a command
+  // word ("conf", "data", ...).  Factory's hidden diagnostic keys check this
+  // before claiming any character the menus also use — digits in particular
+  // select config items and flight records, so intercepting them unconditionally
+  // silently breaks both menus.
+  bool IsConsoleIdle() const { return user_interaction_state_ == WaitingForCommand; }
   void NotifyTestComplete() { HAL_UART_Transmit(&huart2, (uint8_t*)test_complete_text_, strlen(test_complete_text_), uart_timeout); };
 private:
   FlightManager& flight_;

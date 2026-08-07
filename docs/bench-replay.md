@@ -69,6 +69,12 @@ Cost when enabled: ~1.5 KB flash and ~5.2 KB RAM for the replay sample buffer.
 | `0`–`9` | Select the archive record to replay |
 | `B` | Start the replay in the **current** arm state |
 
+**Both only work at the top level, with no menu open.** Inside the config menu
+digits select items, and in the data menu they choose a flight to export, so the
+menus keep them whenever one is open. The first version of these keys claimed
+digits unconditionally and silently broke both menus — which presents as the
+console ignoring numbers. Press Esc to leave a menu before selecting a record.
+
 `B` resets the flight state machine (`PrepareForArm`), opens a fresh record, and
 starts feeding archived samples. The reset matters: without it a second replay
 would begin at `Landed` and record nothing — the same trap as the

@@ -597,14 +597,20 @@ void Factory::HandleConsoleChar(uint8_t uart_char) {
     // Arm state is deliberately not touched: replaying while Disarmed is the
     // whole point, since that is the path a launch cannot be arranged to test.
     // -----------------------------------------------------------------------
-    else if (uart_char >= '0' && uart_char <= '9') {
+    // Digits are ONLY ours while no menu is open.  Inside the config menu they
+    // select items, and in the data menu they choose a flight to export — the
+    // first version of this claimed them unconditionally and silently broke
+    // both, which presents as the console ignoring numbers.  Same reason 'B' is
+    // gated: it is safe against the four command words today, but the menus own
+    // the keyboard whenever one is open.
+    else if (config_.IsConsoleIdle() && uart_char >= '0' && uart_char <= '9') {
         bench_replay_record_ = static_cast<uint8_t>(uart_char - '0');
         char b[64];
         snprintf(b, sizeof(b), "\r\nDIAG|REPLAY: record %u selected\r\n",
                  static_cast<unsigned>(bench_replay_record_));
         UartSend(b);
     }
-    else if (uart_char == 'B' || uart_char == 'b') {
+    else if (config_.IsConsoleIdle() && (uart_char == 'B' || uart_char == 'b')) {
         char b[128];
         // ---- Guard 1: would the destination erase the source? ----------------
         // GetNextAvailableArchiveRecord returns the first FREE slot, or — once
