@@ -51,7 +51,27 @@ A third pressure has to be resisted rather than solved: the obvious "just arm it
    - The prompt is **latched one-shot per transition**, re-armed only when the rocket returns to non-vertical, and then **escalates** rather than repeating flatly. Habituation is the failure mode that kills this feature: an alert that fires in the car and at the prep table gets the voice option switched off, taking the pad-side warning with it.
    - Starting points, to be validated on the pad: verticality within ~20° of the gravity vector, sustained ~10 s, gyro below the existing `pad_stationary_gyro_tol_dps`, continuity on at least one channel. None of these are measured values.
 
-6. **Mounting calibration must not remain arm-triggered.** It runs on `ArmRequest` today, so under Decision 1 a disarmed flight would be recorded through the identity mounting frame (`{{0,1,2},{1,1,1}}`) whenever the locator is not mounted in the standard orientation — silently corrupting the axis assignment of the one record that exists. Calibration is retriggered on the same sustained-vertical-and-stationary condition as Decision 5, and still on each arm.
+6. **Mounting calibration must not remain arm-triggered.** It runs on `ArmRequest` today, so under Decision 1 a disarmed flight would be recorded through the identity mounting frame (`{{0,1,2},{1,1,1}}`) whenever the locator is not mounted in the standard orientation — silently corrupting the axis assignment of the one record that exists. ~~Calibration is retriggered on the same sustained-vertical-and-stationary condition as Decision 5, and still on each arm.~~ **Amended 2026-08-07 — see below; the trigger as originally written was not implementable.** The nose axis is **configured**, and calibration is retriggered on a pad settle measured against it.
+
+### Amendment (2026-08-07): Decision 6's trigger was circular
+
+The clause struck through above could not be built as stated, and the reason is worth recording because it was invisible until someone tried.
+
+**Verticality cannot be measured without already knowing the mounting frame.** Mounting calibration's whole job is to find which sensor axis gravity lies along and call it "up". That is the nose axis only if the rocket happens to be vertical when it runs. A rocket lying flat on the prep table also has gravity along a cardinal axis — a different one — and nothing in a 6-axis IMU distinguishes the two cases. "Retrigger on sustained vertical and stationary" therefore depends on the very output it is meant to produce.
+
+The original ADR did not notice this because arm-triggering **hides the assumption**: you arm at the pad with the rocket upright, so "the gravity axis is the nose axis" is true at the only moment calibration ever ran. Decision 6 proposed running it at other moments without carrying that assumption across.
+
+**Resolution: state the mounting instead of inferring it.** A `NoseAxis` setting (`Auto`, ±X, ±Y, ±Z) names which raw sensor axis points at the nose. It is a static property of the installation — configuration, not something to detect. With it set, `commitMountingFrame` is deterministic and `getPadTiltFromVerticalRad` measures gravity against a *known* axis, so tilt-from-vertical is readable whenever the locator is powered. `isVerticalAndStationary()` is the predicate Decision 5's alert (#37) gates on, so the two cannot drift apart.
+
+Two triggers, doing different jobs:
+- **Config change** applies the frame immediately — no arm, no pad event.
+- **Pad settle** (vertical and still for ~10 s, latched, re-armed on movement) retriggers full calibration, which is what re-seeds the strapdown at the *pad* orientation rather than wherever the locator lay at power-on.
+
+`NoseAxis::Auto` is the default and preserves the pre-#36 behaviour exactly: `isVerticalAndStationary()` is always false without a stated axis, so the pad trigger never fires and calibration stays arm-only. Settable from the app and the USB-C console, per the FR-L2 precedent.
+
+**This also closed a latent bug that predates the ADR.** The detect path trusts whatever axis gravity lies along at arm time, so arming *before* standing the rocket up recorded the entire flight through the wrong body frame — silently, with no indication in the record.
+
+**Cost:** `RocketPersistentSettings` grew by one byte, which changes `CompactConfigJournal`'s entry stride and payload CRC32, so **stored settings fail validation and revert to defaults on the first boot after flashing** — including the LoRa channel, which leaves the receiver deaf until it is reconfigured. Accepted as a one-time migration cost; a versioned config journal would avoid a repeat.
 
 ## Consequences
 
@@ -64,7 +84,9 @@ A third pressure has to be resisted rather than solved: the obvious "just arm it
 - **Decision 5 spends the operator's attention budget**, which is finite and already drawn on by the ready-beep. If the gate is too loose the feature is worse than nothing — it trains the operator to ignore the locator.
 - The buzzer alert competes with the armed ready-beep for the same transducer; the two patterns must be unmistakably distinct, since the whole point is that the operator currently cannot distinguish "disarmed" from "off".
 
-**Revisit if:** a false disarmed-alert is observed on a genuinely non-flight condition (the gate is too loose); an operator reports habituation or disables voice because of it (the escalation is wrong); flash erase-cycle budget becomes a measured constraint; or a case appears where always-on recording interferes with the armed path's timing (the erase started by `StartOpenNewFlight` is already polled every tick specifically because it races launch).
+**Revisit if:** a false disarmed-alert is observed on a genuinely non-flight condition (the gate is too loose); an operator reports habituation or disables voice because of it (the escalation is wrong); flash erase-cycle budget becomes a measured constraint; a case appears where always-on recording interferes with the armed path's timing (the erase started by `StartOpenNewFlight` is already polled every tick specifically because it races launch); or operators are observed leaving `NoseAxis` at `Auto`, which silently disables both the pad-settle calibration and the Decision 5 alert.
+
+**Known gap (2026-08-07).** A *second* consecutive disarmed flight, with no intervening arm or power cycle, is not covered: the state machine stays at `Landed` — which is what keeps the recovery beacon sounding — and nothing resets it. Arming or power-cycling resets as before. Left open deliberately rather than reset on landing, because resetting would silence the beacon at exactly the moment it is needed.
 
 ## Alternatives considered
 
