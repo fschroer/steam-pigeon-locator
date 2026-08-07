@@ -97,6 +97,14 @@ public:
     }
     NoseAxis getNoseAxis() const { return m_nose_axis_; }
 
+    // The COMMITTED body←sensor frame, for the 'm' console diagnostic.  Exposed
+    // because nothing else observable reflects it: PreLaunchData.accel comes
+    // from getRawImu(), which is the driver's un-remapped sample, so the app's
+    // accelerometer readout does not change when the frame does. Until this,
+    // the only way to see the frame take effect was to fly and read the
+    // archived body accel back out.
+    const MountingFrame& getMountingFrame() const { return m_mounting; }
+
     // Angle between the rocket's nose axis and straight up, from the raw
     // accelerometer.  Meaningful ONLY while the locator is near-stationary — it
     // reads the gravity vector, so any sustained linear acceleration corrupts it.

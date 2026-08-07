@@ -129,6 +129,49 @@ To free a slot without losing the flight you want: use the Data menu's `c`
 (reclaim empty/unused records), or download and then erase what you no longer
 need. Check the destination it reports (`next=`) and pick a source that differs.
 
+## Item 5 (mounting axis) — `m`, and why replay cannot test it
+
+**Bench replay is the wrong tool for this one.** It injects archived *body-frame*
+accel straight into the sample, bypassing the IMU driver entirely, and
+`applyMountingFrame` then runs on it anyway — double-transforming. A replay says
+nothing about mounting.
+
+It also has no other observable output. `PreLaunchData.accel` comes from
+`getRawImu()`, the driver's **un-remapped** sample, so the app's accelerometer
+row reads identically whatever the frame is. Body-frame accel reaches the
+outside world only through the archived record — i.e. only by flying.
+
+Hence the **`m` console key** (always compiled in, not gated on this flag —
+"did my nose-axis setting take effect?" is a fair pre-flight question in the
+field):
+
+```
+DIAG|MOUNT: nose axis = Y  (configured)
+DIAG|MOUNT: frame body<-sensor  X<-+Y  Y<-+Z  Z<-+X
+DIAG|MOUNT: raw  accel  x=+0.02 y=+0.99 z=-0.01 g
+DIAG|MOUNT: body accel  x=+0.99 y=-0.01 z=+0.02 g   (x ~ +1.00 when nose up)
+DIAG|MOUNT: tilt from vertical = +3.20 deg  (vertical + still)
+```
+
+The remap is legible directly: the ~+1 g moves out of its physical column in the
+raw row and into body **+X**.
+
+Procedure, no flight needed:
+
+1. With `NoseAxis` = `Auto`, stand the locator on each face and press `m`. The
+   raw row tells you which sensor axis is which — no datasheet required.
+2. Orient it so a **non-X** sensor axis runs along the rocket's long axis, and
+   set `NoseAxis` to that axis (app, or `n` in the config menu).
+3. **Power-cycle**, and stay disarmed — the point is that no arm event occurs.
+4. Stand it vertical and still for ≥10 s so the pad settle fires.
+5. Press `m`. Frame should be non-identity and body accel ≈ `x=+1.00`, with
+   y and z near zero.
+6. **Negative control:** set `NoseAxis` back to `Auto`, power-cycle, repeat. The
+   frame stays identity and the +1 g shows on the *physical* axis instead —
+   which is what proves the setting did the work, not luck.
+
+`m` only responds at the top level, with no menu open — press Esc first.
+
 ## Caveats
 
 - The replay **reads one archive record while writing another**. Both go through

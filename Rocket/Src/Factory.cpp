@@ -581,6 +581,14 @@ void Factory::HandleConsoleChar(uint8_t uart_char) {
         // until the '~' console key clears it (or the next fault overwrites it).
         return;
     }
+    // Mounting diagnostic.  Not a bench-only key: "did my nose-axis setting
+    // take effect?" is a legitimate pre-flight question in the field, and there
+    // is no other way to answer it short of flying.  Gated on an idle console
+    // so it can never shadow a menu key — the mistake the bench-replay keys
+    // made with digits.
+    else if (config_.IsConsoleIdle() && (uart_char == 'm' || uart_char == 'M')) {
+        PrintMountingDiag();
+    }
 #if SP_FAULT_INJECT
     // -----------------------------------------------------------------------
     // Hidden fault-injection keys (issue #17).  Compiled out unless
@@ -701,6 +709,91 @@ void Factory::HandleConsoleChar(uint8_t uart_char) {
     else {
     	config_.ProcessChar(uart_char, device_state_);
     }
+}
+
+// ---------------------------------------------------------------------------
+// PrintMountingDiag — 'm' console key
+//
+// The mounting frame has no other observable output.  PreLaunchData.accel is
+// taken from getRawImu(), i.e. the driver's un-remapped sample, so the app's
+// accelerometer row reads the same whatever the frame is; body-frame accel
+// reaches the outside world only through the archived flight record. Setting
+// NoseAxis therefore produced no visible change until the rocket had flown,
+// which made #36 item 5 unverifiable on the bench.
+//
+// Prints raw and body accel side by side so the remap is directly legible: the
+// axis reading ~+1 g moves from its physical column to body +X.
+// ---------------------------------------------------------------------------
+namespace {
+// Signed fixed-point with 2 decimals.  snprintf's %f is not available under
+// --specs=nano.specs without float printf support linked in, which this build
+// does not enable.
+void FmtG(char *buf, size_t n, float x) {
+	bool neg = x < 0.0f;
+	if (neg) x = -x;
+	int whole = static_cast<int>(x);
+	int frac  = static_cast<int>((x - static_cast<float>(whole)) * 100.0f + 0.5f);
+	if (frac >= 100) { frac -= 100; ++whole; }
+	snprintf(buf, n, "%s%d.%02d", neg ? "-" : "+", whole, frac);
+}
+const char* AxisName(NoseAxis a) {
+	switch (a) {
+		case NoseAxis::X: return "X";
+		case NoseAxis::Y: return "Y";
+		case NoseAxis::Z: return "Z";
+		default:          return "Auto";
+	}
+}
+}  // namespace
+
+void Factory::PrintMountingDiag() {
+	char line[160];
+	char bx[16], by[16], bz[16];
+
+	const NoseAxis axis = navigation_.getNoseAxis();
+	snprintf(line, sizeof(line), "\r\nDIAG|MOUNT: nose axis = %s%s\r\n", AxisName(axis),
+			axis == NoseAxis::Auto ? "  (detect on arm; tilt unavailable)" : "  (configured)");
+	UartSend(line);
+
+	// body_axis[i] = sign[i] * sensor_axis[src[i]]
+	const auto &f = navigation_.getMountingFrame();
+	static const char *kAx = "XYZ";
+	const bool identity = f.src[0] == 0 && f.src[1] == 1 && f.src[2] == 2
+	                   && f.sign[0] == 1 && f.sign[1] == 1 && f.sign[2] == 1;
+	snprintf(line, sizeof(line),
+			"DIAG|MOUNT: frame body<-sensor  X<-%c%c  Y<-%c%c  Z<-%c%c%s\r\n",
+			f.sign[0] < 0 ? '-' : '+', kAx[f.src[0]],
+			f.sign[1] < 0 ? '-' : '+', kAx[f.src[1]],
+			f.sign[2] < 0 ? '-' : '+', kAx[f.src[2]],
+			identity ? "   (identity - never committed)" : "");
+	UartSend(line);
+
+	const Vec3f raw = navigation_.getRawImu().accel_selected_mps2;
+	FmtG(bx, sizeof(bx), raw.x / G0_F);
+	FmtG(by, sizeof(by), raw.y / G0_F);
+	FmtG(bz, sizeof(bz), raw.z / G0_F);
+	snprintf(line, sizeof(line), "DIAG|MOUNT: raw  accel  x=%s y=%s z=%s g\r\n", bx, by, bz);
+	UartSend(line);
+
+	const Vec3f body = navigation_.getFused().body_accel_mps2;
+	FmtG(bx, sizeof(bx), body.x / G0_F);
+	FmtG(by, sizeof(by), body.y / G0_F);
+	FmtG(bz, sizeof(bz), body.z / G0_F);
+	snprintf(line, sizeof(line),
+			"DIAG|MOUNT: body accel  x=%s y=%s z=%s g   (x ~ +1.00 when nose up)\r\n",
+			bx, by, bz);
+	UartSend(line);
+
+	float tilt_rad = 0.0f;
+	if (navigation_.getPadTiltFromVerticalRad(tilt_rad)) {
+		FmtG(bx, sizeof(bx), tilt_rad * RAD2DEG);
+		snprintf(line, sizeof(line), "DIAG|MOUNT: tilt from vertical = %s deg%s\r\n", bx,
+				navigation_.isVerticalAndStationary() ? "  (vertical + still)" : "");
+	} else {
+		snprintf(line, sizeof(line),
+				"DIAG|MOUNT: tilt unavailable (nose axis Auto, or accel not gravity-dominated)\r\n");
+	}
+	UartSend(line);
 }
 
 void Factory::MS5611OCCallback() {

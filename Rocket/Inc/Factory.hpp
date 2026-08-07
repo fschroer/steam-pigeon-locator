@@ -67,6 +67,11 @@ private:
 	// navigation_.Update().
 	void ServiceConsole();
 	void HandleConsoleChar(uint8_t uart_char);
+	// 'm' console key: report the configured nose axis, the committed mounting
+	// frame, and raw vs body accel side by side.  Answers "did my nose-axis
+	// setting actually take effect?", which otherwise cannot be seen without
+	// flying and reading the archived body accel back out (#36 item 5).
+	void PrintMountingDiag();
 
 	static constexpr uint16_t kUart2RxBufSize = 256;  // power of two
 	volatile uint8_t  uart2_rx_buf_[kUart2RxBufSize] = { };
