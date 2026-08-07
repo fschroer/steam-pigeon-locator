@@ -95,18 +95,50 @@ void Navigation::applyMountingFrame(ImuSample& imu) const {
 //
 // All six are proper rotations (determinant = +1).
 // ---------------------------------------------------------------------------
-// Map a configured nose axis straight onto the six cardinal frames below.
-// Returns false for Auto, leaving the caller to detect as it always has.
-static bool MountingFrameForNoseAxis(NoseAxis axis, Navigation::MountingFrame& out) {
+// Which raw sensor component (0=X,1=Y,2=Z) the configured axis refers to.
+// Returns false for Auto — nothing stated, so nothing to measure against.
+static bool NoseAxisComponent(NoseAxis axis, uint8_t& index_out) {
     switch (axis) {
-        case NoseAxis::XPlus:  out = {{0,1,2},{ 1, 1, 1}}; return true;
-        case NoseAxis::XMinus: out = {{0,1,2},{-1, 1,-1}}; return true;
-        case NoseAxis::YPlus:  out = {{1,2,0},{ 1, 1, 1}}; return true;
-        case NoseAxis::YMinus: out = {{1,2,0},{-1, 1,-1}}; return true;
-        case NoseAxis::ZPlus:  out = {{2,0,1},{ 1,-1,-1}}; return true;
-        case NoseAxis::ZMinus: out = {{2,0,1},{-1, 1,-1}}; return true;
+        case NoseAxis::X: index_out = 0u; return true;
+        case NoseAxis::Y: index_out = 1u; return true;
+        case NoseAxis::Z: index_out = 2u; return true;
         case NoseAxis::Auto:
-        default:               return false;
+        default:          return false;
+    }
+}
+
+// Pick the mounting frame for a configured axis.  The axis comes from config;
+// the SIGN is measured, because it is measurable exactly when this is called —
+// calibration only commits while the rocket is vertical, where the gravity
+// component along the stated axis is a full ±1 g.  That is the whole split:
+// the axis cannot be inferred (a rocket on its side also has gravity along a
+// cardinal axis), the sign trivially can.
+//
+// Returns false if the component is too weak to sign confidently — a locator
+// lying broadside to the axis — leaving the previous frame in place rather than
+// committing a coin-flip.
+static bool MountingFrameForNoseAxis(NoseAxis axis, const Vec3f& raw_accel,
+                                     Navigation::MountingFrame& out) {
+    uint8_t idx = 0u;
+    if (!NoseAxisComponent(axis, idx))
+        return false;
+
+    const float comp[3] = { raw_accel.x, raw_accel.y, raw_accel.z };
+    // Half a g along the axis ⇒ within 60° of vertical; well inside the 20°
+    // gate that actually triggers a commit, but tolerant enough that an arm
+    // taken on a canted rail still signs correctly.
+    if (std::fabs(comp[idx]) < 0.5f * G0_F)
+        return false;
+
+    const bool positive = comp[idx] > 0.0f;   // accel reads +1 g on the axis pointing UP
+    switch (axis) {
+        case NoseAxis::X: out = positive ? Navigation::MountingFrame{{0,1,2},{ 1, 1, 1}}
+                                         : Navigation::MountingFrame{{0,1,2},{-1, 1,-1}}; return true;
+        case NoseAxis::Y: out = positive ? Navigation::MountingFrame{{1,2,0},{ 1, 1, 1}}
+                                         : Navigation::MountingFrame{{1,2,0},{-1, 1,-1}}; return true;
+        case NoseAxis::Z: out = positive ? Navigation::MountingFrame{{2,0,1},{ 1,-1,-1}}
+                                         : Navigation::MountingFrame{{2,0,1},{-1, 1,-1}}; return true;
+        default:          return false;
     }
 }
 
@@ -119,9 +151,9 @@ static bool MountingFrameForNoseAxis(NoseAxis axis, Navigation::MountingFrame& o
 // This one measures gravity against a configured axis and therefore can.
 // ---------------------------------------------------------------------------
 bool Navigation::getPadTiltFromVerticalRad(float& tilt_rad_out) const {
-    MountingFrame frame{};
-    if (!MountingFrameForNoseAxis(m_nose_axis_, frame))
-        return false;   // Auto — no stated nose axis to measure against
+    uint8_t axis_idx = 0u;
+    if (!NoseAxisComponent(m_nose_axis_, axis_idx))
+        return false;   // Auto — no stated axis to measure against
 
     const ImuSample imu = m_imu.raw();
     if (!imu.low_g_valid && !imu.high_g_valid)
@@ -134,10 +166,13 @@ bool Navigation::getPadTiltFromVerticalRad(float& tilt_rad_out) const {
     if (mag < 0.5f * G0_F || mag > 1.5f * G0_F)
         return false;
 
-    // Component of the raw accel along the nose axis.  At rest nose-up this is
-    // +1 g (the accelerometer reads the reaction to gravity).
+    // Component of the raw accel along the stated axis, taken ABSOLUTE: this is
+    // the angle to the NEARER pole, so nose-up and nose-down both read ~0 and
+    // the result spans 0..90°.  The operator states which axis the rocket lies
+    // along, not which way up the locator is bolted — a rocket standing on the
+    // pad is vertical whichever end of that axis points at the sky.
     const float src[3] = { a.x, a.y, a.z };
-    const float along  = static_cast<float>(frame.sign[0]) * src[frame.src[0]];
+    const float along  = std::fabs(src[axis_idx]);
 
     float c = along / mag;
     if (c >  1.0f) c =  1.0f;
@@ -170,9 +205,15 @@ void Navigation::commitMountingFrame(const Vec3f& avg_raw_accel) {
     // not yet vertical committed whichever axis happened to be down, silently
     // recording the whole flight through the wrong frame.
     MountingFrame configured{};
-    if (MountingFrameForNoseAxis(m_nose_axis_, configured)) {
-        m_mounting = configured;
-        FinishMountingCommit();
+    if (m_nose_axis_ != NoseAxis::Auto) {
+        // Axis stated, sign measured.  If the reading is too broadside to sign
+        // confidently, keep the existing frame rather than commit a coin-flip —
+        // the next arm or pad settle will land it, and both of those happen with
+        // the rocket upright.
+        if (MountingFrameForNoseAxis(m_nose_axis_, avg_raw_accel, configured)) {
+            m_mounting = configured;
+            FinishMountingCommit();
+        }
         return;
     }
 

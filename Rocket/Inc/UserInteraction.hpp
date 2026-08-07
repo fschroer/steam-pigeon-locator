@@ -99,14 +99,11 @@ private:
   const char* main_backup_deploy_altitude_text_ = "7) Main Backup Deploy Altitude (m):\t\0";
   const char* lora_channel_text_ = "8) Lora Channel (0-63):\t\t\t\0";
   const char* device_name_text_ = "9) Device Name:\t\t\t\t\0";
-  const char* nose_axis_text_ = "n) Sensor Axis Toward Nose:\t\t\0";
+  const char* nose_axis_text_ = "n) Sensor Axis Along Rocket:\t\t\0";
   const char* nose_axis_auto_text_ = "Auto (detect on arm)\0";
-  const char* nose_axis_x_plus_text_ = "+X\0";
-  const char* nose_axis_x_minus_text_ = "-X\0";
-  const char* nose_axis_y_plus_text_ = "+Y\0";
-  const char* nose_axis_y_minus_text_ = "-Y\0";
-  const char* nose_axis_z_plus_text_ = "+Z\0";
-  const char* nose_axis_z_minus_text_ = "-Z\0";
+  const char* nose_axis_x_text_ = "X\0";
+  const char* nose_axis_y_text_ = "Y\0";
+  const char* nose_axis_z_text_ = "Z\0";
   const char* password_text_ = "p) Password:\t\t\t\t\0";
   const char* password_set_text_ = "(set)\0";
   const char* password_unset_text_ = "(not set)\0";
@@ -119,7 +116,7 @@ private:
   const char* main_primary_deploy_altitude_edit_text_ = "Edit Main Primary Deploy Altitude (m):\r\n\0";
   const char* main_backup_deploy_altitude_edit_text_ = "Edit Main Backup Deploy Altitude (m):\r\n\0";
   const char* lora_channel_edit_text_ = "Edit Lora Channel (0-63):\r\n\0";
-  const char* nose_axis_edit_text_ = "Edit Sensor Axis Toward Nose:\r\n\0";
+  const char* nose_axis_edit_text_ = "Edit Sensor Axis Along Rocket:\r\n\0";
   //const char* device_name_edit_text_ = "Edit Device Name:\r\n\0";
 
   const char* data_menu_intro_ = "Rocket Locator Data Menu\r\n\r\n\0";

@@ -46,19 +46,25 @@ public:
         int8_t  sign[3];  // +1 or -1
     };
 
-    // Which raw sensor axis points at the nose (ADR-0021 Decision 6, #36).
+    // Which raw sensor axis the rocket's long axis lies along (ADR-0021
+    // Decision 6, #36).  Unsigned — the sign is measured, not configured.
     // Auto keeps the detect-on-arm behaviour; anything else makes the mounting
     // frame deterministic and tilt-from-vertical measurable at any time.
-    // Applies the frame immediately on a CHANGE, so a configured axis takes
-    // effect without waiting for an arm or a pad trigger.  Called every cycle
-    // from Factory, hence the guard: without it this would re-seed the EKF and
-    // strapdown 20 times a second.
+    //
+    // On a CHANGE, tries to apply the frame straight away using the current
+    // gravity reading, so setting the axis with the rocket already upright takes
+    // effect without waiting for an arm.  If the locator is lying broadside the
+    // sign is not readable and commitMountingFrame declines — the next arm or
+    // pad settle lands it, and both of those happen with the rocket vertical.
+    //
+    // Called every cycle from Factory, hence the equality guard: without it this
+    // would re-seed the EKF and strapdown 20 times a second.
     void setNoseAxis(NoseAxis axis) {
         if (axis == m_nose_axis_)
             return;
         m_nose_axis_ = axis;
         if (axis != NoseAxis::Auto)
-            commitMountingFrame(Vec3f{});   // configured: the accel arg is unused
+            commitMountingFrame(m_imu.raw().accel_selected_mps2);
     }
     NoseAxis getNoseAxis() const { return m_nose_axis_; }
 

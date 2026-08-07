@@ -75,14 +75,21 @@ enum class ImuAccelSource : uint8_t {
 //
 // Auto keeps the pre-#36 behaviour (detect on each arm) and is the default, so
 // a locator whose mounting has not been configured behaves exactly as before.
+// UNSIGNED on purpose.  The axis is what cannot be inferred; the SIGN can be,
+// and only at the moments it matters.  Mounting calibration runs when the rocket
+// is vertical (on arm, or on a pad settle), and at those moments the gravity
+// component along the stated axis is a full ±1 g — unambiguous.  Asking the
+// operator which way is "up" along the axis would be asking them to know
+// something the firmware can read for itself, and to get it right.
+//
+// The alert (#37) treats both polarities as vertical, so a locator mounted
+// nose-up or nose-down behaves identically.  Distinguishing "standing on the
+// pad" from "lying on the bench" needs the axis alone.
 enum class NoseAxis : uint8_t {
     Auto = 0,   // detect the gravity axis on each arm; verticality unavailable
-    XPlus,      // sensor +X toward the nose (the identity mounting frame)
-    XMinus,
-    YPlus,
-    YMinus,
-    ZPlus,
-    ZMinus
+    X,          // the rocket's long axis lies along the sensor X axis
+    Y,
+    Z
 };
 
 struct Vec3f {

@@ -471,22 +471,21 @@ void UserInteraction::DisplayTestMenu() {
 
 const char* UserInteraction::NoseAxisString(NoseAxis nose_axis_value) {
 	switch (nose_axis_value) {
-	case NoseAxis::XPlus:  return nose_axis_x_plus_text_;
-	case NoseAxis::XMinus: return nose_axis_x_minus_text_;
-	case NoseAxis::YPlus:  return nose_axis_y_plus_text_;
-	case NoseAxis::YMinus: return nose_axis_y_minus_text_;
-	case NoseAxis::ZPlus:  return nose_axis_z_plus_text_;
-	case NoseAxis::ZMinus: return nose_axis_z_minus_text_;
+	case NoseAxis::X: return nose_axis_x_text_;
+	case NoseAxis::Y: return nose_axis_y_text_;
+	case NoseAxis::Z: return nose_axis_z_text_;
 	case NoseAxis::Auto:
 	default:               return nose_axis_auto_text_;
 	}
 }
 
-// Cycles Auto → +X → -X → +Y → -Y → +Z → -Z → Auto.  NoseAxis is contiguous
-// 0..6 (unlike DeployMode, whose Unused = 7 leaves a gap), so this wraps
-// arithmetically instead of enumerating every transition by hand.
+// Cycles Auto -> X -> Y -> Z -> Auto.  No signed variants: the operator states
+// which axis the rocket lies ALONG, and the firmware reads which way up it is
+// from gravity when it matters.  NoseAxis is contiguous 0..3 (unlike DeployMode,
+// whose Unused = 7 leaves a gap), so this wraps arithmetically instead of
+// enumerating every transition by hand.
 void UserInteraction::AdjustNoseAxis(uint8_t uart_char) {
-	constexpr uint8_t kNoseAxisCount = static_cast<uint8_t>(NoseAxis::ZMinus) + 1u;
+	constexpr uint8_t kNoseAxisCount = static_cast<uint8_t>(NoseAxis::Z) + 1u;
 	int uart_line_len = 0;
 	switch (uart_char) {
 	case 13: // Enter key
