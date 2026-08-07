@@ -605,9 +605,41 @@ void Factory::HandleConsoleChar(uint8_t uart_char) {
         UartSend(b);
     }
     else if (uart_char == 'B' || uart_char == 'b') {
-        char b[96];
-        snprintf(b, sizeof(b), "\r\nDIAG|REPLAY: starting record %u, state=%s\r\n",
+        char b[128];
+        // ---- Guard 1: would the destination erase the source? ----------------
+        // GetNextAvailableArchiveRecord returns the first FREE slot, or — once
+        // the archive is full — the OLDEST record, which BeginPrepareRecord then
+        // erases.  To have anything worth replaying the archive is usually full,
+        // so the default destination is the oldest flight, which is exactly what
+        // an operator reaches for.  StartOpenNewFlight also runs BEFORE the
+        // replay's first read, so a collision destroys the source and the test
+        // then reads an erased slot.  Refuse instead.
+        const uint16_t dest = archive_.PeekNextRecord();
+        const uint16_t open_id = archive_.GetOpenRecordId();
+        if (dest == bench_replay_record_ || open_id == bench_replay_record_) {
+            snprintf(b, sizeof(b),
+                     "\r\nDIAG|REPLAY: REFUSED — record %u is the write target"
+                     " (next=%u, open=%u). Pick another, or 'c' to reclaim.\r\n",
+                     static_cast<unsigned>(bench_replay_record_),
+                     static_cast<unsigned>(dest), static_cast<unsigned>(open_id));
+            UartSend(b);
+            return;
+        }
+        // ---- Guard 2: is there anything in it? -------------------------------
+        // Replaying an empty record looks like a working test that proves
+        // nothing — the state machine simply never leaves WaitingLaunch.
+        uint32_t samples = 0u;
+        if (!archive_.GetFlightSampleCount(bench_replay_record_, samples) || samples == 0u) {
+            snprintf(b, sizeof(b),
+                     "\r\nDIAG|REPLAY: REFUSED — record %u has no samples\r\n",
+                     static_cast<unsigned>(bench_replay_record_));
+            UartSend(b);
+            return;
+        }
+        snprintf(b, sizeof(b),
+                 "\r\nDIAG|REPLAY: record %u (%lu samples) -> %u, state=%s\r\n",
                  static_cast<unsigned>(bench_replay_record_),
+                 static_cast<unsigned long>(samples), static_cast<unsigned>(dest),
                  device_state_ == DeviceState::Armed ? "ARMED" : "DISARMED");
         UartSend(b);
         // PrepareForArm resets the flight state machine so the replay starts from

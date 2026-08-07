@@ -48,6 +48,19 @@ public:
 	template<typename TValue>
 	bool ReadEvent(uint16_t record_id, FlightArchive::Statistic statId, TValue &valueOut, bool &presentOut) const;
 	bool GetFlightSampleCount(uint16_t record_id, uint32_t &sample_count_out) const;
+
+	// Which slot the NEXT StartOpenNewFlight would allocate, without allocating
+	// it.  Note this is the first free slot, or — once the archive is full — the
+	// OLDEST record, which BeginPrepareRecord then erases.
+	//
+	// Exposed for the bench replay (#35/#36, SP_BENCH_REPLAY): the source record
+	// is read while the destination is written, so a collision would erase the
+	// very flight being replayed.  With a full archive the oldest record is both
+	// the default destination AND the likeliest thing an operator reaches for,
+	// so this is a routine collision, not an edge case.
+	uint16_t PeekNextRecord() const { return archive_.GetNextAvailableArchiveRecord(); }
+	// The slot currently open for writing, or INVALID_RECORD_ID.
+	uint16_t GetOpenRecordId() const { return record_id_; }
 	bool ReadFlightData(uint16_t record_id, FlightArchive::FlightSample *out_samples, uint32_t max_samples,
 			uint32_t &samples_read_out) const;
 	bool ReadFlightDataRange(uint16_t recordId,
