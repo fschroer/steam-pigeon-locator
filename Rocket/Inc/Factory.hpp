@@ -129,17 +129,31 @@ private:
 	// is answered by the bounded snooze (Communication::IsPadAlertSnoozed), not by
 	// letting the alert tire itself out.
 	//
-	// LEAKY, not a reset-on-miss counter.  A rocket on a rod in the 20 mph wind
-	// that launches are permitted in bobs constantly and will spend a fraction
-	// of every second reading past the tilt gate.  A counter that reset on each
-	// miss would never reach the threshold, so the alert would go silent exactly
-	// on a windy, distracting launch day.  Counting up while vertical and down
-	// while not means transient excursions cost time instead of everything:
-	// steady bobbing at 70 % vertical still trips in ~25 s, and genuinely laying
-	// the rocket down clears it in ~10 s.
-	uint16_t disarmed_alert_count_ = 0;
+	// Settle counter and escalation timer are SEPARATE.  Sharing one counter (as
+	// the first cut did) made the escalation ceiling double as the drain
+	// distance: fully escalated at 1200 cycles with a 200-cycle alert threshold
+	// and a 1/cycle leak meant laying the rocket flat took ~50 s to go quiet,
+	// dropping out of the urgent pattern after one cycle and then nagging gently
+	// for the rest. Confirmed on the bench 2026-08-07. Training the operator that
+	// the alert lies about the current state is exactly how it gets ignored.
+	//
+	// Rise is slow (debounce), fall is fast (a deliberate act), and brief
+	// excursions do not drain at all — the discriminator is not RATE but
+	// DURATION. Wind bobbing is sub-second flicker past the tilt gate, so it
+	// never accumulates a sustained run and the settle keeps climbing; laying the
+	// rocket down is sustained, so it clears outright ~1 s later.
+	uint16_t disarmed_alert_count_ = 0;   // settle: vertical cycles, capped
+	uint16_t non_vertical_run_     = 0;   // consecutive non-vertical cycles
+	uint16_t disarmed_alert_elapsed_ = 0; // cycles the alert has been sounding
+
 	static constexpr uint16_t kDisarmedAlertCycles = SAMPLES_PER_SECOND * 10u;   // fire at ~10 s upright
-	static constexpr uint16_t kDisarmedUrgentCycles = SAMPLES_PER_SECOND * 60u;  // escalate at ~60 s
+	// Headroom above the trigger so a bob that briefly clips the tilt gate
+	// cannot drop the settle back under it and stutter the alert.
+	static constexpr uint16_t kDisarmedAlertCap    = SAMPLES_PER_SECOND * 15u;
+	// How long non-vertical must persist before the settle is cleared.  Longer
+	// than any plausible bob, far shorter than a person laying a rocket down.
+	static constexpr uint16_t kNonVerticalClearCycles = SAMPLES_PER_SECOND * 1u;
+	static constexpr uint16_t kDisarmedUrgentCycles = SAMPLES_PER_SECOND * 60u;  // escalate after ~60 s sounding
 	bool altimeter_archive_closed_ = false;
 	bool accelerometer_archive_closed_ = false;
 	bool ready_to_send_ = true;

@@ -423,12 +423,21 @@ void Communication::OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
 			if (minutes == 0u) {
 				pad_alert_snooze_until_ms_ = 0u;   // explicit cancel
 			} else {
-				// Clamped: a snooze long enough to outlast a prep session is an
-				// off switch by another name, and would hand back the forgotten
-				// arm this exists to catch.
-				const uint32_t capped = minutes > kMaxPadAlertSnoozeMinutes
-				                      ? kMaxPadAlertSnoozeMinutes : minutes;
-				pad_alert_snooze_until_ms_ = HAL_GetTick() + capped * 60000u;
+				// ADDITIVE: each request extends whatever is left, so the operator
+				// can tap up to the time they want instead of committing to a
+				// single long silence up front.
+				//
+				// The clamp is on the TOTAL remaining, not on the increment —
+				// clamping the increment would let repeated taps walk the deadline
+				// out forever, which is exactly the off switch this must not
+				// become. Tapping past the ceiling is a no-op, not an extension.
+				const uint32_t now = HAL_GetTick();
+				const uint32_t remaining = static_cast<uint32_t>(PadAlertSnoozeRemainingMs());
+				uint32_t total = remaining + minutes * 60000u;
+				const uint32_t ceiling = kMaxPadAlertSnoozeMinutes * 60000u;
+				if (total > ceiling)
+					total = ceiling;
+				pad_alert_snooze_until_ms_ = now + total;
 			}
 			break;
 		}

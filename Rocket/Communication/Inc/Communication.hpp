@@ -149,11 +149,27 @@ public:
 	// power cycle clears it. A snooze that outlived either would be an off
 	// switch, and would hand back exactly the forgotten arm ADR-0021 exists to
 	// catch. There is no "snooze indefinitely".
-	bool IsPadAlertSnoozed() const {
-		return pad_alert_snooze_until_ms_ != 0u
-		    && static_cast<int32_t>(pad_alert_snooze_until_ms_ - HAL_GetTick()) > 0;
+	bool IsPadAlertSnoozed() const { return PadAlertSnoozeRemainingMs() > 0; }
+
+	int32_t PadAlertSnoozeRemainingMs() const {
+		if (pad_alert_snooze_until_ms_ == 0u)
+			return 0;
+		const int32_t remaining = static_cast<int32_t>(pad_alert_snooze_until_ms_ - HAL_GetTick());
+		return remaining > 0 ? remaining : 0;
 	}
-	static constexpr uint32_t kMaxPadAlertSnoozeMinutes = 30u;
+
+	// Rounded UP, so any live snooze reports at least 1 and only a truly expired
+	// one reports 0 — the app uses this to show what it has accumulated.
+	uint8_t PadAlertSnoozeRemainingMinutes() const {
+		const int32_t ms = PadAlertSnoozeRemainingMs();
+		return ms <= 0 ? 0u : static_cast<uint8_t>((ms + 59999) / 60000);
+	}
+
+	// Ceiling on TOTAL remaining snooze, not on one request.  Taps accumulate
+	// (see the handler), so without a ceiling on the sum rather than the
+	// increment, repeated tapping would walk it out indefinitely — which is the
+	// off switch this must never become.
+	static constexpr uint32_t kMaxPadAlertSnoozeMinutes = 15u;
 
 private:
 

@@ -155,7 +155,14 @@ struct PreLaunchData {
 	// accel snapshot without the locator's mounting frame.  One implementation at
 	// 20 Hz also guarantees the buzzer and the app alert agree, which is the whole
 	// point of the two channels being independent but not divergent.
-	uint8_t pad_alert;     // 0 = quiet, 1 = prepped rocket standing disarmed
+	// 0 = quiet, 1 = alerting, 2 + n = snoozed with n minutes left (n rounds up,
+	// so 2 means under a minute remains and 17 is the 15-minute ceiling).
+	//
+	// The remaining time rides in the same byte rather than taking a new one:
+	// the app needs it to show what repeated taps have accumulated, and a value
+	// an old app cannot decode still reads as non-zero — i.e. as "alerting",
+	// which is the safe direction for anything it does not understand.
+	uint8_t pad_alert;
 	uint32_t locator_id;   // cleartext STM MPU UID (== DeviceUID::getUID()); app identifies the locator by this
 	uint32_t auth_tag;     // password-seeded checksum (see Communication::ComputePasswordAuthTag); 0 while computing
 };

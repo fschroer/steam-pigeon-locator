@@ -221,10 +221,18 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 		                               && navigation_.isVertical()
 		                               && DeploymentChannelContinuity() != 0u;
 		if (prepped_and_disarmed) {
-			if (disarmed_alert_count_ < kDisarmedUrgentCycles)
+			non_vertical_run_ = 0u;
+			if (disarmed_alert_count_ < kDisarmedAlertCap)
 				++disarmed_alert_count_;
-		} else if (disarmed_alert_count_ > 0u) {
-			--disarmed_alert_count_;   // leak down; see the header
+		} else {
+			// Duration, not rate, is the discriminator: a bob clips the gate for a
+			// fraction of a second and must cost nothing, while laying the rocket
+			// down is sustained and must clear promptly. Anything short of
+			// kNonVerticalClearCycles leaves the settle untouched.
+			if (non_vertical_run_ < kNonVerticalClearCycles)
+				++non_vertical_run_;
+			else
+				disarmed_alert_count_ = 0u;
 		}
 
 		// The counter keeps running while snoozed — only the SOUND is suppressed.
@@ -236,13 +244,18 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			if (buzzer_phase_ != BuzzerPhase::DisarmedAlert) {
 				BuzzerReset();
 				buzzer_phase_ = BuzzerPhase::DisarmedAlert;
+				disarmed_alert_elapsed_ = 0u;   // escalation clock starts on sound
+			} else if (disarmed_alert_elapsed_ < kDisarmedUrgentCycles) {
+				++disarmed_alert_elapsed_;
 			}
 		} else if (buzzer_phase_ == BuzzerPhase::DisarmedAlert) {
-			// Armed, laid down, launched, or e-matches disconnected for long
-			// enough to drain the counter — go quiet and re-arm the latch.
+			// Armed, laid down, launched, e-matches disconnected, or snoozed —
+			// go quiet and reset the escalation so the next alert starts gentle
+			// rather than resuming mid-shout.
 			BuzzerReset();
 			BuzzerStop();
 			buzzer_phase_ = BuzzerPhase::Idle;
+			disarmed_alert_elapsed_ = 0u;
 		}
 
 		// ── Buzzer ────────────────────────────────────────────────────────────
@@ -264,7 +277,7 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			// patterns descend (C8→A7) against the rising triads used by Armed and
 			// Landed, so the pad can tell "you forgot" from "ready to fly" by ear.
 			if (buzzer_phase_ == BuzzerPhase::DisarmedAlert) {
-				if (disarmed_alert_count_ >= kDisarmedUrgentCycles)
+				if (disarmed_alert_elapsed_ >= kDisarmedUrgentCycles)
 					BuzzerSequence(DisarmedAlertUrgent);
 				else
 					BuzzerSequence(DisarmedAlert);
@@ -325,13 +338,17 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			if (send_telemetry) {
 				comm_.SendTelemetryData(device_state_ == DeviceState::Armed);
 			} else {
-				// 0 quiet / 1 alerting / 2 snoozed.  The snoozed state is reported
-				// rather than folded into "quiet" so the app can say the system is
-				// still watching — a silent locator that looks identical to a
-				// healthy one is the failure this whole ADR started from.
-				const uint8_t pad_alert_state =
-						buzzer_phase_ == BuzzerPhase::DisarmedAlert ? 1u
-						: (disarmed_alert_count_ >= kDisarmedAlertCycles ? 2u : 0u);
+				// 0 quiet / 1 alerting / 2+n snoozed with n minutes left.  The
+				// snoozed state is reported rather than folded into "quiet" so the
+				// app can say the system is still watching — a silent locator that
+				// looks identical to a healthy one is the failure this whole ADR
+				// started from — and the minutes let it show what tapping has
+				// accumulated against the ceiling.
+				uint8_t pad_alert_state = 0u;
+				if (buzzer_phase_ == BuzzerPhase::DisarmedAlert)
+					pad_alert_state = 1u;
+				else if (alert_due)
+					pad_alert_state = 2u + comm_.PadAlertSnoozeRemainingMinutes();
 				comm_.SendPreLaunchData(device_state_ == DeviceState::Armed, pad_alert_state);
 			}
 			Diag::end(Diag::Seg::Telemetry);
