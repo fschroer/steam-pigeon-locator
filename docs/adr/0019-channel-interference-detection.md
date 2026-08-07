@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-08-04
 - **Deciders:** fschroer
+- **Requirement:** **FR-P15** (interference detection and channel management, Pri 8), with **FR-R6** and **FR-A9** — added 2026-08-06 in requirements v2.3.9, after this ADR shipped. The work arrived as a direct request rather than through the requirements, and the FR was written to match what was built rather than the other way round.
 - **Related issues:** see also [ADR-0006](0006-locator-connect-password.md) (identity gate, and the near-field RF numbers), [ADR-0009](0009-flight-data-transfer-reliability.md) (the half-duplex safe window this reuses), [ADR-0011](0011-locator-lora-channel-from-app.md) (the channel-change machinery a channel recommendation would drive)
 
 ## Context
