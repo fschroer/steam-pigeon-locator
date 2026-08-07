@@ -15,6 +15,8 @@ extern "C" {
 #include "RgbLed.hpp"
 #include "Deployment.hpp"
 #include "Buzzer.hpp"
+#include "Units.hpp"
+#include <cmath>
 //#include "UsartWrite.hpp"
 #include "Faultlog.hpp"
 
@@ -171,12 +173,50 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 		// deliberate and the locator can be armed or disarmed first.
 		if (SP_BENCH_REPLAY || device_state_ == DeviceState::Armed) {
 			if (nav_test_requested_) {
+#if SP_BENCH_REPLAY
+				// WAIT for the destination record to finish opening before reading
+				// the source.  StartOpenNewFlight kicks off a flash ERASE, and the
+				// replay's first read goes to the same flash over the same SPI2
+				// bus — a read issued mid-erase fails, startTestReplay returns
+				// false, and (until now) nothing said so: the console reported
+				// "starting" and then the replay simply never ran.
+				if (archive_.IsActiveOpen()) {
+					nav_test_requested_ = false;
+					if (navigation_.startTestReplay(archive_, bench_replay_record_)) {
+						UartSend("\r\nDIAG|REPLAY: running\r\n");
+					} else {
+						UartSend("\r\nDIAG|REPLAY: FAILED to open source record\r\n");
+					}
+				}
+#else
 				nav_test_requested_ = false;
 				if (navigation_.startTestReplay(archive_, bench_replay_record_)) {
 					// Navigation::Update() now feeds archive data to FlightManager.
 					// No other change needed — FlightManager sees normal sensor reads.
 				}
+#endif
 			}
+#if SP_BENCH_REPLAY
+			// Progress trace.  A replay that quietly does nothing is the failure
+			// mode this harness is most prone to — it drives real subsystems from
+			// fake data, so any one of them declining leaves no other trace.
+			if (navigation_.isTestReplayActive()) {
+				const uint32_t idx = navigation_.testSampleIndex();
+				if ((idx % (SAMPLES_PER_SECOND * 5u)) == 0u) {
+					char b[128];
+					const Vec3f a = navigation_.getFused().body_accel_mps2;
+					const float g = std::sqrt(a.x * a.x + a.y * a.y + a.z * a.z) / G0_F;
+					snprintf(b, sizeof(b),
+							"\r\nDIAG|REPLAY: n=%lu state=%u accel=%d.%02u g agl=%d m\r\n",
+							static_cast<unsigned long>(idx),
+							static_cast<unsigned>(flight_.GetFlightState()),
+							static_cast<int>(g),
+							static_cast<unsigned>(static_cast<int>(g * 100.0f) % 100),
+							static_cast<int>(navigation_.getRawBaro().altitude_m_agl));
+					UartSend(b);
+				}
+			}
+#endif
 			if (navigation_.isTestReplayComplete()) {
 #if SP_BENCH_REPLAY
 				// Leave the device state alone: forcing Disarmed here would mask
