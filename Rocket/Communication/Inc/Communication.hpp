@@ -103,8 +103,10 @@ public:
 	void OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t LoraSnr_FskCfo, DeviceState &device_state);
 	void SetChannel(uint8_t channel);
 	void SendGenericPacket(const uint8_t *data, size_t len);
-	void SendPreLaunchData();
-	void SendTelemetryData();
+	// `armed` is passed in rather than inferred from which of the two is called:
+	// ADR-0021 makes the two no longer interchangeable with arm state (#35/#36).
+	void SendPreLaunchData(bool armed);
+	void SendTelemetryData(bool armed);
 	void SendTestCountdownMessage(uint16_t test_deploy_count);
 	void SendFlightProfileMetadata(DeviceState &device_state);
 	void SendFlightProfileData();

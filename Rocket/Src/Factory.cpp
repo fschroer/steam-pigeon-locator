@@ -138,7 +138,7 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 		case 2: {
 			navigation_.CalibrateOnPadAndZeroAglUntilLaunch(flight_state);
 			const uint16_t t_tlm = Diag::Now();
-			comm_.SendPreLaunchData();
+			comm_.SendPreLaunchData(device_state_ == DeviceState::Armed);
 			Diag::mark(Diag::Seg::Telemetry, t_tlm);
 			if (buzzer_phase_ == BuzzerPhase::Idle)
 				HAL_TIM_PWM_Stop(&htim16, TIM_CHANNEL_1);
@@ -222,7 +222,7 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 				navigation_.CalibrateOnPadAndZeroAglUntilLaunch(flight_state);
 			}
 			Diag::begin(Diag::Seg::Telemetry);
-			comm_.SendTelemetryData();
+			comm_.SendTelemetryData(device_state_ == DeviceState::Armed);
 			Diag::end(Diag::Seg::Telemetry);
 			break;
 		case 5:

@@ -128,6 +128,13 @@ struct PreLaunchData {
 	uint16_t main_backup_deploy_altitude;
 	char device_name[device_name_length];
 	uint16_t battery_voltage_mvolt;
+	// Explicit arm state (ADR-0021 Decision 3, #35).  Carried here as well as in
+	// TelemetryData so the app never has to infer arm state from WHICH message
+	// arrived — the inference it used to make, and which ADR-0021 breaks: once
+	// arming gates pyro only (#36), a DISARMED locator broadcasts in-flight
+	// telemetry, and a type-based reading would report it ARMED.  Sits inside the
+	// authenticated region (before locator_id/auth_tag) so the tag covers it.
+	uint8_t armed;         // 0 = disarmed, 1 = armed
 	uint32_t locator_id;   // cleartext STM MPU UID (== DeviceUID::getUID()); app identifies the locator by this
 	uint32_t auth_tag;     // password-seeded checksum (see Communication::ComputePasswordAuthTag); 0 while computing
 };
@@ -150,6 +157,13 @@ struct TelemetryData {
 	Vec3f vel_ned_mps;    // fused NED velocity (north, east, down) m/s
 	Quaternionf q_bn;     // body-to-NED attitude quaternion (w, x, y, z)
 	FlightStates flight_state;
+	// Explicit arm state (ADR-0021 Decision 3, #35).  The app previously read
+	// "TelemetryData ⇒ armed" off the message type; ADR-0021 invalidates that,
+	// because a disarmed locator will broadcast telemetry in flight (#36) and an
+	// unarmed ballistic flight would then display as ARMED — suppressing exactly
+	// the warning the operator needs.  Inside the authenticated region so the tag
+	// covers it: a safety indicator must not be forgeable by a bystander.
+	uint8_t armed;        // 0 = disarmed, 1 = armed
 	// Identity + authenticator, mirroring PreLaunchData's trailing pair and
 	// computed the same way (ADR-0006).  Carried here too so the app can
 	// recognise an ARMED locator: an armed locator sends nothing but
@@ -296,8 +310,8 @@ static_assert(sizeof(PacketHeader)                   ==   6, "PacketHeader size 
 static_assert(kPayloadSize                           == 239, "FlightData payload size changed");
 static_assert(sizeof(StartupMessage)                 ==  74, "StartupMessage size changed");
 static_assert(sizeof(VersionInfoMessage)             ==  70, "VersionInfoMessage size changed");
-static_assert(sizeof(PreLaunchData)                  == 115, "PreLaunchData size changed (app payload 109 = 101 + locator_id 4 + auth_tag 4)");
-static_assert(sizeof(TelemetryData)                  ==  76, "TelemetryData size changed (app payload 70 = 62 + locator_id 4 + auth_tag 4; + rssi 2 = 72)");
+static_assert(sizeof(PreLaunchData)                  == 116, "PreLaunchData size changed (app payload 110 = 101 + armed 1 + locator_id 4 + auth_tag 4)");
+static_assert(sizeof(TelemetryData)                  ==  77, "TelemetryData size changed (app payload 71 = 62 + armed 1 + locator_id 4 + auth_tag 4; + rssi 2 = 73)");
 static_assert(sizeof(FlightMetadataRecord)           ==  10, "FlightMetadataRecord size changed");
 static_assert(sizeof(FlightMetadata)                 == 106, "FlightMetadata size changed (app payload 100)");
 static_assert(kFlightEventCount                      ==  11, "FlightEvent count changed — sync app FlightEventIndex");

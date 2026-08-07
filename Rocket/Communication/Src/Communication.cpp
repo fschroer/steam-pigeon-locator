@@ -57,7 +57,7 @@ void Communication::SendGenericPacket(const uint8_t *data, size_t len) {
 //  Pre-launch / telemetry packets
 // ============================================================================
 
-void Communication::SendPreLaunchData() {
+void Communication::SendPreLaunchData(bool armed) {
 	PreLaunchData msg;
 	// ADR-0005: telemetry is raw-primary (no getFused()). Position from raw GPS,
 	// AGL from raw baro, accel/rates from raw IMU.
@@ -94,6 +94,11 @@ void Communication::SendPreLaunchData() {
 	msg.main_backup_deploy_altitude = rocket_settings.main_backup_deploy_altitude;
 	std::memcpy(msg.device_name, rocket_settings.device_name, device_name_length);
 	msg.battery_voltage_mvolt = power_.readBatteryMillivolts();
+	// Stated, never implied by the message type (ADR-0021 Decision 3).  This is
+	// always 0 today — only a disarmed locator sends PreLaunchData — but stating
+	// it keeps the app off the inference entirely, so nothing here has to change
+	// if a later state ever sends this message while armed.
+	msg.armed = armed ? 1 : 0;
 
 	// Cleartext identity (app looks the locator up by this) and the password-seeded
 	// auth_tag the app verifies to "recognise" this locator.  The auth_tag is
@@ -110,7 +115,7 @@ void Communication::SendPreLaunchData() {
 	radio_->Send(reinterpret_cast<uint8_t*>(&msg), sizeof(PreLaunchData));
 }
 
-void Communication::SendTelemetryData() {
+void Communication::SendTelemetryData(bool armed) {
 	TelemetryData msg;
 	// ADR-0005: raw-primary telemetry. Raw GPS position + raw-baro AGL/velocity;
 	// orientation from the NFR-9 strapdown (q_bn), not the retired EKF.
@@ -143,6 +148,12 @@ void Communication::SendTelemetryData() {
 	// q_bn was itself not rendering correctly, so this replaces it.)
 	msg.q_bn = nav_.getStrapdownQuat();
 	msg.flight_state = flight_.GetFlightState();
+	// Stated, never implied by the message type (ADR-0021 Decision 3).  Today only
+	// an armed locator sends this, so it is always 1; once arming gates pyro only
+	// (#36) a DISARMED locator broadcasts telemetry in flight, and this byte is
+	// the only thing standing between that and the app reporting an unarmed
+	// ballistic flight as ARMED.
+	msg.armed = armed ? 1 : 0;
 
 	// Same identity/authenticator pair, and same order of operations, as
 	// SendPreLaunchData: tag computed with crc and auth_tag zeroed, then the CRC
