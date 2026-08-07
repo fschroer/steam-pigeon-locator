@@ -70,6 +70,22 @@ void Factory::Init(const Radio_s *radio) {
 	RgbLed(RgbColor::Off);
 	nav_test_requested_ = true;
 
+	// Open a flight record at BOOT, not only on arm (ADR-0021 Decision 1, #36).
+	// A disarmed locator now runs the flight state machine and must have somewhere
+	// to write, and the erase is far too slow to start at launch detection — the
+	// pre-launch ring holds only ~0.5 s beyond its 2 s window, so a record opened
+	// then would drop the first samples of boost.
+	//
+	// This costs no extra flash wear: StartOpenNewFlight re-adopts a record that
+	// was opened but never launched (FindUnflownOpenRecord, keyed on the absence
+	// of LaunchTimestampMs) in place, without allocating a slot or erasing, and
+	// last_flight_sequence only advances in CloseCurrentFlight.  So bench sessions
+	// and power cycles reuse one slot indefinitely; the counter tracks flights
+	// actually recorded, not power-ons.
+#ifndef NAV_TEST
+	archive_.StartOpenNewFlight();
+#endif
+
 	// A captured fault (HardFault / assert / watchdog hang) is deliberately left
 	// in the .noinit record so it can be read over the USB-C console with '?'
 	// after the reset that produced it.  Clearing it here (as an earlier version
@@ -118,70 +134,68 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 
 	switch (device_state_) {
 	case DeviceState::Disarmed:
-		DisableDeployment();
-		Diag::begin(Diag::Seg::NavUpdate);
-		navigation_.Update();
-		Diag::end(Diag::Seg::NavUpdate);
-		if (buzzer_phase_ == BuzzerPhase::PowerOn) {
-			if (BuzzerSequenceOnce(PowerOn))
-				buzzer_phase_ = BuzzerPhase::Idle;
-		}
-		if (buzzer_phase_ == BuzzerPhase::Disarming) {
-			if (BuzzerSequenceOnce(Disarming))
-				buzzer_phase_ = BuzzerPhase::Idle;
-		}
-		switch (rocket_service_count) {
-		case 0: {
-			power_.enableDivider(); // Allow time for divider voltage to settle
-			break;
-		}
-		case 2: {
-			navigation_.CalibrateOnPadAndZeroAglUntilLaunch(flight_state);
-			const uint16_t t_tlm = Diag::Now();
-			comm_.SendPreLaunchData(device_state_ == DeviceState::Armed);
-			Diag::mark(Diag::Seg::Telemetry, t_tlm);
-			if (buzzer_phase_ == BuzzerPhase::Idle)
-				HAL_TIM_PWM_Stop(&htim16, TIM_CHANNEL_1);
-			break;
-		}
-		case 5:
-			RgbLed(RgbColor::Off);
-			break;
-		}
-		break;
-	case DeviceState::Armed:
+	case DeviceState::Armed: {
+		// ── Pyro interlock — the ONLY thing arming gates (ADR-0021, NFR-12, #36) ──
+		// Everything after this line in this case runs identically armed or
+		// disarmed.  Hanging the recorder, the navigator and the recovery beacon
+		// off this flag is what turned one forgotten arm on 2026-08-06 into four
+		// lost capabilities when only this one is what arming exists to control.
+		// No sensor-derived condition may ever set this the other way — see the
+		// auto-arm rejection in ADR-0021.
+		//
+		// Deliberately scoped to these two states rather than hoisted above the
+		// switch: DeviceState::Test fires charges for the remote deployment test
+		// (FR-A7) and Config/Metadata/Data leave the line as they found it, so a
+		// blanket disable here would break the deployment test outright.
+		if (device_state_ == DeviceState::Armed)
+			EnableDeployment();
+		else
+			DisableDeployment();
+
 #ifdef NAV_TEST
-		if (nav_test_requested_) {
-			nav_test_requested_ = false;
-			if (navigation_.startTestReplay(archive_, 0)) {
-				// Navigation::Update() now feeds archive data to FlightManager.
-				// No other change needed — FlightManager sees normal sensor reads.
+		if (device_state_ == DeviceState::Armed) {
+			if (nav_test_requested_) {
+				nav_test_requested_ = false;
+				if (navigation_.startTestReplay(archive_, 0)) {
+					// Navigation::Update() now feeds archive data to FlightManager.
+					// No other change needed — FlightManager sees normal sensor reads.
+				}
+			}
+			if (navigation_.isTestReplayComplete()) {
+				// Replay finished; log result, switch back to disarmed, etc.
+				device_state_ = DeviceState::Disarmed;
 			}
 		}
-		if (navigation_.isTestReplayComplete()) {
-			// Replay finished; log result, switch back to disarmed, etc.
-			device_state_ = DeviceState::Disarmed;
-		}
 #endif
-		EnableDeployment();
 		Diag::begin(Diag::Seg::NavUpdate);
 		navigation_.Update();
 		Diag::end(Diag::Seg::NavUpdate);
 
-		// Flash erase for the new flight record was started on entry to Armed
-		// (StartOpenNewFlight in the state-change block above).  Poll it EVERY
-		// tick — concurrently with the Arming buzzer — so the record finishes
-		// opening (activeOpen = true) well before the rocket leaves the pad.
-		// Gating this poll behind the Arming buzzer completing left a window in
-		// which launch could occur before the record was open; WriteFlightDataSample
-		// then silently dropped every sample and CloseCurrentFlight wrote no trailer,
-		// leaving a record whose data could not be recovered.
+		// Poll the record erase EVERY tick, in both states.  The record is opened
+		// at boot as well as on arm (#36), so a disarmed flight has a record to
+		// write into; gating this poll behind anything leaves a window in which
+		// launch occurs before the record is open, and WriteBuiltSample then
+		// silently drops every sample.
 #ifndef NAV_TEST
 		archive_.PollOpenNewFlight();
 #endif
-		// Arming one-shot plays immediately on arm.
-		// Buzzer is silenced during flight; Landed beacon is handled below.
-		if (buzzer_phase_ == BuzzerPhase::Arming) {
+
+		// ── Buzzer ────────────────────────────────────────────────────────────
+		// Power-on and disarming one-shots are disarmed-only; the arming one-shot
+		// and ready-beep are armed-only.  The LANDED beacon is neither — it is the
+		// audible recovery aid and now sounds after ANY flight, which is the whole
+		// point of #36: a forgotten arm must not also cost you the ability to find
+		// the rocket on the ground.
+		if (device_state_ == DeviceState::Disarmed) {
+			if (buzzer_phase_ == BuzzerPhase::PowerOn) {
+				if (BuzzerSequenceOnce(PowerOn))
+					buzzer_phase_ = BuzzerPhase::Idle;
+			}
+			if (buzzer_phase_ == BuzzerPhase::Disarming) {
+				if (BuzzerSequenceOnce(Disarming))
+					buzzer_phase_ = BuzzerPhase::Idle;
+			}
+		} else if (buzzer_phase_ == BuzzerPhase::Arming) {
 			if (BuzzerSequenceOnce(Arming))
 				buzzer_phase_ = BuzzerPhase::Armed;
 		} else if (buzzer_phase_ == BuzzerPhase::Armed) {
@@ -197,6 +211,7 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			} else if (flight_state > FlightStates::WaitingLaunch && flight_state != FlightStates::Landed)
 				BuzzerStop();
 		}
+
 		flight_.SetTimingDiag(m_timing_diag_);
 		Diag::begin(Diag::Seg::FlightState);
 		flight_.UpdateFlightState();
@@ -217,19 +232,41 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			BuzzerSequence(Landed);
 		}
 		switch (rocket_service_count) {
-		case 2:
+		case 0:
+			power_.enableDivider(); // Allow time for divider voltage to settle
+			break;
+		case 2: {
 			if (flight_state == FlightStates::WaitingLaunch) {
 				navigation_.CalibrateOnPadAndZeroAglUntilLaunch(flight_state);
 			}
+			// PreLaunchData is the ON-PAD message; TelemetryData is the in-flight
+			// one.  Arm state no longer decides this (#35 put it on the wire as its
+			// own field precisely so it would not have to): a disarmed locator that
+			// has left the pad sends telemetry like any other, carrying armed = 0.
+			const bool send_telemetry = device_state_ == DeviceState::Armed
+			                         || flight_state != FlightStates::WaitingLaunch;
+			const uint16_t t_tlm = Diag::Now();
 			Diag::begin(Diag::Seg::Telemetry);
-			comm_.SendTelemetryData(device_state_ == DeviceState::Armed);
+			if (send_telemetry)
+				comm_.SendTelemetryData(device_state_ == DeviceState::Armed);
+			else
+				comm_.SendPreLaunchData(device_state_ == DeviceState::Armed);
 			Diag::end(Diag::Seg::Telemetry);
+			(void) t_tlm;
+			// Silence the transducer when nothing is playing — but NOT while the
+			// Landed beacon is sounding.  The beacon now runs disarmed too, where
+			// buzzer_phase_ is Idle, so without the flight-state guard this would
+			// chop the recovery aid once per second.
+			if (buzzer_phase_ == BuzzerPhase::Idle && flight_state != FlightStates::Landed)
+				HAL_TIM_PWM_Stop(&htim16, TIM_CHANNEL_1);
 			break;
+		}
 		case 5:
 			RgbLed(RgbColor::Off);
 			break;
 		}
 		break;
+	}
 	case DeviceState::Config:
 		break;
 	case DeviceState::Test: {
