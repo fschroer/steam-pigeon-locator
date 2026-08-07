@@ -105,7 +105,9 @@ public:
 	void SendGenericPacket(const uint8_t *data, size_t len);
 	// `armed` is passed in rather than inferred from which of the two is called:
 	// ADR-0021 makes the two no longer interchangeable with arm state (#35/#36).
-	void SendPreLaunchData(bool armed);
+	// pad_alert is the locator's prepped-and-disarmed verdict (#37), computed in
+	// Factory at 20 Hz and broadcast so the app does not re-derive it at 1 Hz.
+	void SendPreLaunchData(bool armed, bool pad_alert);
 	void SendTelemetryData(bool armed);
 	void SendTestCountdownMessage(uint16_t test_deploy_count);
 	void SendFlightProfileMetadata(DeviceState &device_state);

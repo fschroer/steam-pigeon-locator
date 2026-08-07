@@ -140,6 +140,16 @@ struct PreLaunchData {
 	// telemetry, and a type-based reading would report it ARMED.  Sits inside the
 	// authenticated region (before locator_id/auth_tag) so the tag covers it.
 	uint8_t armed;         // 0 = disarmed, 1 = armed
+	// Prepped-and-disarmed verdict (ADR-0021 Decision 5, #37): a rocket standing
+	// vertical and still, with deployment-channel continuity, that is not armed.
+	//
+	// Computed HERE rather than in the app, and broadcast as a verdict, because
+	// the app only sees this message at 1 Hz — far too sparse to judge rotational
+	// quiescence honestly, and it would have to re-derive verticality from an
+	// accel snapshot without the locator's mounting frame.  One implementation at
+	// 20 Hz also guarantees the buzzer and the app alert agree, which is the whole
+	// point of the two channels being independent but not divergent.
+	uint8_t pad_alert;     // 0 = quiet, 1 = prepped rocket standing disarmed
 	uint32_t locator_id;   // cleartext STM MPU UID (== DeviceUID::getUID()); app identifies the locator by this
 	uint32_t auth_tag;     // password-seeded checksum (see Communication::ComputePasswordAuthTag); 0 while computing
 };
@@ -315,7 +325,7 @@ static_assert(sizeof(PacketHeader)                   ==   6, "PacketHeader size 
 static_assert(kPayloadSize                           == 239, "FlightData payload size changed");
 static_assert(sizeof(StartupMessage)                 ==  74, "StartupMessage size changed");
 static_assert(sizeof(VersionInfoMessage)             ==  70, "VersionInfoMessage size changed");
-static_assert(sizeof(PreLaunchData)                  == 117, "PreLaunchData size changed (app payload 111 = 101 + nose_axis 1 + armed 1 + locator_id 4 + auth_tag 4)");
+static_assert(sizeof(PreLaunchData)                  == 118, "PreLaunchData size changed (app payload 112 = 101 + nose_axis 1 + armed 1 + pad_alert 1 + locator_id 4 + auth_tag 4)");
 static_assert(sizeof(TelemetryData)                  ==  77, "TelemetryData size changed (app payload 71 = 62 + armed 1 + locator_id 4 + auth_tag 4; + rssi 2 = 73)");
 static_assert(sizeof(FlightMetadataRecord)           ==  10, "FlightMetadataRecord size changed");
 static_assert(sizeof(FlightMetadata)                 == 106, "FlightMetadata size changed (app payload 100)");

@@ -188,6 +188,53 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 		archive_.PollOpenNewFlight();
 #endif
 
+		// ── Pad settle → mounting calibration (ADR-0021 Decision 6, #36) ──────
+		// Only meaningful before launch; in flight the accelerometer is measuring
+		// thrust and drag, not gravity, so verticality is unreadable.
+		const bool pad_settled = flight_state == FlightStates::WaitingLaunch
+		                      && navigation_.isVerticalAndStationary();
+		if (pad_settled) {
+			if (pad_settle_count_ < kPadSettleCycles)
+				++pad_settle_count_;
+			if (pad_settle_count_ >= kPadSettleCycles && !pad_calibrated_) {
+				navigation_.triggerMountingCalibration();
+				pad_calibrated_ = true;
+			}
+		} else {
+			// Moved, tilted, or launched — re-arm for the next settle.
+			pad_settle_count_ = 0;
+			pad_calibrated_   = false;
+		}
+
+		// ── Disarmed-rocket alert (ADR-0021 Decision 5, #37) ──────────────────
+		// A prepped rocket standing vertical while disarmed.  Continuity is what
+		// makes this specific rather than a nag: e-matches wired AND upright AND
+		// still is a launch-ready rocket, not a bench session or a locator in a
+		// drawer.  DeploymentChannelContinuity() is already sampled while
+		// disarmed (it feeds PreLaunchData.deploy_status) and NFR-8 guarantees
+		// sensing it cannot energize a charge.
+		const bool prepped_and_disarmed = pad_settled
+		                               && device_state_ == DeviceState::Disarmed
+		                               && DeploymentChannelContinuity() != 0u;
+		if (prepped_and_disarmed) {
+			if (disarmed_alert_count_ < kDisarmedUrgentCycles)
+				++disarmed_alert_count_;
+			if (disarmed_alert_count_ >= kDisarmedAlertCycles
+					&& buzzer_phase_ != BuzzerPhase::DisarmedAlert) {
+				BuzzerReset();
+				buzzer_phase_ = BuzzerPhase::DisarmedAlert;
+			}
+		} else {
+			// Armed, moved, tilted, launched, or e-matches disconnected — re-arm
+			// the latch so the alert fires afresh on the next prepped settle.
+			disarmed_alert_count_ = 0;
+			if (buzzer_phase_ == BuzzerPhase::DisarmedAlert) {
+				BuzzerReset();
+				BuzzerStop();
+				buzzer_phase_ = BuzzerPhase::Idle;
+			}
+		}
+
 		// ── Buzzer ────────────────────────────────────────────────────────────
 		// Power-on and disarming one-shots are disarmed-only; the arming one-shot
 		// and ready-beep are armed-only.  The LANDED beacon is neither — it is the
@@ -202,6 +249,15 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			if (buzzer_phase_ == BuzzerPhase::Disarming) {
 				if (BuzzerSequenceOnce(Disarming))
 					buzzer_phase_ = BuzzerPhase::Idle;
+			}
+			// Repeats while the condition holds, escalating once unanswered.  Both
+			// patterns descend (C8→A7) against the rising triads used by Armed and
+			// Landed, so the pad can tell "you forgot" from "ready to fly" by ear.
+			if (buzzer_phase_ == BuzzerPhase::DisarmedAlert) {
+				if (disarmed_alert_count_ >= kDisarmedUrgentCycles)
+					BuzzerSequence(DisarmedAlertUrgent);
+				else
+					BuzzerSequence(DisarmedAlert);
 			}
 		} else if (buzzer_phase_ == BuzzerPhase::Arming) {
 			if (BuzzerSequenceOnce(Arming))
@@ -218,22 +274,6 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 					BuzzerSequence(Armed);
 			} else if (flight_state > FlightStates::WaitingLaunch && flight_state != FlightStates::Landed)
 				BuzzerStop();
-		}
-
-		// ── Pad settle → mounting calibration (ADR-0021 Decision 6, #36) ──────
-		// Only meaningful before launch; in flight the accelerometer is measuring
-		// thrust and drag, not gravity, so verticality is unreadable.
-		if (flight_state == FlightStates::WaitingLaunch && navigation_.isVerticalAndStationary()) {
-			if (pad_settle_count_ < kPadSettleCycles)
-				++pad_settle_count_;
-			if (pad_settle_count_ >= kPadSettleCycles && !pad_calibrated_) {
-				navigation_.triggerMountingCalibration();
-				pad_calibrated_ = true;
-			}
-		} else {
-			// Moved, tilted, or launched — re-arm for the next settle.
-			pad_settle_count_ = 0;
-			pad_calibrated_   = false;
 		}
 
 		flight_.SetTimingDiag(m_timing_diag_);
@@ -275,7 +315,8 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			if (send_telemetry)
 				comm_.SendTelemetryData(device_state_ == DeviceState::Armed);
 			else
-				comm_.SendPreLaunchData(device_state_ == DeviceState::Armed);
+				comm_.SendPreLaunchData(device_state_ == DeviceState::Armed,
+						buzzer_phase_ == BuzzerPhase::DisarmedAlert);
 			Diag::end(Diag::Seg::Telemetry);
 			(void) t_tlm;
 			// Silence the transducer when nothing is playing — but NOT while the

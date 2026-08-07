@@ -57,7 +57,7 @@ void Communication::SendGenericPacket(const uint8_t *data, size_t len) {
 //  Pre-launch / telemetry packets
 // ============================================================================
 
-void Communication::SendPreLaunchData(bool armed) {
+void Communication::SendPreLaunchData(bool armed, bool pad_alert) {
 	PreLaunchData msg;
 	// ADR-0005: telemetry is raw-primary (no getFused()). Position from raw GPS,
 	// AGL from raw baro, accel/rates from raw IMU.
@@ -100,6 +100,7 @@ void Communication::SendPreLaunchData(bool armed) {
 	// it keeps the app off the inference entirely, so nothing here has to change
 	// if a later state ever sends this message while armed.
 	msg.armed = armed ? 1 : 0;
+	msg.pad_alert = pad_alert ? 1 : 0;
 
 	// Cleartext identity (app looks the locator up by this) and the password-seeded
 	// auth_tag the app verifies to "recognise" this locator.  The auth_tag is

@@ -23,7 +23,10 @@ enum FlightProfileState {
 	kIdle = 0, kMetadataRequested = 1
 };
 
-enum class BuzzerPhase : uint8_t { Idle, PowerOn, Arming, Armed, Disarming };
+// DisarmedAlert is a phase of its own rather than something played from Idle,
+// because the once-per-second HAL_TIM_PWM_Stop that silences the transducer is
+// gated on Idle — playing the alert from Idle would chop it every second (#37).
+enum class BuzzerPhase : uint8_t { Idle, PowerOn, Arming, Armed, Disarming, DisarmedAlert };
 
 struct Radio_s;
 // forward declaration from C
@@ -113,6 +116,20 @@ private:
 	uint16_t pad_settle_count_ = 0;
 	bool     pad_calibrated_   = false;
 	static constexpr uint16_t kPadSettleCycles = SAMPLES_PER_SECOND * 10u;  // ~10 s
+
+	// ── Disarmed-rocket alert (ADR-0021 Decision 5, #37) ─────────────────────
+	// Counts cycles for which a PREPPED rocket has stood vertical while disarmed:
+	// pad settle AND deployment-channel continuity.  Continuity is the
+	// discriminator that keeps this off bench work and off a locator standing in
+	// a drawer — without it this degrades into the flat nag ADR-0021 rejected.
+	//
+	// Escalates rather than repeating flatly.  It does NOT stop while the
+	// condition holds: the operator has, by construction, already forgotten once,
+	// and an alarm that gives up is no use at the moment it matters.  If pad
+	// habituation is observed, cap this rather than removing the escalation.
+	uint16_t disarmed_alert_count_ = 0;
+	static constexpr uint16_t kDisarmedAlertCycles = SAMPLES_PER_SECOND * 10u;   // fire at ~10 s
+	static constexpr uint16_t kDisarmedUrgentCycles = SAMPLES_PER_SECOND * 60u;  // escalate at ~60 s
 	bool altimeter_archive_closed_ = false;
 	bool accelerometer_archive_closed_ = false;
 	bool ready_to_send_ = true;

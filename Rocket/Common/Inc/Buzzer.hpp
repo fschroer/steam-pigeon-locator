@@ -101,6 +101,40 @@ constexpr Note Landed[] = {
 		{ Tone::Rest, 34, 0 },
 };
 
+// ── Disarmed-rocket alert (ADR-0021 Decision 5, #37) ────────────────────────
+// Sounded when a prepped rocket is standing vertical and DISARMED.  The design
+// constraint is that it must be unmistakable against the two patterns already in
+// use at the pad: Armed and Landed are both RISING triads (A7→B7→C8).  This one
+// descends (C8→A7) and doubles, so it reads as "wrong" rather than "ready" even
+// to someone not listening for it.
+//
+// Silence is what this replaces, and silence was the problem: a disarmed locator
+// sounded exactly like a flat battery, a dead buzzer, or one nobody switched on,
+// which is how a rocket reached the pad disarmed on 2026-08-06.
+//
+// Long rest — this is an occasional nag, not a ready-beep.  Escalates to the
+// Urgent variant below if it goes unanswered.
+constexpr Note DisarmedAlert[] = {
+		{ Tone::C8, 2, 2 },
+		{ Tone::A7, 2, 2 },
+		{ Tone::Rest, 2, 0 },
+		{ Tone::C8, 2, 2 },
+		{ Tone::A7, 2, 2 },
+		{ Tone::Rest, 60, 0 },
+};
+
+// Same shape so it is recognisably the same message, but louder and far more
+// frequent.  Deliberately NOT a different tune: escalation should read as "this
+// is getting more insistent", not as a new and unfamiliar sound.
+constexpr Note DisarmedAlertUrgent[] = {
+		{ Tone::C8, 2, 3 },
+		{ Tone::A7, 2, 3 },
+		{ Tone::Rest, 2, 0 },
+		{ Tone::C8, 2, 3 },
+		{ Tone::A7, 2, 3 },
+		{ Tone::Rest, 14, 0 },
+};
+
 constexpr Note AnotherOneBitesTheDust[] = {
 		{ Tone::A7, 3, 3 }, // Bass intro
 		{ Tone::G7, 3, 3 },
