@@ -10,6 +10,35 @@
 // Leave undefined in production builds to save ~800 bytes of RAM.
 //#define NAV_TEST
 
+// ---------------------------------------------------------------------------
+// Bench replay (#35 / #36) — DISABLED by default.
+// Set to 1 here (or build with -DSP_BENCH_REPLAY=1) to replay an archived
+// flight through the live flight state machine while the locator sits on the
+// bench.  MUST remain 0 in any production/flight build.
+//
+// This exists because several #35 / #36 acceptance criteria are otherwise
+// unreachable without a launch: a disarmed flight's record, the landing beacon
+// after a disarmed flight, ZUPT release, and "a disarmed locator broadcasting
+// in-flight telemetry displays as DISARMED".  Launch detection deliberately
+// requires 5 g sustained for 200 ms (ADR-0015 drop rejection), which cannot be
+// produced by hand — that hardening is exactly why the bench cannot fake a
+// flight, so the sensor data has to come from a recording instead.
+//
+// It reuses the NAV_TEST replay machinery but differs from it in the one way
+// that matters here: NAV_TEST compiles the ARCHIVE OUT (see the guards in
+// Factory.cpp), so a NAV_TEST build can drive the state machine but records
+// nothing — useless for testing the recording path.  Bench replay keeps the
+// archive live, and lets the replay run while DISARMED, which is the whole
+// point.
+// ---------------------------------------------------------------------------
+#ifndef SP_BENCH_REPLAY
+#define SP_BENCH_REPLAY 0
+#endif
+
+#if SP_BENCH_REPLAY && !defined(NAV_TEST)
+#define NAV_TEST          // pull in the replay implementation unchanged
+#endif
+
 #ifdef NAV_TEST
 #include "Archive.hpp"
 #include "FlightArchive.hpp"

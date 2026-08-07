@@ -68,7 +68,10 @@ void Factory::Init(const Radio_s *radio) {
 	navigation_.Init(SAMPLES_PER_SECOND);
 	flight_.Init();
 	RgbLed(RgbColor::Off);
-	nav_test_requested_ = true;
+	// Plain NAV_TEST auto-replays at boot.  Bench replay must NOT: the operator
+	// needs to choose arm state and record first, and an auto-replay would open
+	// and close a record on every power-on.
+	nav_test_requested_ = (SP_BENCH_REPLAY == 0);
 
 	// Open a flight record at BOOT, not only on arm (ADR-0021 Decision 1, #36).
 	// A disarmed locator now runs the flight state machine and must have somewhere
@@ -82,7 +85,7 @@ void Factory::Init(const Radio_s *radio) {
 	// last_flight_sequence only advances in CloseCurrentFlight.  So bench sessions
 	// and power cycles reuse one slot indefinitely; the counter tracks flights
 	// actually recorded, not power-ons.
-#ifndef NAV_TEST
+#if !defined(NAV_TEST) || SP_BENCH_REPLAY
 	archive_.StartOpenNewFlight();
 #endif
 
@@ -124,7 +127,7 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			// per-flight variable, and drops any stale on-pad data from a prior arm.
 			flight_.PrepareForArm();
 			datestamp_saved_ = false;   // re-write FlightTimestampS for the new flight
-#ifndef NAV_TEST
+#if !defined(NAV_TEST) || SP_BENCH_REPLAY
 			archive_.StartOpenNewFlight();
 #endif
 		} else if (prev_device_state_ == DeviceState::Armed) {
@@ -161,17 +164,29 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			DisableDeployment();
 
 #ifdef NAV_TEST
-		if (device_state_ == DeviceState::Armed) {
+		// Bench replay runs in WHATEVER state the operator is in — the point is to
+		// exercise the DISARMED path, so gating it on Armed (as plain NAV_TEST
+		// does) would test the one case that never needed help.  Started by the
+		// 'B' console key rather than automatically, so the state under test is
+		// deliberate and the locator can be armed or disarmed first.
+		if (SP_BENCH_REPLAY || device_state_ == DeviceState::Armed) {
 			if (nav_test_requested_) {
 				nav_test_requested_ = false;
-				if (navigation_.startTestReplay(archive_, 0)) {
+				if (navigation_.startTestReplay(archive_, bench_replay_record_)) {
 					// Navigation::Update() now feeds archive data to FlightManager.
 					// No other change needed — FlightManager sees normal sensor reads.
 				}
 			}
 			if (navigation_.isTestReplayComplete()) {
+#if SP_BENCH_REPLAY
+				// Leave the device state alone: forcing Disarmed here would mask
+				// whether the ARMED path behaved, and would fire a disarm
+				// transition the operator never asked for.
+				navigation_.stopTestReplay();
+#else
 				// Replay finished; log result, switch back to disarmed, etc.
 				device_state_ = DeviceState::Disarmed;
+#endif
 			}
 		}
 #endif
@@ -184,7 +199,7 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 		// write into; gating this poll behind anything leaves a window in which
 		// launch occurs before the record is open, and WriteBuiltSample then
 		// silently drops every sample.
-#ifndef NAV_TEST
+#if !defined(NAV_TEST) || SP_BENCH_REPLAY
 		archive_.PollOpenNewFlight();
 #endif
 
@@ -287,7 +302,7 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 				buzzer_phase_ = BuzzerPhase::Armed;
 		} else if (buzzer_phase_ == BuzzerPhase::Armed) {
 			if (flight_state == FlightStates::WaitingLaunch) {
-#ifndef NAV_TEST
+#if !defined(NAV_TEST) || SP_BENCH_REPLAY
 				// Withhold the ready-beep until the flight record is fully open
 				// (activeOpen = true).  Users launch on the ready-beep, so this
 				// guarantees sample recording is active before the rocket leaves
@@ -569,6 +584,40 @@ void Factory::HandleConsoleChar(uint8_t uart_char) {
         const unsigned n = comm_.DbgCycleTxDropPerGroup();
         snprintf(b, sizeof(b), "\r\nDIAG|LOSS: flight-data drop-per-group = %u\r\n", n);
         UartSend(b);
+    }
+#endif
+#if SP_BENCH_REPLAY
+    // -----------------------------------------------------------------------
+    // Bench replay (#35 / #36).  Compiled out unless SP_BENCH_REPLAY == 1.
+    // See docs/bench-replay.md.
+    //
+    //   0-9  select the archive record to replay
+    //   B    start the replay in the CURRENT arm state
+    //
+    // Arm state is deliberately not touched: replaying while Disarmed is the
+    // whole point, since that is the path a launch cannot be arranged to test.
+    // -----------------------------------------------------------------------
+    else if (uart_char >= '0' && uart_char <= '9') {
+        bench_replay_record_ = static_cast<uint8_t>(uart_char - '0');
+        char b[64];
+        snprintf(b, sizeof(b), "\r\nDIAG|REPLAY: record %u selected\r\n",
+                 static_cast<unsigned>(bench_replay_record_));
+        UartSend(b);
+    }
+    else if (uart_char == 'B' || uart_char == 'b') {
+        char b[96];
+        snprintf(b, sizeof(b), "\r\nDIAG|REPLAY: starting record %u, state=%s\r\n",
+                 static_cast<unsigned>(bench_replay_record_),
+                 device_state_ == DeviceState::Armed ? "ARMED" : "DISARMED");
+        UartSend(b);
+        // PrepareForArm resets the flight state machine so the replay starts from
+        // WaitingLaunch.  Without it a second replay would begin at Landed and
+        // record nothing — the same trap as the second-consecutive-disarmed-flight
+        // gap noted in ADR-0021.
+        flight_.PrepareForArm();
+        datestamp_saved_ = false;
+        archive_.StartOpenNewFlight();
+        nav_test_requested_ = true;
     }
 #endif
     else {
