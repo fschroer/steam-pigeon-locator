@@ -36,6 +36,7 @@ The gaps catalogued in **Appendix A** are tracked as GitHub issues in [`fschroer
 **Milestone: [Firmware/app contract integrity](https://github.com/fschroer/steam-pigeon-locator/milestone/2)** — keep the LoRa/BLE wire format and shared enums in sync.
 - [ ] [#4 — Wire protocol is defined twice by hand (C++ structs vs Kotlin offsets)](https://github.com/fschroer/steam-pigeon-locator/issues/4) — *layout cross-check: firmware `static_assert`s committed; app `WireLayoutTest.kt` pending commit*
 - [ ] [#5 — Enum drift between firmware and app FlightStates/MsgType](https://github.com/fschroer/steam-pigeon-locator/issues/5)
+- [ ] [#35 — Arm-state must be explicit on the wire; the app infers it from message type](https://github.com/fschroer/steam-pigeon-locator/issues/35) — *[ADR-0021](adr/0021-arming-gates-pyro-only.md) Decision 3; breaking wire change, **blocks #36***
 
 **Milestone: [Requirements & docs accuracy](https://github.com/fschroer/steam-pigeon-locator/milestone/3)** — fix factual errors and add requirement structure.
 - [x] [#3 — Requirements claim GPS shares the SPI bus; it is actually on I2C](https://github.com/fschroer/steam-pigeon-locator/issues/3) — resolved 2026-06-16: requirements doc corrected (SPI = baro/IMU/flash; GPS on I2C)
@@ -46,6 +47,8 @@ The gaps catalogued in **Appendix A** are tracked as GitHub issues in [`fschroer
 - [ ] [#16 — Radio RX: verify removed CRC-mismatch discard doesn't admit corrupt frames](https://github.com/fschroer/steam-pigeon-locator/issues/16) — *bench validation of the 2026-07-04 `radio_driver.c` change*
 - [ ] [#17 — Validate IWDG watchdog timeout + `.noinit` fault-log persistence (NFR-10)](https://github.com/fschroer/steam-pigeon-locator/issues/17) — *bench validation of [ADR-0008](adr/0008-watchdog-fault-log.md)*
 - [ ] [#20 — Validate locator channel-change recovery path (forced miss → receiver revert + retry)](https://github.com/fschroer/steam-pigeon-locator/issues/20) — *bench validation of [ADR-0011](adr/0011-locator-lora-channel-from-app.md) invariant 4 (happy path already bench-tested)*
+- [ ] [#36 — Arming should gate pyro only: record, navigate and beacon a disarmed flight too](https://github.com/fschroer/steam-pigeon-locator/issues/36) — *[ADR-0021](adr/0021-arming-gates-pyro-only.md) Decisions 1/2/4/6; blocked on #35. A 2026-08-06 ballistic flight lost its deployment, black box, fused position and landing beacon to one forgotten arm — only three of those four are what arming is for*
+- [ ] [#37 — Alert the operator when a prepped rocket is vertical and disarmed (buzzer + app)](https://github.com/fschroer/steam-pigeon-locator/issues/37) — *[ADR-0021](adr/0021-arming-gates-pyro-only.md) Decision 5; gated on verticality + quiescence + pyro continuity. Independent of #35/#36*
 - [ ] [#26 — Offline satellite maps: no wired tile provider permits permanent caching](https://github.com/fschroer/steam-pigeon-locator/issues/26) — *release blocker for the offline-maps feature ([ADR-0014](adr/0014-maplibre-offline-satellite-maps.md)); feature implemented and bench-verified, but Mapbox/Esri/MapTiler Cloud terms forbid permanent on-device packs — decide the licensed source (written permission, public-domain NAIP, or online-only)*
 
 ---
