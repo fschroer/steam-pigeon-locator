@@ -1,7 +1,7 @@
 # ADR-0022: The app refuses to quote a distance or bearing it cannot justify
 
-- **Status:** Proposed
-- **Date:** 2026-08-08
+- **Status:** Accepted
+- **Date:** 2026-08-08 (ratified 2026-08-08)
 - **Deciders:** fschroer
 - **Related issues:** see also [ADR-0017](0017-gps-receiver-configuration-ownership.md) (greyed, never hidden), [ADR-0018](0018-landing-detection-quiescence-window.md) (the landing verdict this reads flight phase from)
 
