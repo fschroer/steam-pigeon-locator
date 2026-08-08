@@ -380,8 +380,15 @@ Each locator identifies itself with a permanent hardware ID and, optionally, a p
 |---|---|
 | **Enable Speech** | Turns the spoken callouts on and off. Leave it on — it's how you keep your eyes on the rocket. |
 | **Voice Name** | Selects which of your phone's installed text-to-speech voices to use. |
+| **Closest map zoom** | How far in the flight map follows the rocket by itself (z18–z22, default z20). See below. |
 
 💡 Try the voice at home, at volume, outdoors. Some voices are much easier to understand over wind and motor noise than others.
+
+**About closest map zoom.** The map frames your position and the rocket's together, zooming to fit both. Within a few metres of a landed rocket, the gap between those two positions is mostly the *combined GPS error of the two receivers* rather than real distance — so it swings from one reading to the next, and the map chases it, jumping zoom levels every second or so exactly when you are trying to look at it. Setting a closest zoom stops the chase: the map holds a steady frame instead.
+
+- It bounds **automatic** zoom only. You can always pinch in closer by hand; the map returns to its own framing a few seconds after you let go, as it always has.
+- Lower is steadier, at the cost of the closest levels of detail. z20 is a starting point, not a recommendation — how much error you have depends on your receivers and how much sky they can see.
+- If the map still pumps at close range, come down a level. If it settles too far out to be useful, go up.
 
 ---
 
@@ -882,6 +889,8 @@ The landed beacon is **loud** and repeats about every 2 seconds — the same thr
 - It's a close-in finder, not a long-range one. Expect to hear it when you're within tens of metres, less in wind or tall vegetation.
 - Stop walking to listen. Your own footsteps are louder than you think.
 - 💡 In a group, spread out and triangulate. Two people who can both hear it will find it much faster than one.
+
+⚡ **If the map jumps zoom levels as you close in, that is GPS error, not the rocket moving.** Two receivers each a few metres out is enough to make the gap between the markers swing, and the map re-fits to every swing. Set a **closest map zoom** in App settings (§2.8) to stop it; pinching in by hand still works regardless.
 
 ## 9.5 If the last known position is stale or absent
 
