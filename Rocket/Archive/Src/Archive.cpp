@@ -242,7 +242,6 @@ bool Archive::CloseCurrentFlight() {
 	}
 	runtime_.last_flight_sequence = flight_num_;
 	runtime_.last_closed_record_id = record_id_;
-	runtime_.archive_position = static_cast<uint8_t>((record_id_ + 1u) % record_count);
 	(void) runtimeStore_.SaveIfChanged(runtime_, runtime_saved_);
 	return true;
 }

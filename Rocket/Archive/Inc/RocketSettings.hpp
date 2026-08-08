@@ -48,9 +48,17 @@ struct RocketPersistentSettings
     NoseAxis nose_axis = NoseAxis::Auto;
 };
 
+// Layout-sensitive: this is the payload of the RuntimeMetadataJournal, whose
+// entry header carries a magic and a CRC but NO version or size field.  Any
+// change to the layout therefore re-defaults the journal once on the next
+// flash — including the password below.  See the migration note in ADR-0006.
 struct RocketRuntimeMetadata
 {
-    uint8_t archive_position = 0;
+    // NOTE: an `archive_position` field led this struct until 2026-08-07.  It
+    // held (last_closed_record_id + 1) — the NEXT slot to write, not the record
+    // just written — and nothing ever read it.  Removed rather than renamed:
+    // sitting next to last_closed_record_id under a name that reads like "the
+    // record this flight went into", it was an off-by-one waiting to be picked.
     uint32_t boot_count = 0;
     uint32_t last_flight_sequence = 0;
     uint32_t last_closed_record_id = 0;
