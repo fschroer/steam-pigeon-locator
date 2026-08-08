@@ -6,7 +6,7 @@ Locator · Receiver · *Wherezit?* app
 
 ---
 
-> **Document status:** Draft, 2026-07-29. Written against locator/receiver firmware and *Wherezit?* Android app as of this date. Two features are explicitly incomplete and are marked **WORK IN PROGRESS** where they appear: offline satellite maps (§3.7, §9.2) and flight-path export (§10.3). Air starts are **not** an available feature — see §7.6.
+> **Document status:** Draft, 2026-08-08. Written against locator/receiver firmware and *Wherezit?* Android app as of this date. Two features are explicitly incomplete and are marked **WORK IN PROGRESS** where they appear: offline satellite maps (§3.7, §9.2) and flight-path export (§10.3). Air starts are **not** an available feature — see §7.6.
 >
 > Placeholders marked 📷 and 📱 indicate images still to be captured. Every 📱 placeholder needs a powered-on locator; the screenshots already present were captured with the receiver connected and the locator off.
 
@@ -397,6 +397,7 @@ Each locator identifies itself with a permanent hardware ID and, optionally, a p
 - [ ] Bench deployment test passed on every channel you will use (§3.5)
 - [ ] Flight memory has room (§3.6)
 - [ ] Launch site map downloaded (§3.7 — **work in progress**)
+- [ ] Offline maps app installed, site region downloaded in it (§3.7)
 - [ ] App connects to receiver (§3.8)
 - [ ] Magnet, cable, spare igniters packed (§3.9)
 
@@ -497,6 +498,8 @@ The example above is a 22 × 22 km area at z10–z17: about 12,580 tiles and 235
 **Downloaded regions** are listed at the bottom of the screen with a delete button each. **Clear ambient cache (offline test)** wipes the incidental tiles your phone cached while browsing, so you can honestly test whether your downloaded region really works with no signal.
 
 💡 **Test it properly before you trust it:** clear the ambient cache, put the phone in airplane mode, then open the flight map and pan around your launch site. If you see imagery, you're good.
+
+💡 **While you're at it, install an offline maps app** — Organic Maps or OsmAnd, both free — and download the region around your site in that app too. It is what receives the rocket's coordinates when you tap them during recovery (§9.2), and without offline data it opens to a blank screen where you need it. This is separate from the imagery above and takes a few minutes on the same Wi-Fi.
 
 ## 3.8 Verify the app-to-receiver link
 
@@ -799,6 +802,8 @@ With **Enable Speech** on (§2.8), the app announces:
 
 **Portrait — the flight map.** Your position, the rocket's position, and its track. Distance and bearing to the rocket. The flight state and altitude readouts. The status pill at the top shows the receiver and locator status.
 
+The **track stops being drawn at the landing** — once the locator reports it is down, the last point on the path is where it says it is lying, and the path does not grow while it sits there. **Dist** reads *Unknown* if the app cannot vouch for the position (§9.5).
+
 **Landscape — the heads-up view.** Rotate the phone and it switches to a camera view with the rocket's position overlaid — hold it up, look through it, and it points you at the rocket.
 
 > 📱 **Screenshot needed — `images/app-12-heads-up.png`:** the landscape heads-up camera view during or after a flight, showing the overlay. Hold the phone in landscape while connected to capture this.
@@ -858,6 +863,12 @@ If you downloaded the site (§3.7), the flight map renders that imagery with no 
 
 ⚡ Note the coordinates or the position on the map **before** you walk out of radio range of a landed rocket. If the beacon and the link both go away, a remembered map position is what you have left.
 
+**Tap the coordinates to open them in your maps app.** The latitude/longitude at the bottom of the stats panel is a button whenever the app is confident of the position — it is underlined when you can press it. Pressing hands the position over as a dropped pin named after your locator; your phone asks which app to use if you have more than one.
+
+> ⚠️ **This is only as good as the maps app you brought.** The hand-off itself works with no signal, but most mapping apps have nothing to draw without one — Google Maps will open to a blank screen at a launch site. An app with the region **downloaded for offline use** (Organic Maps and OsmAnd both do this, and are free) will show the pin on real terrain and navigate you to it. Install it and download the area **before you leave home**, alongside §3.7. This is not something to sort out standing in a field.
+
+If the coordinates are **not** underlined, the app is not willing to vouch for that position and will not send it anywhere — see §9.5.
+
 ## 9.3 Using the heads-up view for the last stretch
 
 Rotate the phone to landscape. Hold it up and look through the camera view: the overlay marks where the rocket is. Walk the bearing it shows you. This is much more intuitive than reading a map while walking through brush.
@@ -873,6 +884,8 @@ The landed beacon is **loud** and repeats about every 2 seconds — the same thr
 ## 9.5 If the last known position is stale or absent
 
 Position quality degrades exactly when you need it most: the rocket on its side, antenna against the ground, or under trees.
+
+**"Unknown" instead of a distance means the app has caught the position lying.** It shows a *stale* distance quite happily — a rocket that has lost its fix on the ground keeps reporting the last position it did measure, and that number is still worth walking toward. What it will not show you is a position that cannot be true: a reading that jumped further than the rocket could have moved, or a distance far beyond radio range. When it says Unknown, the heads-up overlay drops its marker too, and the coordinates stop being tappable. The rocket's marker stays on the map throughout — the app withholds numbers it cannot stand behind, it never takes away the last position it had.
 
 Work with what you have:
 
@@ -1087,6 +1100,7 @@ AT THE FLIGHT LINE
 
 ```
 □ Note last known position BEFORE walking
+□ Tap the coordinates → opens your maps app
 □ Receiver vertical, out of pocket
 □ Landscape = heads-up view, walk the bearing
 □ Stop and listen for the loud beacon
