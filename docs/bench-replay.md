@@ -75,10 +75,11 @@ menus keep them whenever one is open. The first version of these keys claimed
 digits unconditionally and silently broke both menus — which presents as the
 console ignoring numbers. Press Esc to leave a menu before selecting a record.
 
-`B` resets the flight state machine (`PrepareForArm`), opens a fresh record, and
-starts feeding archived samples. The reset matters: without it a second replay
-would begin at `Landed` and record nothing — the same trap as the
-second-consecutive-disarmed-flight gap noted in
+`B` resets the flight state machine (`PrepareForArm`), opens a destination record
+(usually by re-adopting the unflown one opened at boot rather than allocating a
+fresh slot — see below), and starts feeding archived samples. The reset
+matters: without it a second replay would begin at `Landed` and record
+nothing — the same trap as the second-consecutive-disarmed-flight gap noted in
 [ADR-0021](adr/0021-arming-gates-pyro-only.md).
 
 Arm state is **not** touched by `B`. Arm or disarm first, then press it; running
@@ -127,7 +128,25 @@ test that proves nothing — the state machine simply never leaves
 
 To free a slot without losing the flight you want: use the Data menu's `c`
 (reclaim empty/unused records), or download and then erase what you no longer
-need. Check the destination it reports (`next=`) and pick a source that differs.
+need. Both reported numbers are refused as sources, so pick one that differs
+from each.
+
+**`next=` is not usually the destination.** It is the next *unallocated* slot;
+`open=` is the record already opened at boot, and `StartOpenNewFlight` re-adopts
+that one whenever it is unflown — which is the normal bench case. So the flight
+lands in `open=`, and `next=` is typically one higher. The guard checks both
+because the allocate-fresh path (after a replay has closed a record) does land
+on `next=`.
+
+The start line reports the slot actually opened:
+
+```
+DIAG|REPLAY: record 0 (2217 samples) -> 8, state=DISARMED
+```
+
+`-> 8` is where this replay will be written — cross-check it against the Data
+menu afterwards. It previously printed the peeked `next=` value instead, so it
+named a record one past the one the flight landed in.
 
 ## Item 5 (mounting axis) — `m`, and why replay cannot test it
 

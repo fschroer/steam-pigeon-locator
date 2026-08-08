@@ -690,19 +690,39 @@ void Factory::HandleConsoleChar(uint8_t uart_char) {
             UartSend(b);
             return;
         }
-        snprintf(b, sizeof(b),
-                 "\r\nDIAG|REPLAY: record %u (%lu samples) -> %u, state=%s\r\n",
-                 static_cast<unsigned>(bench_replay_record_),
-                 static_cast<unsigned long>(samples), static_cast<unsigned>(dest),
-                 device_state_ == DeviceState::Armed ? "ARMED" : "DISARMED");
-        UartSend(b);
         // PrepareForArm resets the flight state machine so the replay starts from
         // WaitingLaunch.  Without it a second replay would begin at Landed and
         // record nothing — the same trap as the second-consecutive-disarmed-flight
         // gap noted in ADR-0021.
         flight_.PrepareForArm();
         datestamp_saved_ = false;
-        archive_.StartOpenNewFlight();
+        const bool opened = archive_.StartOpenNewFlight();
+        // Report the destination only AFTER opening it, and read it from the
+        // archive rather than from PeekNextRecord() above.  The two differ, and
+        // not by accident: PeekNextRecord() is the next UNALLOCATED slot, but
+        // StartOpenNewFlight re-adopts the record already opened at boot
+        // (ADR-0021 Decision 1) whenever it is unflown, which is the normal case
+        // on the bench.  Printing the peeked value therefore named the slot ONE
+        // PAST the one the replay actually wrote — the console said "-> 9" while
+        // the flight landed in record 8.  Guard 1 still checks both, since the
+        // allocate-fresh path does land on PeekNextRecord().
+        if (opened) {
+            snprintf(b, sizeof(b),
+                     "\r\nDIAG|REPLAY: record %u (%lu samples) -> %u, state=%s\r\n",
+                     static_cast<unsigned>(bench_replay_record_),
+                     static_cast<unsigned long>(samples),
+                     static_cast<unsigned>(archive_.GetOpenRecordId()),
+                     device_state_ == DeviceState::Armed ? "ARMED" : "DISARMED");
+        } else {
+            // No destination means every replayed sample is dropped silently,
+            // which looks exactly like a replay that ran and recorded nothing.
+            snprintf(b, sizeof(b),
+                     "\r\nDIAG|REPLAY: record %u (%lu samples) -> FAILED to open a"
+                     " destination, nothing will be recorded\r\n",
+                     static_cast<unsigned>(bench_replay_record_),
+                     static_cast<unsigned long>(samples));
+        }
+        UartSend(b);
         nav_test_requested_ = true;
     }
 #endif
