@@ -259,21 +259,29 @@ The strapdown drives the orientation display correctly (pitch/roll/yaw track the
 
 ## Git state
 
-> RESUME HERE (2026-08-07): **#36 acceptance item 5 is the only thing outstanding.**
-> #37 closed and hardware-verified. #36 has **5 of 6 items ticked**; item 5 is
-> *"non-standard mounting orientation records correct axes without an arm"*.
-> Full procedure: [docs/bench-replay.md](bench-replay.md) section "Item 5", and
-> [#36 comment 5223281483](https://github.com/fschroer/steam-pigeon-locator/issues/36#issuecomment-5223281483).
-> Short version: press **`m`** on the USB-C console (top level, no menu open) to
-> print the configured nose axis, the committed body-from-sensor frame, and raw
-> vs body accel side by side. Configure a **non-X** axis, power-cycle, stay
-> **disarmed**, stand vertical and still for >=10 s, press `m`, and expect a
-> non-identity frame with body accel `x ~ +1.00`. **Do the negative control**
-> (`NoseAxis` = `Auto`, power-cycle, repeat -- the +1 g must return to the
-> physical axis); without it a pass proves nothing.
+> RESUME HERE (2026-08-07): **ADR-0021 is done -- #35, #36 and #37 are all
+> CLOSED and hardware-verified.** #36's last item (5, *"non-standard mounting
+> orientation records correct axes without an arm"*) passed on the bench with
+> `NoseAxis = Z`, never armed: frame `X<-+Z Y<--X Z<--Y`, body accel
+> `x=+0.98 g`, tilt 4.31 deg -- bit-for-bit `ChooseFrame`'s `NoseAxis::Z`
+> positive branch. See [#36 comment 5223359435](https://github.com/fschroer/steam-pigeon-locator/issues/36#issuecomment-5223359435).
+>
+> ⚠️ **Carry-forward: the item 5 negative control was never run.** Next time the
+> unit is on the bench, set `NoseAxis` = `Auto`, power-cycle, stand vertical and
+> still >=10 s, press `m`, and confirm the frame stays identity with the +1 g on
+> the *physical* axis. The pass is well-supported without it (`ChooseFrame`
+> refuses to commit below 0.5 g on the configured axis, so a wrong axis leaves
+> identity rather than a plausible non-identity) but it is not the control.
+>
+> `m` is the mounting diag: top level, no menu open, prints configured nose
+> axis, committed body-from-sensor frame, and raw vs body accel side by side.
+> It now labels **both** outcomes -- `(identity - never committed)` and
+> `(non-identity - committed)`; before, a passing run printed a bare frame line
+> and read as "nothing happened". Procedure:
+> [docs/bench-replay.md](bench-replay.md) section "Item 5".
 > **Bench replay cannot test item 5** -- it injects archived *body-frame* accel
 > past the IMU driver and `applyMountingFrame` re-applies, double-transforming.
-> Replay covers items 1-4 and 6, which are done.
+> Replay covers items 1-4 and 6.
 >
 > WARNING: **`Rocket/Navigation/Inc/Navigation.hpp` is intentionally dirty** with
 > `#define SP_BENCH_REPLAY 1` -- a deliberate local bench setting, **do not
@@ -286,7 +294,7 @@ The strapdown drives the orientation display correctly (pitch/roll/yaw track the
 > `Tests/FlightReplay` and `Tests/ArchiveRoundTrip`. Both pass (97/97, 638/638)
 > as of `717d382`, which repaired mocks that had silently stopped compiling.
 
-> **Current heads: locator `79ba9e5`, receiver `919cb1a`, app `f4d207a`** (plus this file's own docs commit). **ADR-0021 is fully implemented across #35, #36 and #37, and [#37 is CLOSED — verified on hardware 2026-08-07](https://github.com/fschroer/steam-pigeon-locator/issues/37)**, all seven acceptance criteria ticked. Newest first: **`SP_BENCH_REPLAY`** (bench harness, no runtime effect), the **pad-alert fixes + bounded snooze** (`pad alert snooze v1`), the **unsigned nose axis** (`nose axis unsigned v2`), **#37 — the disarmed-rocket alert** (Decision 5), **#36 — arming gates pyro only** (Decisions 1/2/4/6), **#35 — explicit arm state on the wire** (Decision 3). Locator `ebc0043` is a docs-only framing correction, `ed989d9` the original docs-only ADR commit. **Requirements v2.4.5.**
+> **Current heads: locator `c3ba73a`, receiver `919cb1a`, app `f4d207a`** (plus this file's own docs commit). All three repos are otherwise clean and in sync with their origins; nothing is pushed yet from this session. **ADR-0021 is fully implemented across #35, #36 and #37, and all three are CLOSED and hardware-verified as of 2026-08-07** — [#37](https://github.com/fschroer/steam-pigeon-locator/issues/37) with all seven acceptance criteria ticked, [#36](https://github.com/fschroer/steam-pigeon-locator/issues/36) with all six. Newest first: **`SP_BENCH_REPLAY`** (bench harness, no runtime effect), the **pad-alert fixes + bounded snooze** (`pad alert snooze v1`), the **unsigned nose axis** (`nose axis unsigned v2`), **#37 — the disarmed-rocket alert** (Decision 5), **#36 — arming gates pyro only** (Decisions 1/2/4/6), **#35 — explicit arm state on the wire** (Decision 3). Locator `ebc0043` is a docs-only framing correction, `ed989d9` the original docs-only ADR commit. **Requirements v2.4.5.**
 >
 > 🔧 **`SP_BENCH_REPLAY` (locator `0420d72`, [docs/bench-replay.md](bench-replay.md)) unblocks the rest.** It replays an archived flight through the live state machine on the bench, which is the only way to reach #36's disarmed-record / landing-beacon / ZUPT criteria and #35's "disarmed locator in flight displays DISARMED" — launch detection needs 5 g for 200 ms (ADR-0015) and cannot be faked by hand. Defaults to **0** and must stay 0 in flight builds. **Verifying a flag build needs care:** `make CXXFLAGS+=-DSP_BENCH_REPLAY=1` silently does nothing (CubeIDE rules hard-code their flags), so a "successful" flag-on build may actually be the flag-off build — check `arm-none-eabi-nm` for `TestReplay` symbols, or edit the header default. Beneath that, the previous run is the ADR-0019 / ADR-0020 work described in the 2026-08-06 section above — roughly 18 locator, 16 receiver and 21 app commits on top of `4f2e96a` / `4cfcd89` / `3f50212`.
 >
