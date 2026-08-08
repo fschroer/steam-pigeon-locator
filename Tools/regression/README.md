@@ -69,4 +69,4 @@ objective so results are repeatable.
 
 - `Tests/FlightReplay`, `Tests/ArchiveRoundTrip` — the automated suites.
 - `Tools/serial/sp_capture.py` — capture/analyze used by several bench checks.
-- `docs/bench-fault-injection.md`, `docs/bench-loss-injection.md` — the bench procedures.
+- `docs/bench-fault-injection.md`, `docs/bench-loss-injection.md`, `docs/bench-battery-diag.md` — the bench procedures.

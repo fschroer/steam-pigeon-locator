@@ -145,6 +145,12 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 	comm_.Process(device_state_);
 	Diag::mark(Diag::Seg::Comm, t_comm);
 
+	// Expire any bench hold on the battery divider.  Above the per-state switch
+	// deliberately: a hold started while disarmed must still time out if the
+	// operator arms, or enters the config menu, before it elapses — otherwise
+	// the load switch stays on for the flight.
+	power_.serviceDividerHold();
+
 	switch (device_state_) {
 	case DeviceState::Disarmed:
 	case DeviceState::Armed: {
@@ -376,7 +382,23 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 		}
 		switch (rocket_service_count) {
 		case 0:
-			power_.enableDivider(); // Allow time for divider voltage to settle
+			// Allow time for the divider voltage to settle before the read at
+			// count 2.  Gated on WaitingLaunch because the battery only ever
+			// reaches the wire in PreLaunchData, and that message stops the
+			// moment the rocket leaves the pad — so past this point the switch
+			// was being re-enabled every second and read by nobody, burning
+			// ~120 uA through R9+R11 for the whole flight AND the whole
+			// post-landing recovery beacon, which is the one window where
+			// endurance actually decides whether the rocket is found.
+			//
+			// Deliberately NOT gated on arm state as well, even though only a
+			// disarmed locator sends PreLaunchData: disarming between count 0
+			// and count 2 would then read an unpowered divider and report a
+			// flat battery for one second.  Arming is a pad-side transition, so
+			// the extra 150 ms/s of divider current while armed on the pad is
+			// bounded, and it buys a gauge that never blinks empty on disarm.
+			if (flight_state == FlightStates::WaitingLaunch)
+				power_.enableDivider();
 			break;
 		case 2: {
 			if (flight_state == FlightStates::WaitingLaunch) {
@@ -416,6 +438,16 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 				HAL_TIM_PWM_Stop(&htim16, TIM_CHANNEL_1);
 			break;
 		}
+		case 3:
+			// Unconditional teardown backstop.  readBatteryMillivolts() already
+			// drops BATTRD at count 2, but only on the path that actually reads
+			// it — and the count-0 gate above is evaluated two cycles earlier,
+			// so a launch detected in between leaves the switch on with nothing
+			// scheduled to turn it off.  Making the teardown independent of both
+			// means no future change to either condition can strand it again.
+			// Suppressed while the 'h' bench hold is active (see disableDivider).
+			power_.disableDivider();
+			break;
 		case 5:
 			RgbLed(RgbColor::Off);
 			break;
@@ -588,6 +620,42 @@ void Factory::HandleConsoleChar(uint8_t uart_char) {
     // made with digits.
     else if (config_.IsConsoleIdle() && (uart_char == 'm' || uart_char == 'M')) {
         PrintMountingDiag();
+    }
+    // Battery-sense diagnostic.  Like 'm', gated on an idle console so it cannot
+    // shadow a menu key.  Additionally refused unless disarmed: it blocks the
+    // super-loop for ~120 ms, which on the pad would drop two navigation cycles
+    // and stall the deployment state machine for the sake of a bench question.
+    else if (config_.IsConsoleIdle() && (uart_char == 'v' || uart_char == 'V')) {
+        if (device_state_ == DeviceState::Disarmed) {
+            // Cancel any hold first: the profile pre-discharges C7 and measures
+            // from a cold node, which a latched-on switch would silently defeat.
+            power_.cancelDividerHold();
+            PrintBatteryDiag();
+        } else {
+            UartSend("\r\nDIAG|BATT: REFUSED - disarm first (this stalls the loop ~120 ms)\r\n");
+        }
+    }
+    // Hold BATTRD on so the load switch can be metered.  Toggles, so a second
+    // press releases early rather than leaving the operator waiting it out.
+    else if (config_.IsConsoleIdle() && (uart_char == 'h' || uart_char == 'H')) {
+        if (device_state_ != DeviceState::Disarmed) {
+            UartSend("\r\nDIAG|BATT: REFUSED - disarm first\r\n");
+        } else if (power_.dividerHeld()) {
+            power_.cancelDividerHold();
+            UartSend("\r\nDIAG|BATT: hold released, BATTRD low\r\n");
+        } else {
+            char b[160];
+            power_.holdDividerOn(kBattHoldCycles);
+            // Names U8's output rather than BATTRD, because on this board BATTRD
+            // runs to a pad under the package and cannot be probed — VOUT is the
+            // measurement that is actually available, and it answers the same
+            // question: VBATT means the switch conducted, ~0 means it did not.
+            snprintf(b, sizeof(b),
+                    "\r\nDIAG|BATT: BATTRD held high %u s - meter U8 pin B2 VOUT:"
+                    " VBATT = switch conducting, ~0 = not. 'h' again to release.\r\n",
+                    static_cast<unsigned>(kBattHoldCycles / SAMPLES_PER_SECOND));
+            UartSend(b);
+        }
     }
 #if SP_FAULT_INJECT
     // -----------------------------------------------------------------------
@@ -823,6 +891,103 @@ void Factory::PrintMountingDiag() {
 				"DIAG|MOUNT: tilt unavailable (nose axis Auto, or accel not gravity-dominated)\r\n");
 	}
 	UartSend(line);
+}
+
+// ---------------------------------------------------------------------------
+// PrintBatteryDiag — 'v' console key
+//
+// The battery reading has no other observable output.  It reaches the outside
+// world only as PreLaunchData.battery_voltage_mvolt, which the app immediately
+// buckets into an 8-step gauge — level 0 covers everything below 3750 mV — so a
+// dead converter, a load switch that never conducted, a node still charging
+// when it was sampled, and a genuinely flat cell all render as one empty bar.
+// readRawADC() compounds this by dropping both HAL status codes, so a
+// conversion that never ran returns the stale data register and is transmitted
+// as a measurement.
+//
+// This prints the settling curve of the BATTLVL node against the BATTRD rising
+// edge, with the reference measured rather than assumed, so the failing link
+// names itself.  See docs/bench-battery-diag.md for how to read the shapes.
+// ---------------------------------------------------------------------------
+void Factory::PrintBatteryDiag() {
+	char line[160];
+
+	PowerManagement::Diagnostic d;
+	power_.runDiagnostic(d);
+
+	snprintf(line, sizeof(line), "\r\nDIAG|BATT: VDDA = %u mV (%s)\r\n",
+			static_cast<unsigned>(d.vdda_mv),
+			d.vdda_ok ? "measured via VREFINT"
+			          : "VREFINT READ FAILED - assumed 3300, every mV below is suspect");
+	UartSend(line);
+
+	// Refuse to publish the profile at all if the sequencer never came back to
+	// BATTLVL: those rows would be VREFINT, and they would look entirely
+	// reasonable.  A diagnostic that can mislead is worse than one that stops.
+	if (!d.channel_restored) {
+		UartSend("DIAG|BATT: ABORTED - ADC channel could not be restored to BATTLVL,"
+				" samples would be VREFINT. Power-cycle before trusting telemetry.\r\n");
+		return;
+	}
+
+	// The inputs VDDA was derived from.  VDDA = cal * 3300 / raw, so a raw count
+	// that is high by a fixed ADC offset drags the quotient down — printing both
+	// is what lets a low VDDA be told apart from a sagging rail.
+	snprintf(line, sizeof(line),
+			"DIAG|BATT: VREFINT raw %u, factory cal %u; ADC CALFACT %u\r\n",
+			static_cast<unsigned>(d.vrefint_counts),
+			static_cast<unsigned>(d.vrefint_cal),
+			static_cast<unsigned>(d.calfact));
+	UartSend(line);
+
+	if (d.calfact == 0) {
+		UartSend("DIAG|BATT: WARNING - CALFACT is 0, ADC self-calibration did not run;"
+				" every count below carries the raw die offset\r\n");
+	}
+
+	// Full scale both ways.  Same divider ratio now that the coded value matches
+	// R9/R11, so the gap between these two is purely the hardcoded 3300 mV
+	// reference — the last uncorrected assumption in the measurement path.
+	snprintf(line, sizeof(line),
+			"DIAG|BATT: full scale (4095) -> tlm %u mV, meas %u mV\r\n",
+			static_cast<unsigned>(power_.convertToMillivolts(4095)),
+			static_cast<unsigned>(power_.countsToMeasuredMillivolts(4095, d.vdda_mv)));
+	UartSend(line);
+
+	snprintf(line, sizeof(line),
+			"DIAG|BATT: BATTRD %s on entry; node RC ~629 us (8.2k||27k with C7 0.1uF)\r\n",
+			d.battrd_was_on ? "ON" : "off");
+	UartSend(line);
+
+	UartSend("DIAG|BATT:    t_us  counts   node_mV   tlm_mV  meas_mV  hal\r\n");
+
+	bool any_fail = false;
+	for (uint8_t i = 0; i < PowerManagement::kDiagSamples; i++) {
+		const PowerManagement::DiagSample &s = d.samples[i];
+		if (!s.ok) any_fail = true;
+		snprintf(line, sizeof(line), "DIAG|BATT: %7lu %7u %9u %8u %8u  %s\r\n",
+				static_cast<unsigned long>(s.t_us),
+				static_cast<unsigned>(s.counts),
+				static_cast<unsigned>(power_.countsToNodeMillivolts(s.counts, d.vdda_mv)),
+				static_cast<unsigned>(power_.convertToMillivolts(s.counts)),
+				static_cast<unsigned>(power_.countsToMeasuredMillivolts(s.counts, d.vdda_mv)),
+				s.ok ? "ok" : "FAIL");
+		UartSend(line);
+	}
+
+	if (any_fail) {
+		// A HAL failure means the conversion did not happen at all, so the counts
+		// on that row are the previous contents of the data register.  Worth
+		// saying outright: those rows are not low readings, they are no readings.
+		UartSend("DIAG|BATT: FAIL rows did not convert - their counts are a stale register,"
+				" not a measurement\r\n");
+	}
+
+	// The offset production actually gets between enableDivider() at service
+	// count 0 and the read at count 2, and the threshold the app's gauge uses.
+	// Both are stated so the operator can compare the last row against what the
+	// app will show without going and looking either of them up.
+	UartSend("DIAG|BATT: production samples at t=100000 us; app gauge is empty below 3750 mV\r\n");
 }
 
 void Factory::MS5611OCCallback() {

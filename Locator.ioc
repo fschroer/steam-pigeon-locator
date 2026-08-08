@@ -1,7 +1,7 @@
 #MicroXplorer Configuration settings - do not modify
 ADC.Channel-0\#ChannelRegularConversion=ADC_CHANNEL_3
 ADC.EnableRegularConversion=ENABLE
-ADC.IPParameters=NbrOfConversion,SelectedChannel,SamplingTimeCommon1,SamplingTimeCommon2,EnableRegularConversion,Rank-0\#ChannelRegularConversion,Channel-0\#ChannelRegularConversion,SamplingTime-0\#ChannelRegularConversion,NbrOfConversionFlag
+ADC.IPParameters=NbrOfConversion,SelectedChannel,SamplingTimeCommon1,SamplingTimeCommon2,EnableRegularConversion,Rank-0\#ChannelRegularConversion,Channel-0\#ChannelRegularConversion,SamplingTime-0\#ChannelRegularConversion,NbrOfConversionFlag,TriggerFrequencyMode
 ADC.NbrOfConversion=1
 ADC.NbrOfConversionFlag=1
 ADC.Rank-0\#ChannelRegularConversion=1
@@ -9,6 +9,7 @@ ADC.SamplingTime-0\#ChannelRegularConversion=ADC_SAMPLINGTIME_COMMON_1
 ADC.SamplingTimeCommon1=ADC_SAMPLETIME_160CYCLES_5
 ADC.SamplingTimeCommon2=ADC_SAMPLETIME_160CYCLES_5
 ADC.SelectedChannel=ADC_CHANNEL_3
+ADC.TriggerFrequencyMode=ADC_TRIGGER_FREQ_LOW
 CAD.formats=
 CAD.pinconfig=
 CAD.provider=

@@ -601,7 +601,7 @@ While the locator is powered on, in range, and **disarmed**, the app's flight ma
 | **Satellites** | More is better. Watch it climb after power-on. |
 | **Accuracy** (horizontal) | A few metres. If it's tens of metres, the antenna's view of the sky is poor (§1.7). |
 | **Altitude (AGL)** | Near zero on the pad. This is the value that gets zeroed when you arm. |
-| **Battery** | Shown as a bar gauge. Don't fly a locator showing one bar. **This is your only chance to read it** — the gauges go away at launch (§1.6). |
+| **Battery** | Shown as a bar gauge. Don't fly a locator showing one bar. **This is your only chance to read it** — the gauges go away at launch (§1.6). An *empty* gauge on a battery you know is charged is a different problem — see Part 11. |
 | **Sensor health** | Barometer, IMU and GPS each report status. All three should be healthy. |
 | **Continuity, channels 1–4** | **Present on every channel you have wired, absent on every channel you haven't.** |
 | **Deployment configuration** | Modes, delays and altitudes, read back from the locator. Confirm they're what you intended. |
@@ -1040,6 +1040,7 @@ This gives you everything the locator recorded, at full rate, for analysis in a 
 | Deployment Test isn't in the menu | It only appears while the locator is **armed** (§3.5). |
 | Locator Settings / Flight Profiles aren't in the menu | They only appear while the locator is powered, in range, and **disarmed** (§2.1). |
 | Ready-beep never starts after arming | Flight memory full (§3.6) or battery too low. **Don't launch** (§7.4). |
+| Battery gauge reads empty on a battery you know is charged | The gauge cannot tell a flat cell from a broken battery-sense circuit — both read empty. Before you replace the battery, check it over USB-C: press `v` at the console (disarmed). If the readings there don't respond at all, the fault is in the locator, not the battery, and it needs service (Appendix D). |
 | Can't disarm | Not while it's flying. This is intentional (§7.5). |
 | Telemetry drops out mid-flight | Normal at range and altitude. The rocket is unaffected (§8.4). |
 | Altitude looks stepped or jumpy | Sunlight on the barometer, most likely in a clear payload bay (§1.7). |
@@ -1218,6 +1219,17 @@ Reading it:
 | `data` | Flight data menu |
 | `test` | Deployment test menu |
 | `dfu` | Firmware update mode |
+
+## Service diagnostics (locator)
+
+Type these at the console with no menu open, and with the locator **disarmed**. They exist for diagnosing a locator that is behaving oddly; the output is intended for service rather than for pre-flight checks, and you do not need to understand it to use it.
+
+| Key | Action |
+|---|---|
+| `v` | Battery-sense check. Prints how the battery measurement behaves over ~100 ms. **If the numbers don't respond at all, the fault is in the locator's battery-sense circuit rather than the battery** — which is the one case an empty gauge cannot distinguish on its own (Part 11). |
+| `h` | Holds the battery-sense circuit powered for ~10 seconds so it can be measured with a meter. Press again to release early. Releases on its own regardless. |
+
+Neither key affects flight behavior, and both are refused while the locator is armed.
 
 ## Editing keys (configuration menu)
 

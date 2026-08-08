@@ -72,6 +72,16 @@ private:
 	// setting actually take effect?", which otherwise cannot be seen without
 	// flying and reading the archived body accel back out (#36 item 5).
 	void PrintMountingDiag();
+	// 'v' console key: profile the battery-sense chain (reference, converter,
+	// load switch, divider, filter cap) and print it.  The app's 8-step gauge
+	// renders every reading below 3750 mV as the same empty bar, and
+	// readRawADC() cannot report a failed conversion, so an empty gauge alone
+	// says nothing about which link failed.  Blocks ~120 ms, hence disarmed-only.
+	void PrintBatteryDiag();
+	// 'h' console key: how long the load switch stays latched on for metering.
+	// Long enough to find the probe points and read a settled value, short
+	// enough that walking away cannot leave the divider drawing current.
+	static constexpr uint16_t kBattHoldCycles = SAMPLES_PER_SECOND * 10u;   // ~10 s
 
 	static constexpr uint16_t kUart2RxBufSize = 256;  // power of two
 	volatile uint8_t  uart2_rx_buf_[kUart2RxBufSize] = { };

@@ -60,7 +60,7 @@ void MX_ADC_Init(void)
   hadc.Init.SamplingTimeCommon1 = ADC_SAMPLETIME_160CYCLES_5;
   hadc.Init.SamplingTimeCommon2 = ADC_SAMPLETIME_160CYCLES_5;
   hadc.Init.OversamplingMode = DISABLE;
-  hadc.Init.TriggerFrequencyMode = ADC_TRIGGER_FREQ_HIGH;
+  hadc.Init.TriggerFrequencyMode = ADC_TRIGGER_FREQ_LOW;
   if (HAL_ADC_Init(&hadc) != HAL_OK)
   {
     Error_Handler();
@@ -76,7 +76,38 @@ void MX_ADC_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN ADC_Init 2 */
+  /* NOTE for whoever regenerates this file from Locator.ioc:
+     TriggerFrequencyMode above must stay ADC_TRIGGER_FREQ_LOW.  The battery read
+     enables the ADC, takes one conversion, and fully disables it again (see
+     PowerManagement::readRawADCChecked) roughly once per second, which exceeds
+     the datasheet "tIdle" between triggers.  ST's note on the parameter in
+     stm32wlxx_hal_adc.h says low-frequency mode is required in exactly that
+     case; the cost is 2 ADC clock cycles of rearm, ~83 ns here.  CubeMX
+     defaults this to HIGH, so ADC.TriggerFrequencyMode was added to the .ioc's
+     IPParameters list.
 
+     That mechanism is verified, not assumed: on 2026-08-08 the line was set to
+     HIGH by hand and the project regenerated (CubeIDE 1.19.0), and CubeMX wrote
+     LOW back over it.  Note CubeMX only rewrites this file when its model
+     differs from what is on disk, so a regeneration that leaves adc.c untouched
+     is the setting already being correct, not the setting being skipped. */
+
+  /* ADC self-calibration.  Prerequisite is that the ADC be disabled, which is
+     the state this function leaves it in.  The resulting CALFACT survives the
+     enable/disable cycle HAL_ADC_Stop performs on every battery read — the
+     factor is lost only when the ADC voltage regulator is turned off, and that
+     happens solely in HAL_ADC_DeInit.  So calibrating once here holds.
+
+     Without it CALFACT stays 0 and every conversion carries the die's raw
+     offset.  Measured on a locator on 2026-08-08: ~83 counts (~67 mV), which
+     presented as a grounded BATTLVL node reading 63 mV and a VREFINT-derived
+     VDDA of 3129 mV instead of ~3.29 V.  See docs/bench-battery-diag.md.
+
+     Deliberately NOT routed to Error_Handler(): an uncalibrated ADC costs tens
+     of millivolts on a battery gauge, while halting here would cost the whole
+     locator, including the recovery beacon.  A failure is visible instead in
+     the 'v' console diagnostic, which prints CALFACT and warns when it is 0. */
+  (void) HAL_ADCEx_Calibration_Start(&hadc);
   /* USER CODE END ADC_Init 2 */
 
 }
