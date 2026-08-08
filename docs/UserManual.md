@@ -171,7 +171,9 @@ Both the locator and the receiver charge over USB-C at up to 1 A.
 - **Operate** safely up to **60 °C** (140 °F). Above that, risk of thermal runaway increases.
 - **Do not charge above 45 °C** (113 °F). A black rocket sitting in the desert sun gets there easily — bring the locator into the shade before you plug it in.
 
-Locator battery voltage appears in the app on the flight map while the locator is powered and in range (§4.6). Check it before every flight; a locator that has been sitting switched on in your range box since last month will not make it through a flight.
+Locator and receiver battery levels appear in the app on the flight map while the locator is powered, in range, and **not yet flying** (§4.6). Check the locator before every flight; one that has been sitting switched on in your range box since last month will not make it through a flight.
+
+⚡ **The battery gauges disappear at launch, and that is correct.** Battery level is only carried by the pre-launch message, which the locator stops sending the moment it detects launch — everything after that is telemetry, which has no room for it. A gauge left on screen during the flight would be showing you the charge from the pad, frozen, for the rest of the day. They come back when the locator returns to its pre-launch message, which it does after landing and re-arming (§9.7). **Check the battery on the ground; there is no reading in the air.**
 
 ## 1.7 Mounting the locator in the rocket
 
@@ -592,7 +594,7 @@ While the locator is powered on, in range, and **disarmed**, the app's flight ma
 | **Satellites** | More is better. Watch it climb after power-on. |
 | **Accuracy** (horizontal) | A few metres. If it's tens of metres, the antenna's view of the sky is poor (§1.7). |
 | **Altitude (AGL)** | Near zero on the pad. This is the value that gets zeroed when you arm. |
-| **Battery** | Shown as a bar gauge. Don't fly a locator showing one bar. |
+| **Battery** | Shown as a bar gauge. Don't fly a locator showing one bar. **This is your only chance to read it** — the gauges go away at launch (§1.6). |
 | **Sensor health** | Barometer, IMU and GPS each report status. All three should be healthy. |
 | **Continuity, channels 1–4** | **Present on every channel you have wired, absent on every channel you haven't.** |
 | **Deployment configuration** | Modes, delays and altitudes, read back from the locator. Confirm they're what you intended. |
