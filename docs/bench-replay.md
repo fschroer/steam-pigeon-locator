@@ -147,7 +147,7 @@ field):
 
 ```
 DIAG|MOUNT: nose axis = Y  (configured)
-DIAG|MOUNT: frame body<-sensor  X<-+Y  Y<-+Z  Z<-+X
+DIAG|MOUNT: frame body<-sensor  X<-+Y  Y<-+Z  Z<-+X   (non-identity - committed)
 DIAG|MOUNT: raw  accel  x=+0.02 y=+0.99 z=-0.01 g
 DIAG|MOUNT: body accel  x=+0.99 y=-0.01 z=+0.02 g   (x ~ +1.00 when nose up)
 DIAG|MOUNT: tilt from vertical = +3.20 deg  (vertical + still)
@@ -164,8 +164,9 @@ Procedure, no flight needed:
    set `NoseAxis` to that axis (app, or `n` in the config menu).
 3. **Power-cycle**, and stay disarmed — the point is that no arm event occurs.
 4. Stand it vertical and still for ≥10 s so the pad settle fires.
-5. Press `m`. Frame should be non-identity and body accel ≈ `x=+1.00`, with
-   y and z near zero.
+5. Press `m`. Frame should be non-identity — the line says so explicitly,
+   `(non-identity - committed)` — and body accel ≈ `x=+1.00`, with y and z near
+   zero.
 6. **Negative control:** set `NoseAxis` back to `Auto`, power-cycle, repeat. The
    frame stays identity and the +1 g shows on the *physical* axis instead —
    which is what proves the setting did the work, not luck.

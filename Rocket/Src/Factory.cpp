@@ -765,7 +765,7 @@ void Factory::PrintMountingDiag() {
 			f.sign[0] < 0 ? '-' : '+', kAx[f.src[0]],
 			f.sign[1] < 0 ? '-' : '+', kAx[f.src[1]],
 			f.sign[2] < 0 ? '-' : '+', kAx[f.src[2]],
-			identity ? "   (identity - never committed)" : "");
+			identity ? "   (identity - never committed)" : "   (non-identity - committed)");
 	UartSend(line);
 
 	const Vec3f raw = navigation_.getRawImu().accel_selected_mps2;
