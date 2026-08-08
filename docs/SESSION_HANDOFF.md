@@ -266,12 +266,20 @@ The strapdown drives the orientation display correctly (pitch/roll/yaw track the
 > `x=+0.98 g`, tilt 4.31 deg -- bit-for-bit `ChooseFrame`'s `NoseAxis::Z`
 > positive branch. See [#36 comment 5223359435](https://github.com/fschroer/steam-pigeon-locator/issues/36#issuecomment-5223359435).
 >
-> **The negative control was run and confirmed** (`NoseAxis` = `Auto`,
-> power-cycle, vertical and still: frame stays identity, +1 g stays on the
-> physical axis). That closes the one gap the earlier write-up flagged -- item 5
-> now rests on the control, not only on the argument that `ChooseFrame` refuses
-> to commit below 0.5 g on the configured axis. **No open items remain on
-> ADR-0021.**
+> **The negative control was run and confirmed** (`NoseAxis` = `Auto`: frame
+> `X<-+X Y<-+Y Z<-+Z (identity - never committed)`, body row identical to raw,
+> tilt correctly unavailable). Output in
+> [#36 comment 5224910908](https://github.com/fschroer/steam-pigeon-locator/issues/36#issuecomment-5224910908).
+> Item 5 now rests on the control, not only on the argument that `ChooseFrame`
+> refuses to commit below 0.5 g. **No open items remain on ADR-0021.**
+>
+> One wrinkle worth knowing before reading those two logs side by side: the unit
+> was stood on a **different face** for the control (gravity on sensor `x`,
+> `+1.02`) than for the positive run (sensor `z`, `+0.98`), so two variables
+> changed rather than one. Harmless -- an identity frame forces body == raw, so
+> no remap can have occurred -- but it means body `x ~ +1.00`, the POSITIVE
+> test's criterion, is *also* true in the control, purely as pass-through. The
+> frame line is the discriminator in that pair, not the body row.
 >
 > ⚠️ **The next flash RE-DEFAULTS the locator's runtime journal.** The dead
 > `archive_position` field was removed from `RocketRuntimeMetadata` on
