@@ -186,9 +186,26 @@ Procedure, no flight needed:
 5. Press `m`. Frame should be non-identity — the line says so explicitly,
    `(non-identity - committed)` — and body accel ≈ `x=+1.00`, with y and z near
    zero.
-6. **Negative control:** set `NoseAxis` back to `Auto`, power-cycle, repeat. The
-   frame stays identity and the +1 g shows on the *physical* axis instead —
-   which is what proves the setting did the work, not luck.
+6. **Negative control:** set `NoseAxis` back to `Auto`, power-cycle, and repeat
+   **without moving the locator** — change the setting and nothing else. The
+   frame stays identity and the +1 g shows on the *physical* axis instead, which
+   is what proves the setting did the work, not luck:
+
+   ```
+   DIAG|MOUNT: nose axis = Auto  (detect on arm; tilt unavailable)
+   DIAG|MOUNT: frame body<-sensor  X<-+X  Y<-+Y  Z<-+Z   (identity - never committed)
+   DIAG|MOUNT: raw  accel  x=+0.02 y=+0.99 z=-0.01 g
+   DIAG|MOUNT: body accel  x=+0.02 y=+0.99 z=-0.01 g   (Auto: no frame, so body == raw)
+   DIAG|MOUNT: tilt unavailable (nose axis Auto, or accel not gravity-dominated)
+   ```
+
+   **Re-orienting between steps 5 and 6 weakens the control.** Under `Auto` the
+   body row is a straight copy of raw, so if you stand the locator on its
+   *physical X* face for the control, body `x` reads ~+1 g — satisfying step 5's
+   criterion in the run that is meant to fail it. The frame line still
+   discriminates, and `body == raw` still proves no remap occurred, but the
+   headline number stops being the tell. Keep the same face and the two logs
+   differ in exactly one place.
 
 `m` only responds at the top level, with no menu open — press Esc first.
 

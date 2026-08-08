@@ -799,9 +799,18 @@ void Factory::PrintMountingDiag() {
 	FmtG(bx, sizeof(bx), body.x / G0_F);
 	FmtG(by, sizeof(by), body.y / G0_F);
 	FmtG(bz, sizeof(bz), body.z / G0_F);
+	// The "+1.00 on x" hint is a statement about the MOUNTING FRAME, so it only
+	// means anything when an axis is configured.  Under Auto no frame ever
+	// commits and body is a straight copy of raw, so whichever axis is
+	// physically up reads ~+1 g in the body row too — and if that happens to be
+	// X, the hint reads as a PASS in the run that is supposed to fail.  That is
+	// exactly how the #36 item 5 negative control logged: identity frame, yet
+	// "body accel x=+1.02 g   (x ~ +1.00 when nose up)".
 	snprintf(line, sizeof(line),
-			"DIAG|MOUNT: body accel  x=%s y=%s z=%s g   (x ~ +1.00 when nose up)\r\n",
-			bx, by, bz);
+			"DIAG|MOUNT: body accel  x=%s y=%s z=%s g   %s\r\n",
+			bx, by, bz,
+			axis == NoseAxis::Auto ? "(Auto: no frame, so body == raw)"
+			                       : "(x ~ +1.00 when nose up)");
 	UartSend(line);
 
 	float tilt_rad = 0.0f;
