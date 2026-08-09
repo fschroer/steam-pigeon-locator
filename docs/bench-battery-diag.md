@@ -19,6 +19,17 @@ Both findings are fixed or exposed by the tooling described below: calibration
 now runs in `MX_ADC_Init`, and the diagnostic prints `CALFACT` so a repeat is
 visible rather than inferred.
 
+**Confirmed after the fix**, on the same board: `CALFACT` came back **82**,
+`VREFINT raw 1507` against `factory cal 1506` (so VDDA 3297 mV, nominal), and
+the BATTLVL floor collapsed from ~83 counts to **1**. The ~83-count floor was
+never a node voltage — it was the ADC's uncorrected offset, and the node had
+been at true zero throughout. That also rules out leakage through the switch:
+it is an open circuit, not a partial conductor.
+
+`CALFACT` was **62** on a healthy board against **82** on this one — ~20 counts
+(~16 mV) of per-die spread that was previously uncorrected on every unit, which
+is the part of this that was never specific to one board.
+
 ## Why this exists
 
 The battery reading has exactly one route to the outside world:
@@ -97,15 +108,24 @@ divider drawing current.
 
 ## Reading the output
 
+A real run from a healthy board (2026-08-08, cell at ~3.87 V):
+
 ```
-DIAG|BATT: VDDA = 3291 mV (measured via VREFINT)
-DIAG|BATT: VREFINT raw 1660, factory cal 1655; ADC CALFACT 41
-DIAG|BATT: full scale (4095) -> tlm 4302 mV, meas 4290 mV
+DIAG|BATT: VDDA = 3284 mV (measured via VREFINT)
+DIAG|BATT: VREFINT raw 1512, factory cal 1505; ADC CALFACT 62
+DIAG|BATT: full scale (4095) -> tlm 4302 mV, meas 4281 mV
 DIAG|BATT: BATTRD off on entry; node RC ~629 us (8.2k||27k with C7 0.1uF)
 DIAG|BATT:    t_us  counts   node_mV   tlm_mV  meas_mV  hal
-DIAG|BATT:      24      18        14       18       18  ok
-DIAG|BATT:     271    1298      1043     1362     1359  ok
-...
+DIAG|BATT:       1       1         0        0        0  ok
+DIAG|BATT:     250     103        82      108      106  ok
+DIAG|BATT:     500     672       538      705      701  ok
+DIAG|BATT:    1000    2240      1796     2353     2341  ok
+DIAG|BATT:    2000    3404      2729     3576     3557  ok
+DIAG|BATT:    5000    3698      2965     3885     3865  ok
+DIAG|BATT:   10000    3699      2966     3885     3866  ok
+DIAG|BATT:   25000    3701      2968     3887     3869  ok
+DIAG|BATT:   50000    3701      2968     3887     3869  ok
+DIAG|BATT:  100000    3701      2968     3887     3869  ok
 DIAG|BATT: production samples at t=100000 us; app gauge is empty below 3750 mV
 ```
 
@@ -153,6 +173,20 @@ With VDDA ≈ 3300 mV and a cell at 4.20 V, the node sits at
 divider has little headroom: anything above ~4.30 V saturates the ADC, so a cell
 on charge sits close to the top of the range and the last ~100 mV cannot be
 resolved.
+
+**Measured curve shape**, fitted to the healthy-board run above: the exponential
+tail gives **τ ≈ 627 µs**, against the 629 µs predicted from 8.2k ‖ 27k × 0.1 µF
+— the RC model is right. The whole curve is offset **~400 µs** by the
+TPS22950's controlled turn-on, and the first few hundred microseconds rise
+faster than a pure delayed exponential because the switch slews its output
+rather than stepping it. Net effect: **settled by ~5 ms**, so production's 100 ms
+has ~20× margin and the 25 ms that an in-line settle delay would have used would
+also have been ample.
+
+The corollary matters more than the margin does: the enable-to-read gap is a
+service *count*, not a deadline. If the super-loop ever backs up and replays
+counts 0 and 2 back-to-back, the read lands in the first few hundred
+microseconds of this curve and reports a near-flat battery.
 
 Note that a `meas_mV` full scale well below ~4.30 V means VDDA itself read low,
 which is a reason to check `CALFACT` and the VREFINT inputs before believing any
