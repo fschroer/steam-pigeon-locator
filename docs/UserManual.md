@@ -221,11 +221,11 @@ Everything in the app lives behind the menu button at the top left of the flight
 | Menu item | Appears when |
 |---|---|
 | Application Settings | Always |
-| Download maps | Always |
 | Receiver Settings | The receiver is connected |
 | Locator Settings | The locator is powered, in range, and **disarmed** |
 | Flight Profiles | The locator is powered, in range, and **disarmed** |
 | Deployment Test | The locator is powered, in range, and **armed** |
+| Download maps | Always (last in the menu) |
 
 So if a screen you want isn't in the menu, the reason is almost always the locator's arm state or the fact that it isn't transmitting. The screenshot above was taken with the receiver connected and the locator switched off — which is why only three items appear.
 
@@ -479,7 +479,7 @@ The locator holds **10 flights**. When it's full, you can't record a new one.
 > ⚠️ **WORK IN PROGRESS.** This feature is built and it works, but the satellite imagery it downloads comes from map providers whose terms do not currently permit keeping tiles on your device permanently. The provider question is being resolved. Until it is:
 > - **Treat downloaded imagery as temporary.** It may expire or stop rendering.
 > - **Do not rely on it as your only recovery plan.** Bring a paper map, a compass, and a GPS you trust.
-> - The buttons, the layout and the workflow described below are stable and will not change; only the provider list and how long a download lasts are open questions.
+> - The workflow described below is stable. The provider list, how long a download lasts, and the details of individual controls are still open.
 
 Recovery happens where there is no cell signal. This screen pre-loads the satellite imagery for your launch site so the map works anyway.
 
@@ -496,7 +496,7 @@ Recovery happens where there is no cell signal. This screen pre-loads the satell
 4. Set **Detail (max zoom)** with the slider. The hint under the slider tells you what each level is good for — z17 is described as *"Field features — good for recovery"*, which is the level you want. The thumbnail on the right previews the actual detail you'll get.
 5. Check the estimate. The screen shows the ground coverage, the tile count and the download size.
 6. Give it a **Site name**.
-7. Press **Download this area for offline**.
+7. Press **Download this area for offline**. If the area is too large the button instead reads **"Over 1 GB — tighten the area or lower the zoom"** and cannot be pressed; shrink the area or drop the max zoom until it changes back.
 
 ![Download maps — size estimate and downloaded regions](images/app-07-download-maps-detail.png)
 
@@ -504,9 +504,19 @@ The example above is a 22 × 22 km area at z10–z17: about 12,580 tiles and 235
 
 💡 **Do this on Wi-Fi, the day before.** 235 MB over a marginal cell connection at the field is not a plan.
 
-**Downloaded regions** are listed at the bottom of the screen with a delete button each. **Clear ambient cache (offline test)** wipes the incidental tiles your phone cached while browsing, so you can honestly test whether your downloaded region really works with no signal.
+**Leaving the screen does not stop the download.** It keeps running in the background and stops only if the app itself closes — so you can go back to the flight map, or start it and put the phone down. While it runs, **Cancel** stops it deliberately; whatever had already downloaded is kept, not discarded.
 
-💡 **Test it properly before you trust it:** clear the ambient cache, put the phone in airplane mode, then open the flight map and pan around your launch site. If you see imagery, you're good.
+**Offline regions** are listed at the bottom of the screen, each with a status line and a delete button:
+
+| Status shown | What it means |
+|---|---|
+| `complete · 235 MB` | Fully downloaded. This region will render with no signal. |
+| `incomplete — 62% of tiles · 140 MB` | Interrupted. Press **Resume** to finish it — tiles already downloaded are not fetched again. |
+| `status unknown` | The app could not read the region's status. Treat it as incomplete. |
+
+⚠️ **A region appearing in the list is not proof that it downloaded.** The entry is created when the download *starts*, so a region cut short by a dropped connection, a cancel, or the app closing still sits in the list. Check that it says **complete** before you count on it at the field.
+
+💡 **Test it properly before you trust it:** put the phone in **airplane mode _and_ turn Wi-Fi off** — airplane mode alone leaves Wi-Fi up on most phones, which quietly invalidates the test — then open the flight map and pan around your launch site. What you should see is a **hard-edged rectangle** of imagery with nothing outside it. If imagery continues past the edges, you are looking at tiles your phone cached while browsing, not at your downloaded region.
 
 💡 **While you're at it, install an offline maps app** — Organic Maps or OsmAnd, both free — and download the region around your site in that app too. It is what receives the rocket's coordinates when you tap them during recovery (§9.2), and without offline data it opens to a blank screen where you need it. This is separate from the imagery above and takes a few minutes on the same Wi-Fi.
 
