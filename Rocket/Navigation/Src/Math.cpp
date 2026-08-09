@@ -80,12 +80,12 @@ Quaternionf quatIntegrateBodyRates(const Quaternionf& q, const Vec3f& omega_rps,
     // (q + ½·q⊗ω·dt) whose error grows with (ω·dt)² — at 20 Hz a 660 dps roll
     // is 33°/step, where the Euler approximation introduces large attitude
     // error that then leaks gravity into the velocity solution.  (Sub-sample
-    // coning is still unmodelled; that needs IMU-rate sampling.)
+    // coning is still unmodeled; that needs IMU-rate sampling.)
     const float theta = norm(omega_rps) * dt_s;   // total rotation angle this step
 
     Quaternionf dq;
     if (theta < 1e-6f) {
-        // Small-angle: ½·θ with unit scalar; normalise handles the rest.
+        // Small-angle: ½·θ with unit scalar; normalize handles the rest.
         dq.w = 1.0f;
         dq.x = 0.5f * omega_rps.x * dt_s;
         dq.y = 0.5f * omega_rps.y * dt_s;

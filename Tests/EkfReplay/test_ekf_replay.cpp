@@ -4,7 +4,7 @@
 // Offline EKF replay — the ADR-0004 analysis tool.
 //
 // Compiles the REAL Rocket/Navigation/Src/InsEkf15.cpp and drives it from an
-// archived flight CSV, so filter behaviour can be diagnosed and re-tuned
+// archived flight CSV, so filter behavior can be diagnosed and re-tuned
 // against recorded data without spending a flight.  InsEkf15 has no HAL or
 // driver dependencies (only Math/WGS84/Cholesky/Units), so it links on host
 // unmodified — no fork, no reimplementation.

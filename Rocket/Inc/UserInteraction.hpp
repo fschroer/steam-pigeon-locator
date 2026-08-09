@@ -89,7 +89,7 @@ private:
   const char* bs_ = "\b \b\0";
   const char* config_menu_intro_ = "Rocket Locator Configuration\r\n\0";
   const char* config_save_text_ = "Saved Configuration\r\n\r\n\0";
-  const char* cancel_text_ = "Cancelled\r\n\r\n\0";
+  const char* cancel_text_ = "Canceled\r\n\r\n\0";
   const char* deployment_ch1_mode_text_ = "0) Deployment Channel 1 Mode:\t\t\0";
   const char* deployment_ch2_mode_text_ = "1) Deployment Channel 2 Mode:\t\t\0";
   const char* deployment_ch3_mode_text_ = "2) Deployment Channel 3 Mode:\t\t\0";
@@ -136,7 +136,7 @@ private:
   const char* data_erase_confirm_text_ = "\r\nErase ALL flight memory? This cannot be undone. Press Y to confirm, any other key to cancel.\r\n\0";
   const char* data_erase_progress_text_ = "\r\nErasing all flight memory, please wait...\r\n\0";
   const char* data_erase_done_text_ = "\r\nAll flight memory erased.\r\n\0";
-  const char* data_cancel_text_ = "\r\nCancelled.\r\n\0";
+  const char* data_cancel_text_ = "\r\nCanceled.\r\n\0";
   // fused_agl_m / fused_vspeed_mps are the EKF fused solution (retired from the
   // real-time authority per ADR-0005 but still computed every cycle and logged here
   // for offline observation, ADR-0004).  tilt_deg / q_* are the NFR-9 strapdown.

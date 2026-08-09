@@ -31,7 +31,7 @@ These are locator-internal invariants for how a record is opened, written, close
 ## Consequences
 
 - Archived data survives a flash/debugger/watchdog reset without a manual power cycle; a flight that never landed is still downloadable; aborted arms no longer strand or skip slots; a launch on the ready-beep always records; the archive can be tidied (`c`) or reset for a layout change (`e`).
-- Reliance on POR-equivalent behaviour couples correctness to `0xAB`/`0x66`/`0x99` support and (defensively) a `CSB_MEM` pull-up — hence the bench task (#19).
+- Reliance on POR-equivalent behavior couples correctness to `0xAB`/`0x66`/`0x99` support and (defensively) a `CSB_MEM` pull-up — hence the bench task (#19).
 - Deferring ISR flash work to the main loop adds up to one 50 ms tick of latency to a console keystroke, a settings save, or transfer setup — immaterial, and the price of NFR-4/NFR-5 correctness.
 - `EraseAllMemory` blocks for the duration of a full-archive erase (the region is several MB → up to a couple of minutes); it is a deliberate, watchdog-kicked maintenance operation, not a routine path.
 - **Revisit if:** the flash part or its reset-command support changes; the record geometry changes such that reuse-across-reboot detection (4) needs revising; or a non-blocking full-erase is wanted.

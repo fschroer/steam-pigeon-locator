@@ -19,7 +19,7 @@ These are protocol-level contracts shared by three independently-built binaries,
 
 ## Decision
 
-We adopt the following invariants for the flight-data transfer protocol. Any decoder/encoder in any of the three components must honour them.
+We adopt the following invariants for the flight-data transfer protocol. Any decoder/encoder in any of the three components must honor them.
 
 1. **Header-exact framing.** A `FlightData` / `FlightDataParity` frame is delimited by its **exact on-wire length derived from the header**, never by the size of the receive buffer:
    - `FlightData` length = fixed header (16 B) + `CompressedHeader` (48 B) + `(count-1) × CompressedDelta` (24 B), where `count = min(samplesPerPacket, total_samples − packet_index × samplesPerPacket)`.
@@ -35,7 +35,7 @@ We adopt the following invariants for the flight-data transfer protocol. Any dec
 - Multi-packet transfers are reliable regardless of BLE fragmentation or burst concatenation; empty records are handled gracefully; abort and return-to-main are prompt; the ~24 s first-tap delay is gone.
 - The larger window (8) roughly halves ACK round-trips per transfer at the cost of a longer burst, which is why invariant 5 pairs it with the retx timeout.
 - Reliance on the per-frame CRC-16 increased (invariant 1), which is the right place to lean now that the radio layer admits CRC-mismatched frames (#16) — but it means the ~1/65 536 CRC-16 false-accept is marginally more exposed under a larger window; watch it during bench validation.
-- **Cross-component coupling:** the marker (2), the forwarding rule (4), and framing (1) are contracts between three separately-flashed binaries. The wire-size `static_assert`s (`MessageProtocol.hpp`, both firmware copies) and the app's `WireLayoutTest` pin the struct sizes; this ADR pins the *behaviour*. Changing any of these requires updating all three sides together.
+- **Cross-component coupling:** the marker (2), the forwarding rule (4), and framing (1) are contracts between three separately-flashed binaries. The wire-size `static_assert`s (`MessageProtocol.hpp`, both firmware copies) and the app's `WireLayoutTest` pin the struct sizes; this ADR pins the *behavior*. Changing any of these requires updating all three sides together.
 - **Revisit if:** link conditions degrade materially (may need a smaller window or FEC tuning), a higher-throughput scheme is wanted, or the radio-layer CRC decision (#16) is reversed.
 
 ## Amendment (2026-07-17) — `FlightEvents` companion message (MsgType 19)
@@ -54,5 +54,5 @@ Sizes are pinned the usual way: `static_assert(sizeof(FlightEventsMessage) == 66
 - **Whole-buffer framing (status quo ante).** Simplest, but only correct for exactly-one-buffered-packet — the defect itself.
 - **A length field on the wire.** Redundant: the length is fully derivable from the existing header fields, and adding one would churn the pinned struct sizes.
 - **Stop-and-wait per packet.** Removes the burst/retx-timeout coupling but is much slower (an ACK round-trip per packet).
-- **No marker; rely on an app-side timeout for empty records.** Worse UX (a multi-second blank wait) and leaves the locator's state ambiguous — the prior behaviour we replaced.
+- **No marker; rely on an app-side timeout for empty records.** Worse UX (a multi-second blank wait) and leaves the locator's state ambiguous — the prior behavior we replaced.
 - **No safety-net timeout (pure app-driven resume).** Tried and rejected: a single lost `DisarmRequest` bricked the locator until power-cycle.

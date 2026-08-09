@@ -318,7 +318,7 @@ private:
 #if SP_LOSS_INJECT
 	// Loss-injection state (issue #18).  dbg_txdrop_per_group_ data packets at the
 	// start of every parity group are dropped ON THEIR FIRST transmission only —
-	// dbg_dropped_ makes the drop one-shot so a retransmit gets through, modelling
+	// dbg_dropped_ makes the drop one-shot so a retransmit gets through, modeling
 	// a transient RF loss.  Reset each transfer in BeginTransfer().
 	bool     dbg_drop_next_cfg_chg_ = false;   // #20: forced miss of next config change
 	uint8_t  dbg_txdrop_per_group_  = 0;       // #18: 0/1/2 packets dropped per group

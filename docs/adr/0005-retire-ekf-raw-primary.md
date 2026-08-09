@@ -12,7 +12,7 @@
 [ADR-0003](0003-priority1-deployment-raw-baro.md) already removed the 15-state EKF (`InsEkf15`) from the Priority-1 deployment authority (raw baro is permanent primary). After extensive bench and flight observation ([#13](https://github.com/fschroer/steam-pigeon-locator/issues/13)) the estimator was found to **add** error rather than reduce it for this application, surviving only via many point fixes (ZUPT, gyro-bias freeze, mounting/cardinal cal, descent tilt correction, the 150 m baro innovation gate, apogee-on-raw-baro, the #12 velocity guard, the #11 launch raw gate). Three limitations are not fixable by tuning:
 
 - **No magnetometer** (the ISM6HG256X is 6-axis). Yaw/heading is unobservable at rest, so the app's "Hdg"/"Inc" wander when stationary.
-- **GPS is poor for vertical / sub-metre.** With GPS lock, GPS altitude aiding overrides baro and freezes fused AGL at ~0 for small movements — worse than raw baro.
+- **GPS is poor for vertical / sub-meter.** With GPS lock, GPS altitude aiding overrides baro and freezes fused AGL at ~0 for small movements — worse than raw baro.
 - **20 Hz is too slow** for flight body rates (660–768 dps): attitude is aliased and gravity leaks into the vertical channel (2026-06-14 divergence).
 
 Two facts reframe the question:
@@ -30,7 +30,7 @@ This makes the two EKF-only requirements — FR-P8 (fused 3D location) and FR-P9
    - **Altitude / vertical velocity** → raw baro (already the Priority-1 source via ADR-0003; now also the telemetry source).
    - **Position / ground course** → raw GPS.
    - **Body rates / g-force** → raw IMU.
-   - **Orientation (display)** → at most an *approximate* attitude clearly labelled as such, valid only in quiet phases (pad, descent under canopy); it must not be presented as trustworthy during high-rate flight, and **no heading is claimed at rest** (a 6-axis IMU cannot observe it).
+   - **Orientation (display)** → at most an *approximate* attitude clearly labeled as such, valid only in quiet phases (pad, descent under canopy); it must not be presented as trustworthy during high-rate flight, and **no heading is claimed at rest** (a 6-axis IMU cannot observe it).
 
 3. **In-flight attitude for the air-start gate (FR-P13) comes from a high-rate strapdown gyro integrator (NFR-9), not the EKF and not a complementary filter.** Integrate the quaternion at ≥ 480 Hz (decoupled from the 20 Hz loop, respecting NFR-4 ISR discipline), seeded from the known on-pad vertical attitude found by mounting calibration. This yields **tilt-from-launch-vertical**, which is what the safety gate needs — not absolute heading. Hardware supports it: the gyro full-scale is ±4000 dps (`ISM6HG256X.hpp` `FS_G`), so the 660–768 dps flight rates do not clip, and the high-g accelerometer already runs at 480 Hz ODR.
 
@@ -50,7 +50,7 @@ This makes the two EKF-only requirements — FR-P8 (fused 3D location) and FR-P9
 
 **Negative / accepted**
 - A high-rate strapdown path is new firmware: a FIFO/timer-driven gyro read + quaternion integrator outside the 20 Hz loop (touches the ADR-0002 execution model and NFR-3/NFR-4). It does not exist yet.
-- Loss of a "real" 3D position/orientation product in real time (FR-P8/FR-P9). Accepted: those were never trustworthy here, and the app's needs are met by raw GPS + approximate-labelled attitude.
+- Loss of a "real" 3D position/orientation product in real time (FR-P8/FR-P9). Accepted: those were never trustworthy here, and the app's needs are met by raw GPS + approximate-labeled attitude.
 - The ISM6HG256X register/ODR configuration in the driver is still flagged *"confirm against the datasheet"*; the high-rate claim must be hardware-verified before flight.
 - Roll about the thrust axis remains unobserved/uncorrected — irrelevant to the tilt gate, but the attitude product is not a full nav-grade solution.
 
@@ -75,7 +75,7 @@ The NFR-9 high-rate strapdown (Decision 3) is **implemented and bench-confirmed 
 - **dt is GPS-disciplined, not 1/ODR.** Per-sample dt = (TIM2 interval ÷ PPS-measured ticks/sec) ÷ words drained, EMA-smoothed and clamped. This anchors the FR-P13 safety integrator to GPS time, immune to the MSI/IMU-oscillator clock errors — and crucially to **`HAL_GetTick`, which is the RTC-based LoRaWAN TimerServer (sys_app.c override), correct in production but unusable for timing under a debugger.** TIM2+PPS is the trusted free-running timebase.
 - **Stack discipline:** `Navigation::Update()` sits in the deepest periodic call chain on a 2 KB stack; the drain uses a small (12-word) batch buffer — a large local buffer overflows the stack. Verify `Update()`'s `.su` frame stays well under budget if this path changes.
 
-The strapdown rate, FIFO health (no overrun), and integration timebase are bench-verified; **what remains is behavioural verification** — that tilt-from-vertical tracks correctly through rotation and the FR-P13 gate reads as intended (read values in-app, not CubeMonitor). FR-P13 firing-output wiring remains deferred (master switch OFF).
+The strapdown rate, FIFO health (no overrun), and integration timebase are bench-verified; **what remains is behavioral verification** — that tilt-from-vertical tracks correctly through rotation and the FR-P13 gate reads as intended (read values in-app, not CubeMonitor). FR-P13 firing-output wiring remains deferred (master switch OFF).
 
 To feed that verification (and [#14](https://github.com/fschroer/steam-pigeon-locator/issues/14)/[#15](https://github.com/fschroer/steam-pigeon-locator/issues/15)), the strapdown **tilt and quaternion are now logged per sample** to the flight archive (packed int16; `ARCHIVE_VERSION` 5) and dumped via the UART CSV export. Tilt/quaternion are not in the LoRa flight-profile format, so that part is locator-side only. *(Correction, 2026-07-17: the parenthetical "its codec packs only timestamp/accel/gyro" was wrong — `FlightProfileCodec` has always packed an altitude too. See the amendment below for which one.)*
 
@@ -101,7 +101,7 @@ Only the selected column changed — the wire layout is untouched (`CompressedHe
 
 ## Amendment (2026-07-18) — part of the EKF's bad attitude was a plain SEED BUG, not estimator weakness
 
-This ADR's Decision 2 downgrades EKF orientation to "at most an *approximate* attitude clearly labelled as such", and the code that replaced it carries the note *"the EKF `q_bn` was itself not rendering correctly, so this replaces it."* Both readings attribute the failure to the estimator being unfit — 20 Hz aliasing, no magnetometer, gravity leakage. **At least part of it was simply a sign error in the seed**, and that distinction matters for anyone reconsidering FR-P8/FR-P9.
+This ADR's Decision 2 downgrades EKF orientation to "at most an *approximate* attitude clearly labeled as such", and the code that replaced it carries the note *"the EKF `q_bn` was itself not rendering correctly, so this replaces it."* Both readings attribute the failure to the estimator being unfit — 20 Hz aliasing, no magnetometer, gravity leakage. **At least part of it was simply a sign error in the seed**, and that distinction matters for anyone reconsidering FR-P8/FR-P9.
 
 `InsEkf15::initialize()` seeded attitude from the raw specific-force vector:
 
@@ -119,7 +119,7 @@ Measured by replaying flight 2026-07-17 offline (`Tests/EkfReplay`), at t = 0, a
 | EKF, as shipped | **170.63°** (filter believes the nose points DOWN) |
 | EKF, negated seed | **9.37°** |
 
-This is not aliasing, dynamics, or replay artefact — the vehicle is stationary for the whole window, and tilt is directly comparable because the Y-reflection in `getStrapdownQuat` leaves pitch/inclination unchanged.
+This is not aliasing, dynamics, or replay artifact — the vehicle is stationary for the whole window, and tilt is directly comparable because the Y-reflection in `getStrapdownQuat` leaves pitch/inclination unchanged.
 
 It is also effectively unrecoverable in flight: `correctTiltFromAccel()` injects `gain × error` (gain 0.01) per cycle, and 180° is the antipode where the rotation-error axis is ill-conditioned. So the filter has most likely flown every flight to date resolving gravity and body acceleration through a rotation ~180° from truth — which would corrupt the vertical channel far more than the aliasing this ADR blames.
 

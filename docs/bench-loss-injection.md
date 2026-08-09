@@ -12,7 +12,7 @@ All in the locator, guarded by `SP_LOSS_INJECT` (default **0**):
 
 - **Flight-data TX drop** (`Communication::SendDataPacket` / `DbgConsumeTxDrop`).
   Drops the first *N* data packets of every parity group **on their first
-  transmission only** — a retransmit of the same index goes through, modelling a
+  transmission only** — a retransmit of the same index goes through, modeling a
   transient over-the-air loss. The drop skips just the radio send; the packet is
   still XOR'd into its parity group and marked sent, exactly as a real RF loss
   leaves the separately-transmitted parity covering the gap. So `N=1` is
@@ -83,7 +83,7 @@ of `kParityGroupSize`.
 3. In the app, change the locator LoRa channel from Locator Settings. The app
    forwards the request; the receiver follows to the new channel, but the locator
    drops it and stays on the old one — the link is split.
-4. Expected app behaviour (ADR-0011 invariant 4): it detects the timeout (no
+4. Expected app behavior (ADR-0011 invariant 4): it detects the timeout (no
    PreLaunchData on the new channel), reverts the receiver to the **old** channel,
    waits for the link to resume, retries the change once, and — since `&` is
    one-shot, the retry is **not** dropped — the change now succeeds. Confirm both

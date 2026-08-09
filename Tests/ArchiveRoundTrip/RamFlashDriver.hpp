@@ -44,7 +44,7 @@ public:
     }
 
     // NOR flash Write: can only set bits to 0, never to 1 without an erase.
-    // This is modelled as a bitwise AND of the incoming data into the buffer.
+    // This is modeled as a bitwise AND of the incoming data into the buffer.
     // A page program must not cross a page boundary (256-byte alignment).
     bool Write(uint32_t address, const void* src, size_t length) override
     {

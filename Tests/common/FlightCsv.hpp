@@ -21,7 +21,7 @@
 // is what it did before this existed.
 //
 // Values are stored as double: latitude/longitude carry ~7 significant digits
-// before the decimal point and would lose metres of precision as float.
+// before the decimal point and would lose meters of precision as float.
 // ---------------------------------------------------------------------------
 #pragma once
 

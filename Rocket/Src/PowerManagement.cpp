@@ -85,7 +85,7 @@ bool PowerManagement::readRawADCChecked(uint16_t& counts) {
 	if (ok)
 		ok = (HAL_ADC_PollForConversion(m_hadc, 10) == HAL_OK);
 	// Read unconditionally: on failure this is the stale data register, which is
-	// exactly what readRawADC() has always returned, so production behaviour is
+	// exactly what readRawADC() has always returned, so production behavior is
 	// unchanged.  The difference is that here the caller is told.
 	counts = HAL_ADC_GetValue(m_hadc);
 	HAL_ADC_Stop(m_hadc);
@@ -152,7 +152,7 @@ uint16_t PowerManagement::readBatteryMillivolts() {
 //
 // The raw count and this die's factory calibration value are both reported, not
 // just the derived voltage: VDDA = cal * 3300 / raw, so seeing the inputs is
-// what lets a low VDDA be recognised as an ADC offset rather than a sagging
+// what lets a low VDDA be recognized as an ADC offset rather than a sagging
 // rail — the reading being high by a fixed number of counts moves the quotient
 // down.  That is precisely the reading that appeared on 2026-08-08.
 // ---------------------------------------------------------------------------
@@ -176,7 +176,7 @@ bool PowerManagement::measureVdda(Diagnostic& out) {
 
 	// HAL_ADC_ConfigChannel turns the VREFINT path on but applies no settling
 	// delay for it — it only does that for the temperature sensor — so wait the
-	// datasheet stabilisation time here, or the first conversion reads low and
+	// datasheet stabilization time here, or the first conversion reads low and
 	// the computed VDDA comes out high.
 	BusyWaitUntil(Micros(), LL_ADC_DELAY_VREFINT_STAB_US + 8u);
 

@@ -127,7 +127,7 @@ private:
 	// Latched: fires once per settle, and re-arms only when the rocket is moved
 	// or tilted away again.  Requires a configured nose axis — with NoseAxis::Auto
 	// isVerticalAndStationary() is always false, so this never fires and the
-	// pre-#36 arm-only behaviour is preserved exactly.
+	// pre-#36 arm-only behavior is preserved exactly.
 	uint16_t pad_settle_count_ = 0;
 	bool     pad_calibrated_   = false;
 	static constexpr uint16_t kPadSettleCycles = SAMPLES_PER_SECOND * 10u;  // ~10 s

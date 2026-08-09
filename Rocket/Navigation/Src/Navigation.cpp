@@ -45,7 +45,7 @@ bool Navigation::PowerDownAll() {
 // next kMountingCalSamples IMU readings (in raw sensor frame) are averaged to
 // identify the dominant gravity axis, which is then committed as the mounting
 // frame.  The bias-freeze flag is also cleared so gyro bias accumulation can
-// start fresh after the EKF re-initialisation.
+// start fresh after the EKF re-initialization.
 // ---------------------------------------------------------------------------
 void Navigation::triggerMountingCalibration() {
     m_mounting_cal_active  = true;
@@ -80,7 +80,7 @@ void Navigation::applyMountingFrame(ImuSample& imu) const {
 // ---------------------------------------------------------------------------
 // commitMountingFrame
 // Selects one of the six cardinal orientations that best matches the averaged
-// raw-sensor gravity vector, sets m_mounting, and re-initialises the EKF so
+// raw-sensor gravity vector, sets m_mounting, and re-initializes the EKF so
 // that subsequent fusion begins from a correctly-oriented state.
 //
 // Mounting matrix convention — body ← sensor mapping:
@@ -256,7 +256,7 @@ void Navigation::commitMountingFrame(const Vec3f& avg_raw_accel) {
 // Shared tail of a mounting-frame commit: everything that must follow m_mounting
 // changing, whether the frame was detected or taken from configuration.
 void Navigation::FinishMountingCommit() {
-    // Re-initialise the EKF with the current sensor reading remapped through
+    // Re-initialize the EKF with the current sensor reading remapped through
     // the new mounting frame, so the initial attitude is correct from frame 1.
     ImuSample imu = m_imu.raw();
     applyMountingFrame(imu);
@@ -458,7 +458,7 @@ bool Navigation::Update() {
     // Accumulate raw (pre-remapping) sensor readings during the calibration
     // window.  The EKF continues to run with whatever mounting frame is
     // currently active (identity until the first arm).  Once the window closes,
-    // commitMountingFrame() sets the correct mapping and re-initialises the EKF.
+    // commitMountingFrame() sets the correct mapping and re-initializes the EKF.
     if (m_mounting_cal_active && imu_new) {
         // Launch / handling guard.  The mounting frame is derived from the
         // gravity vector, which is only meaningful while stationary.  If any
@@ -470,7 +470,7 @@ bool Navigation::Update() {
         // Consequence for a launch inside the window: acceleration stays high
         // for the entire boost, so the counter never reaches kMountingCalSamples,
         // commitMountingFrame() is never called, and the EKF is never
-        // re-initialised mid-flight.  Calibration simply does not complete until
+        // re-initialized mid-flight.  Calibration simply does not complete until
         // a clean stationary run of kMountingCalSamples consecutive samples is
         // observed.  (Norm is frame-invariant, so this check is valid on the
         // raw, pre-remap sample.)
@@ -664,7 +664,7 @@ void Navigation::CalibrateOnPadAndZeroAglUntilLaunch(FlightStates flight_state) 
             // frame.  Run them unconditionally so the pad reference stays
             // correct throughout the mounting cal window (3.2 s at 20 Hz).
             // Suspending them here caused a false-launch: commitMountingFrame()
-            // reinitialises the EKF (resetting pad_altitude_msl_m from baro),
+            // reinitializes the EKF (resetting pad_altitude_msl_m from baro),
             // but if the stale m_solution.altitude_msl_m was wrong, the pad
             // reference is corrupted.  With these running, the next call here
             // (within 1 s) corrects the reference before DetectLaunch can fire.

@@ -36,7 +36,7 @@
 //       . = ALIGN(4);
 //     } >RAM
 //
-//   This tells the linker to place .noinit in RAM but never initialise it.
+//   This tells the linker to place .noinit in RAM but never initialize it.
 //   In STM32CubeIDE: open the .ld file, find the .data section, insert above.
 // =============================================================================
 
@@ -96,7 +96,7 @@ extern FaultRecord g_fault_log;
 
 // Call once at the very start of main(), before HAL_Init(), to:
 //   • Save RCC_CSR reset-cause bits (cleared by HAL_Init)
-//   • Increment boot_count if magic is valid, else initialise the record
+//   • Increment boot_count if magic is valid, else initialize the record
 void FaultLogInit();
 
 // Returns true if the stored record contains a valid fault from a previous boot.

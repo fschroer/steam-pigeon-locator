@@ -55,7 +55,7 @@ bool FlightManager::DetectLaunch(const NavSolution& sol) {
 
     // AGL term (#11): use RAW baro AGL per NFR-1, gated on the on-pad ground
     // reference having been zeroed (nav_.baroAglReferenceReady()).  Before it is
-    // zeroed, raw baro AGL reads an unzeroed MSL altitude (hundreds of metres) and
+    // zeroed, raw baro AGL reads an unzeroed MSL altitude (hundreds of meters) and
     // could false-trigger, so until then only the accel-only path is active.
     const BaroSample baro = nav_.getRawBaro();
     const bool agl_ready  = nav_.baroAglReferenceReady() && baro.valid;
@@ -182,7 +182,7 @@ bool FlightManager::DetectApogee(const NavSolution& sol, const BaroSample& baro_
 // < 0.25).  The EKF is retired from the real-time path (ADR-0005) and produces no
 // usable vertical speed in this build — it reads 0 on every sample — so that term
 // was ALWAYS satisfied and forced a false landing ~1 s after the near-apogee window
-// expired, mid-descent and tens of metres up, which closed the flight record early
+// expired, mid-descent and tens of meters up, which closed the flight record early
 // (flight 2026-07-12: "landing" at 7.7 s while still at 67 m and descending).  Raw
 // baro velocity is the authoritative descent signal under NFR-1, so it is now the
 // sole criterion.
@@ -827,7 +827,7 @@ void FlightManager::ResetFlight() {
 // so a late event (e.g. drogue backup after its delay, once main already fired)
 // must record its timestamp without pulling flight_state_ back to a lower ordinal.
 // setPhase is forwarded only on a real advance; the event states (4..7) all map to
-// the same EKF/baro phase, so no behaviour is lost when an advance is suppressed.
+// the same EKF/baro phase, so no behavior is lost when an advance is suppressed.
 // ---------------------------------------------------------------------------
 void FlightManager::AdvanceFlightState(FlightStates s) {
     if (static_cast<uint8_t>(s) > static_cast<uint8_t>(flight_state_)) {

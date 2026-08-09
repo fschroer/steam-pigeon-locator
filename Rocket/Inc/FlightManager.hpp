@@ -57,7 +57,7 @@ public:
     // tail lets the record retain ~2 s of the settled-on-ground signal (previously
     // the record ended one cycle BEFORE landing).  On a kMaxFlightMs force-close the
     // tail counter is never armed, so this is true immediately, preserving the
-    // previous close-on-landing behaviour there.
+    // previous close-on-landing behavior there.
     bool RecordComplete() const {
         return flight_state_ == FlightStates::Landed && m_landed_tail_remaining_ == 0;
     }
@@ -224,7 +224,7 @@ private:
     // 1.0 m/s is 13-28 samples: above the 12-sample canopy plateau of 2026-08-01
     // (false landing at 66 m AGL, which 20 @ 2.0 m/s fired on), at or below the
     // 28-sample ground quiescence of the tightest real landing on record.  20 is
-    // centred in that window; 40 would have MISSED a landing that actually happened.
+    // centered in that window; 40 would have MISSED a landing that actually happened.
     static constexpr uint8_t  kLandedConfirmSamples    = 20;     // 1.0 s sustained quiescence
     // AGL threshold removed — landing may be on terrain higher than the pad, so an
     // absolute AGL ceiling would prevent detection on uphill landing sites.

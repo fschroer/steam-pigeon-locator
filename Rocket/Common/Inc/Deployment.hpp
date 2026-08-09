@@ -15,7 +15,7 @@ enum class TestDeploymentState : uint8_t {
 	Countdown,
 	Firing,
 	Complete,
-	Cancelled
+	Canceled
 };
 
 void EnableDeployment();

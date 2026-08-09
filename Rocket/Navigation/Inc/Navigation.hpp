@@ -64,7 +64,7 @@ public:
     // body axis is most closely aligned with gravity, then builds a permutation/
     // sign matrix that remaps all subsequent IMU output to the standard body
     // frame (+X = nose/up, +Y = right, +Z = down).  Resets gyro-bias-freeze and
-    // re-initialises the EKF once the window completes.
+    // re-initializes the EKF once the window completes.
     void triggerMountingCalibration();
 
     // Compact representation of a 90°-multiple body←sensor rotation.
@@ -77,7 +77,7 @@ public:
 
     // Which raw sensor axis the rocket's long axis lies along (ADR-0021
     // Decision 6, #36).  Unsigned — the sign is measured, not configured.
-    // Auto keeps the detect-on-arm behaviour; anything else makes the mounting
+    // Auto keeps the detect-on-arm behavior; anything else makes the mounting
     // frame deterministic and tilt-from-vertical measurable at any time.
     //
     // On a CHANGE, tries to apply the frame straight away using the current
@@ -236,7 +236,7 @@ private:
     void applyMountingFrame(ImuSample& imu) const;
 
     // Inspect avg_raw_accel (averaged in sensor frame), determine the dominant
-    // gravity axis, set m_mounting, then re-initialise the EKF.
+    // gravity axis, set m_mounting, then re-initialize the EKF.
     void commitMountingFrame(const Vec3f& avg_raw_accel);
     // Shared tail of a commit (EKF re-init, strapdown re-seed, FIFO flush).
     void FinishMountingCommit();
@@ -270,7 +270,7 @@ private:
     // mounting-calibration average.  Samples outside [1 ± this] g (motor
     // ignition, free-fall, handling) discard and restart the window, preventing
     // a launch inside the window from committing a corrupted frame and
-    // re-initialising the EKF mid-flight.  0.5 g rejects thrust (>1.5 g) and
+    // re-initializing the EKF mid-flight.  0.5 g rejects thrust (>1.5 g) and
     // free-fall (<0.5 g) while tolerating normal pad vibration and settling.
     static constexpr float   kMountingCalMaxDeviationG = 0.5f;
 

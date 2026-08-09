@@ -39,7 +39,7 @@ We add a locator-channel control to the app and make the receiver follow the loc
 - **No wire-format change.** `lora_channel` already rides in `LocatorCfgChgRequest`; the app infers the locator channel from the receiver-appended `receiver_lora_channel` already present in PreLaunchData. Struct sizes, the `static_assert`s, and the app's `WireLayoutTest` are untouched.
 - **Cross-component coupling:** runtime-apply (locator), follow-after-forward (receiver), and confirm/recover (app) are contracts across three separately-flashed binaries; changing one requires the others.
 - The happy path is bench-tested (both devices move together, PreLaunchData resumes on the new channel). The **recovery path (invariant 4) is not yet bench-validated** under a forced miss — tracked as #20.
-- **Revisit if:** the receiver's forwarding-window / post-TX guard constants change materially, a hardware TxDone signal becomes unavailable, or a locator↔receiver channel handshake with explicit acknowledgement is wanted instead of the inference in invariant 3.
+- **Revisit if:** the receiver's forwarding-window / post-TX guard constants change materially, a hardware TxDone signal becomes unavailable, or a locator↔receiver channel handshake with explicit acknowledgment is wanted instead of the inference in invariant 3.
 
 ## Alternatives considered
 

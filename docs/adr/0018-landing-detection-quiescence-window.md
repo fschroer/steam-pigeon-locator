@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-08-03
 - **Deciders:** fschroer
-- **Related issues:** see also [ADR-0005](0005-retire-ekf-raw-primary.md) (raw-primary), [ADR-0007](0007-prelaunch-ring-monotonic-clock.md) (post-landing tail), [ADR-0015](0015-launch-detection-drop-rejection.md) (the launch-side analogue)
+- **Related issues:** see also [ADR-0005](0005-retire-ekf-raw-primary.md) (raw-primary), [ADR-0007](0007-prelaunch-ring-monotonic-clock.md) (post-landing tail), [ADR-0015](0015-launch-detection-drop-rejection.md) (the launch-side analog)
 
 ## Context
 
@@ -42,13 +42,13 @@ The Frank Tomach figure of 28 is a *lower bound* on a well-behaved landing: its 
 
 ## Decision
 
-1. **Raw baro velocity is the sole landing criterion.** The fused vertical-speed term is retired, not merely de-prioritised, per [ADR-0005](0005-retire-ekf-raw-primary.md) — it reads 0 on every sample and can only ever produce false positives. `DetectLanded()` takes `NavSolution` only to keep the signature stable; the parameter is explicitly discarded.
+1. **Raw baro velocity is the sole landing criterion.** The fused vertical-speed term is retired, not merely de-prioritized, per [ADR-0005](0005-retire-ekf-raw-primary.md) — it reads 0 on every sample and can only ever produce false positives. `DetectLanded()` takes `NavSolution` only to keep the signature stable; the parameter is explicitly discarded.
 
 2. **No AGL ceiling.** Landing may be on terrain above pad elevation, so an absolute AGL gate would block detection on an uphill recovery site. Duration of quiescence is the only discriminator.
 
 3. **Quiescence threshold: `|raw baro vel| < 1.0 m/s`.** This is the change that actually defeats the canopy plateau — it collapses the 2026-08-01 plateau from 20 qualifying samples to 12, taking it below any usable confirm count.
 
-4. **Confirm count must lie inside the validated window (13–28 samples), and is set to 20 (1.0 s).** Twenty sits near the centre — 8 samples clear of the plateau and 8 clear of the tightest real landing — which is the defensible choice given the evidence base is three flights.
+4. **Confirm count must lie inside the validated window (13–28 samples), and is set to 20 (1.0 s).** Twenty sits near the center — 8 samples clear of the plateau and 8 clear of the tightest real landing — which is the defensible choice given the evidence base is three flights.
 
 5. **Any change to either constant must be re-validated against the recorded flights**, not reasoned about in isolation. The two parameters are not independent: tightening the velocity threshold shortens every quiet run, including the ones on the ground.
 

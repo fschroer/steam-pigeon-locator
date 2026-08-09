@@ -27,7 +27,7 @@ Communication::Communication(DeviceUID &deviceUID, FlightManager &flight, Rocket
 }
 
 // ============================================================================
-//  Initialisation
+//  Initialization
 // ============================================================================
 
 void Communication::Init(IRadio &radio) {
@@ -103,7 +103,7 @@ void Communication::SendPreLaunchData(bool armed, uint8_t pad_alert) {
 	msg.pad_alert = pad_alert;
 
 	// Cleartext identity (app looks the locator up by this) and the password-seeded
-	// auth_tag the app verifies to "recognise" this locator.  The auth_tag is
+	// auth_tag the app verifies to "recognize" this locator.  The auth_tag is
 	// computed with auth_tag zeroed, then the packet CRC is taken over the final
 	// bytes (including the now-populated auth_tag) so link integrity still covers
 	// the whole frame.
@@ -161,7 +161,7 @@ void Communication::SendTelemetryData(bool armed) {
 	// SendPreLaunchData: tag computed with crc and auth_tag zeroed, then the CRC
 	// taken over the final bytes so link integrity still covers the whole frame.
 	// An armed locator sends only this message, so this is the app's sole means of
-	// recognising it between arming and landing (ADR-0006).
+	// recognizing it between arming and landing (ADR-0006).
 	msg.locator_id = deviceUID_.getUID();
 	msg.auth_tag = 0;
 	msg.auth_tag = ComputePasswordAuthTag(msg, archive_.GetPasswordKey());
@@ -304,7 +304,7 @@ void Communication::OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
 		// startup string fails CRC well before this point.  An allowlist of
 		// "addressed" types would work today but has to be updated by hand for every
 		// new command, and forgetting would silently restore the broadcast
-		// behaviour.  Requiring an address from everything means a new command is
+		// behavior.  Requiring an address from everything means a new command is
 		// protected by default, and the failure mode of forgetting anything is that
 		// it does nothing rather than that it reaches every rocket on the channel.
 		//
@@ -354,10 +354,10 @@ void Communication::OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
 				device_state = DeviceState::Armed;
 				// Begin cardinal-axis mounting detection.  Accumulates the next
 				// kMountingCalSamples IMU readings in raw sensor frame, identifies
-				// the dominant gravity axis, and re-initialises the EKF with the
+				// the dominant gravity axis, and re-initializes the EKF with the
 				// correct body←sensor rotation once the window closes (~3.2 s).
 				// Also resets the gyro-bias-freeze flag so bias accumulation
-				// starts clean after the EKF re-initialisation.
+				// starts clean after the EKF re-initialization.
 				nav_.triggerMountingCalibration();
 			}
 			break;
@@ -611,7 +611,7 @@ void Communication::SendDataPacket(uint16_t packet_index, uint32_t now_ms) {
 
 	const size_t written = FlightProfileCodec::PackSamples(src, count, pkt.payload, sizeof(pkt.payload));
 
-	// Compute the actual serialised payload size from the codec output.
+	// Compute the actual serialized payload size from the codec output.
 	// PackSamples returns a sample count; the wire layout is:
 	//   CompressedHeader + (written-1) * CompressedDelta
 	const size_t payload_used = sizeof(FlightProfileCodec::CompressedHeader)

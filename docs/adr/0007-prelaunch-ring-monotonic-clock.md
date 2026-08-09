@@ -24,7 +24,7 @@ The hard constraint is **NFR-3**: no super-loop cycle may exceed the 50 ms windo
 
 3. **Stamp every sample with a GPS-PPS-disciplined monotonic millisecond clock, and rebase the record to a launch epoch.** `Factory_C_Interface::AdvanceMonotonicMs()` accumulates elapsed time in microseconds (64-bit) from the per-cycle TIM2 delta ÷ `Pps_GetTim2TicksPerSec()` (nominal 1 MHz until PPS lock), forwarded to `FlightManager` each cycle. At launch the **record epoch** is anchored to the oldest retained pre-launch sample; all archived timestamps (samples and events) are epoch-relative, so a record starts at ~0 ms and launch lands at ~2000 ms. `flight_time_ms` is now derived from this clock, not incremented.
 
-4. **Reset the full flight state on every arm so the locator is reusable without a power cycle.** The arm transition (`Factory::ProcessRocketEvents`, `Disarmed → Armed`) calls `FlightManager::PrepareForArm()`, which runs `ResetFlight()` (returns the state machine to `WaitingLaunch` and zeroes every per-flight variable — deployment stats/queue, timers, apogee/burnout/landing detectors, the raw-baro source-selector history, and the record epoch) **and** `ResetPreLaunchBuffer()` (empties the ring). `Factory` additionally clears `datestamp_saved_` so the new flight re-writes `FlightTimestampS`. Previously nothing reset `flight_state_` out of `Landed`, so a second flight required a power cycle; now a disarm→arm cycle fully re-initialises the flight in place.
+4. **Reset the full flight state on every arm so the locator is reusable without a power cycle.** The arm transition (`Factory::ProcessRocketEvents`, `Disarmed → Armed`) calls `FlightManager::PrepareForArm()`, which runs `ResetFlight()` (returns the state machine to `WaitingLaunch` and zeroes every per-flight variable — deployment stats/queue, timers, apogee/burnout/landing detectors, the raw-baro source-selector history, and the record epoch) **and** `ResetPreLaunchBuffer()` (empties the ring). `Factory` additionally clears `datestamp_saved_` so the new flight re-writes `FlightTimestampS`. Previously nothing reset `flight_state_` out of `Landed`, so a second flight required a power cycle; now a disarm→arm cycle fully re-initializes the flight in place.
 
 ## Consequences
 
@@ -65,7 +65,7 @@ The function divides the delta by the **nearest whole second** and band-checks t
 
 ### Why the recovery cap is 9 seconds
 
-`PPS_MAX_MISSED_SECONDS = 9`, not the 5 originally proposed in #30. Nearest-second rounding is only unambiguous while a full band-width of drift cannot push the delta into a neighbouring second's rounding interval — i.e. while `n × 50000 < 500000` (band half-width × n, against the half-second rounding boundary), giving **n < 10**.
+`PPS_MAX_MISSED_SECONDS = 9`, not the 5 originally proposed in #30. Nearest-second rounding is only unambiguous while a full band-width of drift cannot push the delta into a neighboring second's rounding interval — i.e. while `n × 50000 < 500000` (band half-width × n, against the half-second rounding boundary), giving **n < 10**.
 
 At n ≥ 10 an in-band-but-drifting clock can round to the wrong second count and produce a *plausible-looking wrong rate* that passes the band check. That is strictly worse than rejecting: a rejected interval holds a known-good rate, whereas a mis-rounded one silently rescales the clock — the same class of failure this amendment exists to remove. Hence the cap sits at the last provably safe value.
 

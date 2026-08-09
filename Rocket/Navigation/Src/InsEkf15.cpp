@@ -14,7 +14,7 @@ namespace RocketNav {
 // Q and R rationale per phase:
 //
 //   WaitingLaunch / Landed:
-//     Q_vel=0.01   Pad vibration is the only unmodelled acceleration.
+//     Q_vel=0.01   Pad vibration is the only unmodeled acceleration.
 //     Q_att=5e-6   Matches typical ISM6HG256X low-g gyro ARW.
 //     Q_gbias=1e-9 Bias nearly constant when cold and still.
 //     Q_abias=1e-6 Same.
@@ -148,7 +148,7 @@ void InsEkf15::setPhase(FlightStates state) {
 
     // GPS-only mode is RETIRED (was: active from Noseover onward, suppressing
     // inertial velocity integration AND baro updates so post-apogee inertial drift
-    // couldn't corrupt the EKF recovery position).  That specialisation is obsolete:
+    // couldn't corrupt the EKF recovery position).  That specialization is obsolete:
     // the recovery position is now raw GPS (ADR-0005), the EKF drives nothing
     // authoritative, and the user wants the fused solution OBSERVABLE through descent
     // (ADR-0004) rather than frozen — the old gating left fused altitude flat and
@@ -280,7 +280,7 @@ void InsEkf15::predict(const ImuSample& imu, float dt_s) {
     // Reset the STATE ONLY — do NOT touch the covariance.  Zeroing the velocity
     // cross-covariances destroys the P[vel,att]/P[vel,bias] couplings that keep
     // attitude and accel-bias observable (see the covariance-propagation note
-    // below); doing so de-stabilises attitude (Inc/Hdg -> NaN) and ramps velocity.
+    // below); doing so de-stabilizes attitude (Inc/Hdg -> NaN) and ramps velocity.
     {
         constexpr float kVelDivergenceMps = 1500.0f;   // >> any model-rocket speed
         const float vmag2 = m_sol.vel_ned_mps.x * m_sol.vel_ned_mps.x
@@ -597,8 +597,8 @@ void InsEkf15::updateGpsPosition(const GpsSample& gps) {
     // the floor K ≈ 0.86 and a 1 m noise sample moves the EKF 0.86 m (8.6 m/s
     // apparent velocity drift at 10 Hz).  All other phases use h_acc directly
     // so the SAM-M10Q's reported accuracy drives the gain.
-    constexpr float kGpsHAccFloorHigh = 50.0f;  // metres — Launched / Burnout
-    constexpr float kGpsHAccFloorLow  =  1.0f;  // metres — all other phases
+    constexpr float kGpsHAccFloorHigh = 50.0f;  // meters — Launched / Burnout
+    constexpr float kGpsHAccFloorLow  =  1.0f;  // meters — all other phases
     const float hAccFloor = m_floor_gps_acc_ ? kGpsHAccFloorHigh : kGpsHAccFloorLow;
     const float hAccR  = std::max(gps.h_acc_m, hAccFloor);
     const float hAcc2R = hAccR * hAccR;
@@ -851,7 +851,7 @@ void InsEkf15::zeroPadReferenceAgl(float pad_msl_m, float agl_m) {
 // Mechanism:
 //   1. Rotate the expected gravity vector [0,0,g] from nav to body using the
 //      current attitude to get g_body_expected.
-//   2. Normalise the raw accelerometer reading to the same magnitude to get
+//   2. Normalize the raw accelerometer reading to the same magnitude to get
 //      g_body_measured.
 //   3. The cross product (expected × measured) gives the axis-angle rotation
 //      error in the body frame; its magnitude is sin(θ_error) ≈ θ_error for

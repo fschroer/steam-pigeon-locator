@@ -48,7 +48,7 @@ void FaultLogInit() {
             g_fault_log.fault_type = FaultType::WatchdogHang;
         }
     } else {
-        // First power-on or corrupted record — initialise cleanly.
+        // First power-on or corrupted record — initialize cleanly.
         std::memset(&g_fault_log, 0, sizeof(g_fault_log));
         g_fault_log.magic      = FaultRecord::kMagic;
         g_fault_log.fault_type = FaultType::None;
@@ -136,7 +136,7 @@ extern "C" void SaveFaultAndHalt(uint32_t* sp_frame, uint32_t fault_type) {
     // If your RgbLed function touches anything unsafe, comment this out.
     // RgbLed(RgbColor::Red);
 
-    // Reset after a short delay so the watchdog behaviour is consistent
+    // Reset after a short delay so the watchdog behavior is consistent
     // (the IWDG will reset us anyway, but an explicit reset is cleaner).
     HAL_Delay(200);
     NVIC_SystemReset();

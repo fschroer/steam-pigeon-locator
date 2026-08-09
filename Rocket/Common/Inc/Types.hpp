@@ -73,7 +73,7 @@ enum class ImuAccelSource : uint8_t {
 // that circularity — tilt-from-vertical becomes the angle between measured
 // gravity and a known axis, measurable whenever the locator is powered.
 //
-// Auto keeps the pre-#36 behaviour (detect on each arm) and is the default, so
+// Auto keeps the pre-#36 behavior (detect on each arm) and is the default, so
 // a locator whose mounting has not been configured behaves exactly as before.
 // UNSIGNED on purpose.  The axis is what cannot be inferred; the SIGN can be,
 // and only at the moments it matters.  Mounting calibration runs when the rocket

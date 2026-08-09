@@ -44,7 +44,7 @@ struct RocketPersistentSettings
 
     // Which raw sensor axis points toward the nose (ADR-0021 Decision 6, #36).
     // Appended AFTER device_name so every existing field keeps its offset; only
-    // the struct size changes.  Default Auto = pre-#36 behaviour.
+    // the struct size changes.  Default Auto = pre-#36 behavior.
     NoseAxis nose_axis = NoseAxis::Auto;
 };
 

@@ -34,7 +34,7 @@ The common root is one assumption: that configuring the receiver once at boot wa
 
 ## Decision
 
-1. **The firmware owns receiver configuration for the whole flight, not just boot.** Any behaviour that depends on receiver configuration must be re-assertable in flight, and must not require a power cycle to restore.
+1. **The firmware owns receiver configuration for the whole flight, not just boot.** Any behavior that depends on receiver configuration must be re-assertable in flight, and must not require a power cycle to restore.
 
 2. **A stale-fix watchdog runs from launch through landing.** When no UBX-NAV-PVT has been parsed for 3 s, the driver re-asserts the full RAM-layer configuration (ports, protocols, rate, message rate, dynamic model) as a single **un-ACKed** `CFG-VALSET`, retried every 3 s. Un-ACKed is mandatory, not a shortcut: `waitForAck()` blocks for up to a second and would overrun the 50 ms super-loop and trip the IWDG ([ADR-0002](0002-execution-model-superloop-vs-rtos.md)). `sendUbx()` carries a whole-call time budget for the same reason — its per-byte timeouts alone bound it at `len × 5 ms` ≈ 450 ms.
 
@@ -52,7 +52,7 @@ The common root is one assumption: that configuring the receiver once at boot wa
 
 4. **Fix quality is archived with every flight sample**, in `FlightSample::gps_fix_sv` (offset 79 — the former `_pad[1]`): bits 0-2 carry the live u-blox `fixType` (0-5), or **6** = fix stale with NMEA on the wire (receiver reset to defaults) / **7** = fix stale otherwise; bits 3-7 carry satellites-used, saturated at 31. `FlightSample` stays **80 bytes** and `ARCHIVE_VERSION` stays **5** (see Alternatives).
 
-5. **Degraded GPS is reported truthfully and shown, not hidden.** The stale path sets `SensorHealth::Stale`. The app greys the rocket marker and accuracy ring for any non-`Ok` health while **keeping the position on screen**, distinct from the red "link stale" state. Link age is evaluated first: with no recent packet, the reported `gpsStatus` is itself stale and cannot qualify anything.
+5. **Degraded GPS is reported truthfully and shown, not hidden.** The stale path sets `SensorHealth::Stale`. The app grays the rocket marker and accuracy ring for any non-`Ok` health while **keeping the position on screen**, distinct from the red "link stale" state. Link age is evaluated first: with no recent packet, the reported `gpsStatus` is itself stale and cannot qualify anything.
 
 ## Consequences
 
@@ -78,4 +78,4 @@ The common root is one assumption: that configuring the receiver once at boot wa
 - **Bump `ARCHIVE_VERSION` to mark the new field.** `ValidateHeaderForConfig()` compares `h.version` (and `statsSlotCount`) exactly, so a bump **orphans every record already on the device**. Offsets did not move and the byte previously read back as 0, so old records stay readable and simply decode as `fix_type 0 / num_sv 0`. Preserving stored flight data outweighed a clean version marker.
 - **A new `Statistic` event for the stream classification.** Same orphaning problem — `statsSlotCount` is validated identically.
 - **ACK the in-flight configuration writes.** Blocks up to 1 s; incompatible with the 50 ms budget and the IWDG.
-- **Hide the marker when GPS health is not `Ok`** (the app's behaviour before this ADR — it gated the marker on `== SensorHealth.Ok`). Removes the last-known position from the screen at precisely the moment it is the only thing left to walk toward. Greying communicates the same distrust while keeping the information.
+- **Hide the marker when GPS health is not `Ok`** (the app's behavior before this ADR — it gated the marker on `== SensorHealth.Ok`). Removes the last-known position from the screen at precisely the moment it is the only thing left to walk toward. Graying communicates the same distrust while keeping the information.

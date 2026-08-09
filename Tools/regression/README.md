@@ -5,7 +5,7 @@ host-side test suites and walks an operator through the bench checks that can't
 be automated, recording pass/fail/skip and writing a timestamped markdown report
 under `reports/` (gitignored).
 
-Run it before merging significant changes to confirm existing behaviour still
+Run it before merging significant changes to confirm existing behavior still
 holds; extend it as new functionality lands.
 
 ## Usage

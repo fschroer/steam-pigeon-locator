@@ -42,7 +42,7 @@ enum class MsgType : uint8_t {
 	FlightDataRequest = 9, // Request from the app, via the receiver, for the data in one flight profile.
 	FlightData = 10, // Flight profile data response from the locator to the app via the receiver consisting of multiple packets, which the app acknowledges via the receiver.
 	FlightDataParity = 11, // Parity packet to allow the app to reconstruct profile data if one packet is lost.
-	FlightDataAck = 12, // Profile data acknowledgement sent from the app via the receiver.
+	FlightDataAck = 12, // Profile data acknowledgment sent from the app via the receiver.
 	DeploymentTestRequest = 13, // Request from the app, via the receiver, for the locator to execute a deployment test.
 	DeploymentTest = 14, // Deployment test countdown sent from the locator to the app via the receiver.
 	VersionRequest = 17, // Request from the app, via the receiver, for both firmware versions.
@@ -52,7 +52,7 @@ enum class MsgType : uint8_t {
 	// is app<->receiver only and the locator plays no part in it — but the MsgType
 	// space is shared across all three copies, so the values are claimed here to
 	// stop a future locator message silently colliding with them on the wire.
-	// Adding these changes no behaviour: an already-flashed locator stays compatible.
+	// Adding these changes no behavior: an already-flashed locator stays compatible.
 	ChannelSurveyRequest = 20,
 	ChannelSurvey = 21,
 	// Suppress the prepped-and-disarmed alert for a bounded time (#37).  A
@@ -194,7 +194,7 @@ struct TelemetryData {
 	uint8_t armed;        // 0 = disarmed, 1 = armed
 	// Identity + authenticator, mirroring PreLaunchData's trailing pair and
 	// computed the same way (ADR-0006).  Carried here too so the app can
-	// recognise an ARMED locator: an armed locator sends nothing but
+	// recognize an ARMED locator: an armed locator sends nothing but
 	// TelemetryData, so without these the app has no way to tell whose telemetry
 	// it is holding — it either shows an unauthenticated stream or, as it did,
 	// shows nothing at all until the locator is disarmed.
@@ -319,7 +319,7 @@ struct PadAlertSnoozeRequest {
 // The locator requires an address from EVERY frame it acts on (ADR-0020), because
 // every frame reaching it is an app command.  An allowlist would have to be
 // updated by hand for each new command, and forgetting would silently restore the
-// pre-ADR-0020 behaviour where one command reached every rocket on the channel.
+// pre-ADR-0020 behavior where one command reached every rocket on the channel.
 // The receiver still sizes each command individually — see its message_length_
 // table — but that is a per-type length, not a policy list.
 

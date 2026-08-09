@@ -673,7 +673,7 @@ void Factory::HandleConsoleChar(uint8_t uart_char) {
     }
     else if (uart_char == '@') {          // force a watchdog hang (IWDG reset)
         UartSend("\r\nDIAG|INJECT WatchdogHang - spinning until IWDG reset...\r\n");
-        Diag::KickWatchdog(0xDEADu);      // tag a recognisable checkpoint + one refresh
+        Diag::KickWatchdog(0xDEADu);      // tag a recognizable checkpoint + one refresh
         for (;;) { }                      // stall the super-loop; IWDG fires
     }
     else if (uart_char == '%') {          // force a FAULT_ASSERT failure

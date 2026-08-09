@@ -9,7 +9,7 @@
 # The intent is a living regression gate: as new functionality lands, add a
 # check to AUTO_CHECKS (a self-contained host test) or MANUAL_CHECKS (a bench
 # procedure) below.  Re-run before merging significant changes to confirm the
-# existing behaviour still holds.
+# existing behavior still holds.
 #
 #   python run_regression.py              # auto suites, then prompt for bench checks
 #   python run_regression.py --auto-only  # CI-friendly: skip the manual checks

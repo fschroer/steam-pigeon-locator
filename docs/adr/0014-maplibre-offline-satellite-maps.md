@@ -7,7 +7,7 @@
 
 ## Context
 
-Recovery happens where there is no cell signal. The app map is the tool for walking to a rocket that may be kilometres downrange, so an online-only map fails at the exact moment it is needed. `DownloadMapScreen` had existed as a UI stub — buttons, no download logic — and the live map was a plain `GoogleMap` with `MapType.SATELLITE`, i.e. online tile streaming. Offline was an intended-but-unbuilt feature.
+Recovery happens where there is no cell signal. The app map is the tool for walking to a rocket that may be kilometers downrange, so an online-only map fails at the exact moment it is needed. `DownloadMapScreen` had existed as a UI stub — buttons, no download logic — and the live map was a plain `GoogleMap` with `MapType.SATELLITE`, i.e. online tile streaming. Offline was an intended-but-unbuilt feature.
 
 The **Google Maps SDK exposes no offline API** on Android or iOS. (The consumer Google Maps app has offline areas; the SDK does not expose them, and those areas contain vector road data, not satellite imagery — see "Alternatives".) Offline satellite was therefore unreachable without replacing the map stack.
 
@@ -47,7 +47,7 @@ Specific enough to check code against:
   Both currently wired providers (Esri, Mapbox) are therefore **evaluation-only**. Shipping as-is would breach their terms.
 - **Identified clean path: NAIP** — `s3://naip-visualization` (requester-pays), **"Public Domain with Attribution"**, 30–100 cm, CONUS-only, so tiles may be cached and redistributed freely. Requires a GDAL tiling pipeline plus an on-device MBTiles tile server (a natural extension of `LocalStyleServer`). USGS's ready-made `USGSImageryOnly` service was evaluated and **rejected: it caps at z16 (~2 m/px)** — 404s above z16 at all four launch sites, urban and remote alike; adequate for terrain context, too coarse to spot a rocket.
 - **Satellite imagery is inherently large.** In a raster pyramid the deepest zoom is ~75% of all tiles (the series sums to 4/3 of the top level), so each level dropped saves ~75%. Tile size also varies ~5× by zoom, so size estimates are measured **per zoom** (`SatelliteProvider.avgTileBytes(z)`), not tiles × one constant.
-- **Detail beyond the imagery's native resolution is free but worthless.** Measured Mapbox bytes/tile collapse past z19 (z20 9.5 KB, z21 5.5, z22 4.0 vs ~20 KB at z17–18) — the signature of upscaled blur. Native resolution varies by site, so the useful max zoom is a per-site judgement; the download screen shows a live detail inset for exactly this.
+- **Detail beyond the imagery's native resolution is free but worthless.** Measured Mapbox bytes/tile collapse past z19 (z20 9.5 KB, z21 5.5, z22 4.0 vs ~20 KB at z17–18) — the signature of upscaled blur. Native resolution varies by site, so the useful max zoom is a per-site judgment; the download screen shows a live detail inset for exactly this.
 
 **Revisit when:** a provider grants written permission for permanent offline caching (MapTiler §6.3 and Mapbox §1.9 both say "unless otherwise agreed in writing" — worth asking for a hobby-scale use); or the NAIP pipeline lands; or MapLibre gains a non-`http` offline style path (which would retire `LocalStyleServer`).
 

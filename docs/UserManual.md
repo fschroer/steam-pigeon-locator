@@ -113,7 +113,7 @@ The locator has **no mechanical power switch**. It is turned on and off by holdi
 
 > 📷 **Photo needed — `images/hw-03-magnet-switch.jpg`:** hand holding the magnet against the correct spot on the locator (ideally installed in an airframe, showing the through-the-wall usage), with the sensor location marked.
 
-💡 **Keep a dedicated magnet with your range box** and know which face is "on". A small labelled magnet ("ON this side") removes all doubt on the pad.
+💡 **Keep a dedicated magnet with your range box** and know which face is "on". A small labeled magnet ("ON this side") removes all doubt on the pad.
 
 ⚡ **Do not store or transport the rocket next to magnets.** Magnetic tool trays, magnetic latches on range-box lids, speaker magnets, and magnetic phone mounts can all switch the locator on (or off) without you noticing. A locator that switched itself on in the car arrives at the field with a flat battery.
 
@@ -151,7 +151,7 @@ The receiver is a relay and nothing more. It has no flight role: it forwards mes
 
 **Receiver status LED:**
 
-| Colour | Meaning |
+| Color | Meaning |
 |---|---|
 | Brief **blue** flash | Transmitted a message to the locator. |
 | Brief **green** flash | Received a good message from the locator. This is the flash you want to see roughly once a second when the locator is powered and in range. |
@@ -187,7 +187,7 @@ Locator and receiver battery levels appear in the app on the flight map while th
 
 **GPS:** the antenna wants the clearest possible view of the sky.
 
-- Avoid putting metal or carbon fibre between the antenna and the sky. Carbon airframes will substantially degrade or block GPS.
+- Avoid putting metal or carbon fiber between the antenna and the sky. Carbon airframes will substantially degrade or block GPS.
 - Position the locator so the antenna faces outward/upward where you can.
 - 💡 The reliable trick: **power the locator up out in the open, wait for the GPS lock LED to blink, and only then install it in the rocket.** Getting the first fix is much harder than keeping one.
 
@@ -384,7 +384,7 @@ Each locator identifies itself with a permanent hardware ID and, optionally, a p
 
 💡 Try the voice at home, at volume, outdoors. Some voices are much easier to understand over wind and motor noise than others.
 
-**About closest map zoom.** The map frames your position and the rocket's together, zooming to fit both. Within a few metres of a landed rocket, the gap between those two positions is mostly the *combined GPS error of the two receivers* rather than real distance — so it swings from one reading to the next, and the map chases it, jumping zoom levels every second or so exactly when you are trying to look at it. Setting a closest zoom stops the chase: the map holds a steady frame instead.
+**About closest map zoom.** The map frames your position and the rocket's together, zooming to fit both. Within a few meters of a landed rocket, the gap between those two positions is mostly the *combined GPS error of the two receivers* rather than real distance — so it swings from one reading to the next, and the map chases it, jumping zoom levels every second or so exactly when you are trying to look at it. Setting a closest zoom stops the chase: the map holds a steady frame instead.
 
 - It bounds **automatic** zoom only. You can always pinch in closer by hand; the map returns to its own framing a few seconds after you let go, as it always has.
 - Lower is steadier, at the cost of the closest levels of detail. z20 is a starting point, not a recommendation — how much error you have depends on your receivers and how much sky they can see.
@@ -434,7 +434,7 @@ Set, in this order:
 4. **LoRa channel** (§2.5).
 5. **Locator name**.
 
-Press **Update**. The app tells you whether the locator acknowledged the change (*Updated*, *Not Received*, or *Send Failed*). ⚡ **If you don't see the acknowledgement, the locator did not take the change.** Try again; don't assume.
+Press **Update**. The app tells you whether the locator acknowledged the change (*Updated*, *Not Received*, or *Send Failed*). ⚡ **If you don't see the acknowledgment, the locator did not take the change.** Try again; don't assume.
 
 **Read the settings back** before you close the screen. The values shown come from the locator, not from your phone, so what you see is what will fly.
 
@@ -570,9 +570,9 @@ With the receiver connected but the locator off, the map reads **No Locator**. *
 
 ## 4.3 Connect e-matches to the assigned channels
 
-Match the wiring to the mapping you configured in §3.4. **Channel 1 in the app is the terminal block labelled 1 on the board.**
+Match the wiring to the mapping you configured in §3.4. **Channel 1 in the app is the terminal block labeled 1 on the board.**
 
-💡 Say it out loud as you wire: *"Channel one, drogue primary. Channel three, main primary."* Miswiring drogue and main is a well-travelled route to a very short flight.
+💡 Say it out loud as you wire: *"Channel one, drogue primary. Channel three, main primary."* Miswiring drogue and main is a well-traveled route to a very short flight.
 
 ## 4.4 First power-on: the no-fire confirmation
 
@@ -609,7 +609,7 @@ While the locator is powered on, in range, and **disarmed**, the app's flight ma
 | Indicator | What good looks like |
 |---|---|
 | **Satellites** | More is better. Watch it climb after power-on. |
-| **Accuracy** (horizontal) | A few metres. If it's tens of metres, the antenna's view of the sky is poor (§1.7). |
+| **Accuracy** (horizontal) | A few meters. If it's tens of meters, the antenna's view of the sky is poor (§1.7). |
 | **Altitude (AGL)** | Near zero on the pad. This is the value that gets zeroed when you arm. |
 | **Battery** | Shown as a bar gauge. Don't fly a locator showing one bar. **This is your only chance to read it** — the gauges go away at launch (§1.6). An *empty* gauge on a battery you know is charged is a different problem — see Part 11. |
 | **Sensor health** | Barometer, IMU and GPS each report status. All three should be healthy. |
@@ -627,7 +627,7 @@ While the locator is powered on, in range, and **disarmed**, the app's flight ma
 In order of effectiveness:
 
 1. **Get the first fix in the open, before installing** (§4.5).
-2. **Reposition the locator** in the airframe so the antenna has a clearer view — away from metal, batteries, and especially carbon fibre.
+2. **Reposition the locator** in the airframe so the antenna has a clearer view — away from metal, batteries, and especially carbon fiber.
 3. **Wait.** Satellite count climbs over the first minute or two.
 4. If your airframe is carbon, accept that GPS may be unreliable inside it and plan recovery around the audible beacon and the radio link (§9.4, §9.5).
 
@@ -896,11 +896,11 @@ Rotate the phone to landscape. Hold it up and look through the camera view: the 
 
 The landed beacon is **loud** and repeats about every 2 seconds — the same three rising notes as the ready-beep, but at full volume.
 
-- It's a close-in finder, not a long-range one. Expect to hear it when you're within tens of metres, less in wind or tall vegetation.
+- It's a close-in finder, not a long-range one. Expect to hear it when you're within tens of meters, less in wind or tall vegetation.
 - Stop walking to listen. Your own footsteps are louder than you think.
 - 💡 In a group, spread out and triangulate. Two people who can both hear it will find it much faster than one.
 
-⚡ **If the map jumps zoom levels as you close in, that is GPS error, not the rocket moving.** Two receivers each a few metres out is enough to make the gap between the markers swing, and the map re-fits to every swing. Set a **closest map zoom** in App settings (§2.8) to stop it; pinching in by hand still works regardless.
+⚡ **If the map jumps zoom levels as you close in, that is GPS error, not the rocket moving.** Two receivers each a few meters out is enough to make the gap between the markers swing, and the map re-fits to every swing. Set a **closest map zoom** in App settings (§2.8) to stop it; pinching in by hand still works regardless.
 
 ## 9.5 If the last known position is stale or absent
 
@@ -1164,7 +1164,7 @@ AT THE FLIGHT LINE
 
 ## Receiver lights
 
-| Colour | Meaning |
+| Color | Meaning |
 |---|---|
 | Blue flash | Transmitted to locator |
 | Green flash | Good message received from locator |
@@ -1365,9 +1365,9 @@ Puts the device into firmware-update mode. It will not work again until it is re
 
 The locator-to-receiver link operates in the **902–928 MHz** band. Channel 0 is at 902.3 MHz and each channel step is 200 kHz, so channels 0–63 span roughly **902.3 to 914.9 MHz**.
 
-This band is licence-free for low-power devices in the United States and in other ITU Region 2 countries that follow the same allocation. **It is not licence-free everywhere** — in Europe, Japan and many other regions, 902–928 MHz is allocated to other services and operating in it is not permitted.
+This band is license-free for low-power devices in the United States and in other ITU Region 2 countries that follow the same allocation. **It is not license-free everywhere** — in Europe, Japan and many other regions, 902–928 MHz is allocated to other services and operating in it is not permitted.
 
-**If you are flying outside a region where this band is licence-free, check your local regulations before transmitting.**
+**If you are flying outside a region where this band is license-free, check your local regulations before transmitting.**
 
 ## Why a nearby locator gets through on the wrong channel
 
@@ -1375,9 +1375,9 @@ If you've ever had a locator sitting next to the receiver and seen its packets a
 
 The link uses a **125 kHz** wide signal, and channels are spaced **200 kHz** apart. That's less than two channel-widths of separation, which is fine at any normal distance — the receiver's filtering rejects an adjacent channel by a factor of several hundred thousand.
 
-But signal strength falls off with distance, and at short range the numbers get absurd. The locator transmits at **22 dBm** (about a sixth of a watt). At **one metre** the receiver hears it at roughly **−10 dBm**. The receiver's usable sensitivity is about **−123 dBm**. That is a gap of **113 dB — a factor of about 200 billion.**
+But signal strength falls off with distance, and at short range the numbers get absurd. The locator transmits at **22 dBm** (about a sixth of a watt). At **one meter** the receiver hears it at roughly **−10 dBm**. The receiver's usable sensitivity is about **−123 dBm**. That is a gap of **113 dB — a factor of about 200 billion.**
 
-So the neighbouring locator is arriving some 200 billion times stronger than the faint rocket the receiver is straining to hear, and the channel filter only knocks down a few hundred thousand of that. What's left over is *still* a strong, perfectly decodable signal. On top of that, a signal that loud simply overwhelms the receiver's input stage, which then leaks energy across all channels regardless of filtering.
+So the neighboring locator is arriving some 200 billion times stronger than the faint rocket the receiver is straining to hear, and the channel filter only knocks down a few hundred thousand of that. What's left over is *still* a strong, perfectly decodable signal. On top of that, a signal that loud simply overwhelms the receiver's input stage, which then leaks energy across all channels regardless of filtering.
 
 Two practical points follow:
 

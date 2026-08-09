@@ -123,7 +123,7 @@ constexpr Note DisarmedAlert[] = {
 		{ Tone::Rest, 60, 0 },
 };
 
-// Same shape so it is recognisably the same message, but louder and far more
+// Same shape so it is recognizably the same message, but louder and far more
 // frequent.  Deliberately NOT a different tune: escalation should read as "this
 // is getting more insistent", not as a new and unfamiliar sound.
 constexpr Note DisarmedAlertUrgent[] = {
