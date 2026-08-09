@@ -823,6 +823,8 @@ With **Enable Speech** on (§2.8), the app announces:
 
 The **track stops being drawn at the landing** — once the locator reports it is down, the last point on the path is where it says it is lying, and the path does not grow while it sits there. **Dist** reads *Unknown* if the app cannot vouch for the position (§9.5).
 
+**The map does not re-center for every reading.** Both receivers keep reporting slightly different positions even when nothing is moving, and a map that followed all of it would creep across the screen all flight. So it holds where it is until the picture has genuinely changed, then moves. Expect the markers to drift a little within a still frame rather than the frame sliding under them — that is the map working, not lagging. See §9.4, where you will notice it most.
+
 **Landscape — the heads-up view.** Rotate the phone and it switches to a camera view with the rocket's position overlaid — hold it up, look through it, and it points you at the rocket.
 
 > 📱 **Screenshot needed — `images/app-12-heads-up.png`:** the landscape heads-up camera view during or after a flight, showing the overlay. Hold the phone in landscape while connected to capture this.
@@ -900,7 +902,9 @@ The landed beacon is **loud** and repeats about every 2 seconds — the same thr
 - Stop walking to listen. Your own footsteps are louder than you think.
 - 💡 In a group, spread out and triangulate. Two people who can both hear it will find it much faster than one.
 
-⚡ **If the map jumps zoom levels as you close in, that is GPS error, not the rocket moving.** Two receivers each a few meters out is enough to make the gap between the markers swing, and the map re-fits to every swing. Set a **closest map zoom** in App settings (§2.8) to stop it; pinching in by hand still works regardless.
+⚡ **If the map jumps zoom levels as you close in, that is GPS error, not the rocket moving.** Two receivers each a few meters out is enough to make the gap between the markers swing, and the map re-fits to every swing. Setting a **closest map zoom** in App settings (§2.8) bounds how far in it will chase — but it does not stop the swinging outright, because in the last few meters the fit never asks to go deeper than the limit, so the limit never comes into play. Pinching in by hand works regardless.
+
+💡 **The map's position, unlike its zoom, does hold steady.** Walking the last stretch you will see the rocket marker and your own dot wander around inside a frame that stays put. That is deliberate: the app ignores position changes small enough to be the two receivers disagreeing with each other rather than anything actually moving, so the picture stops creeping while you are trying to read it. If it looks like the map has stopped following you, take a few more paces — it re-centers once you have genuinely gone somewhere.
 
 ## 9.5 If the last known position is stale or absent
 
