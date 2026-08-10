@@ -384,10 +384,11 @@ Each locator identifies itself with a permanent hardware ID and, optionally, a p
 
 💡 Try the voice at home, at volume, outdoors. Some voices are much easier to understand over wind and motor noise than others.
 
-**About closest map zoom.** The map frames your position and the rocket's together, zooming to fit both. Within a few meters of a landed rocket, the gap between those two positions is mostly the *combined GPS error of the two receivers* rather than real distance — so it swings from one reading to the next, and the map chases it, jumping zoom levels every second or so exactly when you are trying to look at it. Setting a closest zoom stops the chase: the map holds a steady frame instead.
+**About closest map zoom.** The map frames your position and the rocket's together, zooming to fit both. This setting is the deepest it will go on its own.
 
 - It bounds **automatic** zoom only. You can always pinch in closer by hand; the map returns to its own framing a few seconds after you let go, as it always has.
-- Lower is steadier, at the cost of the closest levels of detail. z20 is a starting point, not a recommendation — how much error you have depends on your receivers and how much sky they can see.
+- Lower shows more ground around the rocket; higher shows finer detail, as far as the imagery goes. z20 is a starting point, not a recommendation.
+- **It is not what stops the map jittering at close range.** It used to be described that way here, and that was wrong: the jitter happens at and below this limit, where there is nothing for a limit to bind. The app now ignores framing changes small enough to be the two receivers disagreeing, which handles it directly and needs no setting — see §9.4.
 - If the map still pumps at close range, come down a level. If it settles too far out to be useful, go up.
 
 ---
@@ -823,7 +824,7 @@ With **Enable Speech** on (§2.8), the app announces:
 
 The **track stops being drawn at the landing** — once the locator reports it is down, the last point on the path is where it says it is lying, and the path does not grow while it sits there. **Dist** reads *Unknown* if the app cannot vouch for the position (§9.5).
 
-**The map does not re-center for every reading.** Both receivers keep reporting slightly different positions even when nothing is moving, and a map that followed all of it would creep across the screen all flight. So it holds where it is until the picture has genuinely changed, then moves. Expect the markers to drift a little within a still frame rather than the frame sliding under them — that is the map working, not lagging. See §9.4, where you will notice it most.
+**The map does not re-frame for every reading.** Both receivers keep reporting slightly different positions even when nothing is moving, and a map that followed all of it would creep and re-zoom across the screen all flight. So it holds where it is, at the zoom it is at, until the picture has genuinely changed. Expect the markers to drift a little within a still frame rather than the frame sliding under them — that is the map working, not lagging. See §9.4, where you will notice it most.
 
 **Landscape — the heads-up view.** Rotate the phone and it switches to a camera view with the rocket's position overlaid — hold it up, look through it, and it points you at the rocket.
 
@@ -902,9 +903,13 @@ The landed beacon is **loud** and repeats about every 2 seconds — the same thr
 - Stop walking to listen. Your own footsteps are louder than you think.
 - 💡 In a group, spread out and triangulate. Two people who can both hear it will find it much faster than one.
 
-⚡ **If the map jumps zoom levels as you close in, that is GPS error, not the rocket moving.** Two receivers each a few meters out is enough to make the gap between the markers swing, and the map re-fits to every swing. Setting a **closest map zoom** in App settings (§2.8) bounds how far in it will chase — but it does not stop the swinging outright, because in the last few meters the fit never asks to go deeper than the limit, so the limit never comes into play. Pinching in by hand works regardless.
+💡 **The map holds still as you close in — both its position and its zoom.** Walking the last stretch you will see the rocket marker and your own dot wander around inside a frame that stays put, rather than the frame sliding and re-zooming under them.
 
-💡 **The map's position, unlike its zoom, does hold steady.** Walking the last stretch you will see the rocket marker and your own dot wander around inside a frame that stays put. That is deliberate: the app ignores position changes small enough to be the two receivers disagreeing with each other rather than anything actually moving, so the picture stops creeping while you are trying to read it. If it looks like the map has stopped following you, take a few more paces — it re-centers once you have genuinely gone somewhere.
+That is deliberate, and it is worth knowing what it is hiding. Two receivers each a few meters out is enough to make the *reported* gap between the markers swing wildly at close range — measured on a locator lying motionless on the ground, the distance readout moved between 6 m and 11 m. Left alone the map chases every one of those swings, which reads as the rocket jittering about while you are trying to walk to it. So the app ignores changes small enough to be the two receivers disagreeing with each other rather than anything actually moving.
+
+If it looks like the map has stopped following you, take a few more paces — it re-frames once you have genuinely gone somewhere.
+
+⚡ **The distance readout still swings, even though the map no longer does.** Holding the picture steady does not make the underlying numbers more certain. Within the last few meters, treat **Dist** as "very close" rather than as a measurement, and switch to the beacon and the heads-up view (§9.3) to close the gap.
 
 ## 9.5 If the last known position is stale or absent
 
