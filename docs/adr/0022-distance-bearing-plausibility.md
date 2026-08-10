@@ -38,6 +38,8 @@ A second calibration point, easy to get backwards: the distance comes from a hav
 
 5. **Bearing shares the distance's verdict.** Distance and bearing come out of one `Vector`, so a rejected position aims the AR marker just as wrongly. The locator circle, the off-screen edge arrow, and both gauge pointers are suppressed together. The crosshair, gauge scales and labels stay — they are the reference frame, not a claim about where the rocket is.
 
+   [ADR-0023](0023-app-heading-true-north-and-compass-trust.md) later gave this suppression a **second, independent cause**: the AR marker differences the locator bearing against the phone's compass heading, so an uncalibrated magnetometer breaks the other half of the same subtraction. Both feed the one `bearingValid` gate, and a position this ADR is perfectly happy with is still withheld when the compass reports `UNRELIABLE`.
+
 6. **What is suppressed is a derived figure, never the position itself.** The rocket marker and its accuracy ring keep rendering under the ADR-0017 trust colors. This ADR withholds numbers the app cannot stand behind; it does not take the map away.
 
 ## Consequences

@@ -409,6 +409,7 @@ Each locator identifies itself with a permanent hardware ID and, optionally, a p
 - [ ] Launch site map downloaded (§3.7 — **work in progress**)
 - [ ] Offline maps app installed, site region downloaded in it (§3.7)
 - [ ] App connects to receiver (§3.8)
+- [ ] Phone compass calibrated — figure-eight, away from metal (§9.3)
 - [ ] Magnet, cable, spare igniters packed (§3.9)
 
 ## 3.2 Charge everything
@@ -872,6 +873,7 @@ If the locator somehow never detects a landing, the record closes itself after *
 
 - [ ] Note the last known position on the map **before** you start walking
 - [ ] Receiver held vertically, out of your pocket
+- [ ] Step away from vehicles and metal before trusting the compass (§9.3)
 - [ ] Walk the bearing (§9.3)
 - [ ] Listen for the beacon (§9.4)
 - [ ] ⚠️ Approach assuming unfired charges are live (§9.6)
@@ -895,6 +897,20 @@ If the coordinates are **not** underlined, the app is not willing to vouch for t
 
 Rotate the phone to landscape. Hold it up and look through the camera view: the overlay marks where the rocket is. Walk the bearing it shows you. This is much more intuitive than reading a map while walking through brush.
 
+### The direction depends on your phone's compass
+
+The map rotation and the heads-up overlay both come from the magnetic compass inside your phone, and it is the least reliable part of this system. It does not fail cleanly — it goes quietly wrong by 10, 20, 30 degrees, and it looks exactly as confident as when it is right. Thirty degrees out over 200 m puts you 100 m from the rocket.
+
+**Iron and magnets near the phone are what do it.** A truck bed or tailgate, a steel launch rail, a magnetic phone mount or a case with magnets in it, the car you are standing beside. The phone does not need to touch any of it.
+
+⚡ **If the app shows a yellow "Compass off — figure-8 to fix" next to the compass rose, do not walk the bearing until you have cleared it.** The app is telling you the heading is being disturbed. Step away from vehicles and metal first, then sweep the phone through a figure-eight in the air — a couple of loops, turning your wrist as you go, so the phone points in a lot of different directions. The warning clears within a few seconds of the compass recovering, and you can watch the map swing onto the correct heading as it does.
+
+💡 **The figure-eight is the only repair there is.** There is no calibration button — on Android the compass calibrates itself from movement, and the gesture is simply how you give it enough movement to work with. It is worth doing once when you arrive at the site, before you need it.
+
+**If the overlay marker disappears** while the crosshair and the scales stay on screen, the app has decided it cannot aim it — either the position is one it will not vouch for (§9.5) or the compass is too disturbed to trust. Fall back to the map, the distance readout and the beacon. The marker comes back on its own.
+
+> ⚠️ **The compass affects the picture, not the position.** The rocket's coordinates come from its own GPS and are unaffected by any of this. If in doubt, tap the coordinates to hand them to a maps app (§9.2), or read the bearing off the map against a landmark — a compass problem cannot move the rocket marker on the map, only rotate the map underneath it.
+
 ## 9.4 Using the audible beacon
 
 The landed beacon is **loud** and repeats about every 2 seconds — the same three rising notes as the ready-beep, but at full volume.
@@ -916,6 +932,8 @@ If it looks like the map has stopped following you, take a few more paces — it
 Position quality degrades exactly when you need it most: the rocket on its side, antenna against the ground, or under trees.
 
 **"Unknown" instead of a distance means the app has caught the position lying.** It shows a *stale* distance quite happily — a rocket that has lost its fix on the ground keeps reporting the last position it did measure, and that number is still worth walking toward. What it will not show you is a position that cannot be true: a reading that jumped further than the rocket could have moved, or a distance far beyond radio range. When it says Unknown, the heads-up overlay drops its marker too, and the coordinates stop being tappable. The rocket's marker stays on the map throughout — the app withholds numbers it cannot stand behind, it never takes away the last position it had.
+
+💡 **It does not work the other way round.** The overlay marker can also disappear while the distance is perfectly good, because aiming it needs the phone's compass as well as the rocket's position — see §9.3. If the marker is gone but **Dist** still reads a number, the position is fine and it is the compass that is in trouble.
 
 Work with what you have:
 
@@ -1133,6 +1151,8 @@ AT THE FLIGHT LINE
 □ Note last known position BEFORE walking
 □ Tap the coordinates → opens your maps app
 □ Receiver vertical, out of pocket
+□ Step away from vehicles/metal — compass
+□ Yellow "Compass off"? → figure-8, then walk
 □ Landscape = heads-up view, walk the bearing
 □ Stop and listen for the loud beacon
 

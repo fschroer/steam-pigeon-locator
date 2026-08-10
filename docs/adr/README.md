@@ -37,5 +37,6 @@ Write an ADR for a decision that is costly to reverse, or that future work must 
 | [0020](0020-targeted-locator-commands.md) | Address app→locator commands to a locator, so a broadcast command cannot arm somebody else's rocket | Accepted |
 | [0021](0021-arming-gates-pyro-only.md) | Arming gates pyro only — always-on recording, and prompting the operator instead of auto-arming | Accepted |
 | [0022](0022-distance-bearing-plausibility.md) | The app refuses to quote a distance or bearing it cannot justify — radio-range ceiling, phase-aware jump test | Accepted |
+| [0023](0023-app-heading-true-north-and-compass-trust.md) | The app's heading is true north, and it refuses a compass it cannot trust — declination, and calibration status from the raw magnetometer | Accepted |
 
 > **Numbering note (resolved 2026-08-03):** the iOS-port ADR and the launch-detection ADR were both filed as **0015**. Launch detection was filed first (2026-07-17) and keeps the number; the iOS port moved to **0016**. Commit `4b6bb45` and any external reference calling the iOS port "ADR-0015" mean [0016](0016-ios-port-corebluetooth-and-platform-parity.md) — a note in that file records the change. When picking the next number, check this table rather than the highest number you remember.
