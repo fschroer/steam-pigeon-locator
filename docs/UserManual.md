@@ -907,6 +907,8 @@ The map rotation and the heads-up overlay both come from the magnetic compass in
 
 💡 **The figure-eight is the only repair there is.** There is no calibration button — on Android the compass calibrates itself from movement, and the gesture is simply how you give it enough movement to work with. It is worth doing once when you arrive at the site, before you need it.
 
+> ⚠️ **No warning is not the same as a good compass.** The app can spot a field that is obviously being swamped — a magnet, a vehicle, a laptop — but a compass that has simply drifted out of calibration reads as perfectly normal from the inside, and on some phones the operating system never reports its calibration state at all. **Do the figure-eight on arrival regardless of whether you have been prompted.** It costs five seconds and it is the only thing that rules this out.
+
 **If the overlay marker disappears** while the crosshair and the scales stay on screen, the app has decided it cannot aim it — either the position is one it will not vouch for (§9.5) or the compass is too disturbed to trust. Fall back to the map, the distance readout and the beacon. The marker comes back on its own.
 
 > ⚠️ **The compass affects the picture, not the position.** The rocket's coordinates come from its own GPS and are unaffected by any of this. If in doubt, tap the coordinates to hand them to a maps app (§9.2), or read the bearing off the map against a landmark — a compass problem cannot move the rocket marker on the map, only rotate the map underneath it.
