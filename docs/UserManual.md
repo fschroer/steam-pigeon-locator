@@ -343,6 +343,8 @@ A few things to know about the result:
 
 💡 The natural time to do this is during bench prep or when you arrive at the field — before you power up on the pad.
 
+**You get a free check on your own channel without scanning.** Whenever the receiver is connected and the locator is off, the app has the receiver read your current channel directly and will post an interference note if it finds something transmitting there. So the ordinary sight of **No Locator** with nothing under it is a positive result: your channel was measured and it was clear. A note appearing *before* you have powered the rocket up is the cheapest warning you will ever get — deal with it then, not on the pad.
+
 ## 2.6 Connection password and locator recognition
 
 Each locator identifies itself with a permanent hardware ID and, optionally, a password.
@@ -409,6 +411,7 @@ Each locator identifies itself with a permanent hardware ID and, optionally, a p
 - [ ] Launch site map downloaded (§3.7 — **work in progress**)
 - [ ] Offline maps app installed, site region downloaded in it (§3.7)
 - [ ] App connects to receiver (§3.8)
+- [ ] Chosen channel reads clear — receiver connected, locator still off, no interference note (§2.5)
 - [ ] Phone compass calibrated — figure-eight, away from metal (§9.3)
 - [ ] Magnet, cable, spare igniters packed (§3.9)
 
@@ -533,7 +536,9 @@ The example above is a 22 × 22 km area at z10–z17: about 12,580 tiles and 235
 
 ![Connected, locator off](images/app-01-flight-map.png)
 
-With the receiver connected but the locator off, the map reads **No Locator**. **This is the normal, healthy state before you power up the rocket.** The app is connected to the receiver; there is simply nothing flying yet.
+With the receiver connected but the locator off, the status panel reads **No Locator** where the locator's name would be — on the rocket-icon row, whose satellite count and battery are blank for the same reason. **This is the normal, healthy state before you power up the rocket.** The app is connected to the receiver; there is simply nothing flying yet.
+
+While the locator is off the app keeps measuring the channel through the receiver, so it can still warn you that something else is transmitting where your rocket is about to. **Nothing under the No Locator line means the channel is clear** — which is the reading you want before you power up.
 
 ⚡ **Silence is not a dropped connection.** The receiver relays nothing when the locator is quiet — off, on the pad, or out of range. The app knows this, checks the receiver's health in the background, and will not tear down a working link just because the locator has gone quiet. Don't "fix" a link that isn't broken.
 
@@ -705,7 +710,7 @@ All four live on the readiness page and the Locator Settings screen (§4.6, §3.
 ## 6.3 Power on and confirm
 
 1. Apply the magnet. **Listen for the loud rising power-on tone.** No tone means no power — check the battery.
-2. Check your phone: the locator appears, and the map switches from **No Locator** to live data.
+2. Check your phone: the locator appears, and the status panel switches from **No Locator** to the locator's name, with its satellite count and battery alongside.
 3. Walk the readiness page (§4.6): satellites, accuracy, battery, sensor health, **continuity on every wired channel**, deployment configuration.
 
 ⚠️ **Do not arm at the pad.** Arm from the flight line (Part 7).
@@ -848,7 +853,11 @@ Normal causes:
 - **dBm** — how *loud* the rocket is. Mostly a function of distance, orientation and obstructions. Green near, red far.
 - **SNR** — how *clean* it is: how much margin is left before packets start dropping. It falls naturally as the rocket gets further away, and going amber or orange near apogee is **normal, not a fault**. Red means you're close to losing packets — which at apogee is simply what maximum range looks like.
 
-Under those numbers the app will say *"Interference on this channel"* only when the signal is arriving **strong but noisy** — the fingerprint of another transmitter, since a strong signal has no business being noisy. A weak, noisy signal is just distance, and the app stays quiet about it, because that is what every healthy flight looks like at apogee. **So no interference note during a dropout means range, not congestion — and the answer to range is to wait.** See §2.5 for what to do about a note that does appear.
+Under those numbers the app will say *"Interference detected. Try another channel."* when the signal is arriving **strong but noisy** — the fingerprint of another transmitter, since a strong signal has no business being noisy. A weak, noisy signal is just distance, and the app stays quiet about it, because that is what every healthy flight looks like at apogee.
+
+**So no interference note during a dropout means range, not congestion — and the answer to range is to wait.** That now rests on a measurement rather than on silence: once nothing has been heard for about five seconds the app starts asking the receiver to read the channel directly, several times a second-and-a-half, and it keeps doing so for as long as the rocket stays quiet. An empty space under the signal reading means the channel was checked and found clear. See §2.5 for what to do about a note that does appear.
+
+⚡ **A note that will not clear is not telling you about the channel.** Up to release 2026-08-11 the interference note could latch on and stay on — through a locator switched off, and even through a *receiver* switched off, when there was no radio left in the system to have an opinion. If you are running an older build, an interference warning that survives powering the locator down is that bug and not a busy channel.
 
 **What to do: nothing.** Keep the receiver up and vertical, keep watching the sky. Don't start disconnecting and reconnecting — the app maintains its own link health and will recover on its own. The **last known position is retained**, and that's what you'll walk toward.
 
@@ -1070,14 +1079,15 @@ This gives you everything the locator recorded, at full rate, for analysis in a 
 |---|---|
 | Locator won't power on / no power-on tone | Battery flat (§1.6). Wrong magnet pole or wrong spot (§1.2). |
 | App never finds the receiver | Receiver powered? Bluetooth on? Phone permissions granted? (§3.8) |
-| App says "No Locator" but the receiver is connected | Normal when the locator is off (§3.8). Otherwise: locator off, out of range, or on a different channel (§2.5). |
+| Status panel says "No Locator" but the receiver is connected | Normal when the locator is off (§3.8). Otherwise: locator off, out of range, or on a different channel (§2.5). If an interference note appears under it, the channel is occupied and that may be why you are hearing nothing. |
 | App asks for a password | First contact with a locator it doesn't know (§2.6). |
 | App opened while the locator was already armed | Supported: armed telemetry identifies itself, so the app picks up a locator it already knows and shows live data straight away. If it still reads "No Locator", that locator has never been connected on this phone — **disarm it once** so the app can prompt for its password (§2.6). |
 | "Another locator … is not being displayed" | Someone else is on your channel — change **Locator Settings → channel** (§2.5). Or one of your *own* spare locators is powered up near the receiver, in which case the channel is irrelevant: move it away (§2.5). To switch to that locator on purpose, tap **Connect** (§2.6). |
 | App shows a locator that isn't on your channel | A powered locator within a few feet of the receiver gets in regardless of channel (§2.5, Appendix G). Move it away. |
 | Telemetry patchy on the pad or the flight line | Check for another powered locator near the receiver — it deafens the receiver every time it transmits (§2.5). |
-| "Interference on this channel" under the signal reading | Something other than your rocket is transmitting in your channel. Move to another channel (§2.5), or find and move the nearby transmitter. Appears only when the signal is strong *and* noisy (§8.4). |
-| "Channel is busy, but your link is clean" | Informational. Other traffic is present but isn't hurting you. No action needed. |
+| "Interference detected. Try another channel." under the signal reading | Something other than your rocket is transmitting in your channel. Move to another channel (§2.5), or find and move the nearby transmitter. Appears when an arriving signal is strong *and* noisy (§8.4), and also with the locator off, when the receiver reads the channel directly and finds it occupied. |
+| That note stays on after you switch the locator or receiver off | A bug in builds before 2026-08-11, not a busy channel: the verdict was being recomputed from the last packet heard before the silence, and could never clear. Update the app **and reflash the receiver** — the two must match (§8.4). |
+| "Channel is busy, but your link is clean" | Informational. Other traffic is present but isn't hurting you. No action needed. Shown only while the locator is being heard — it is a statement about a link, so it is not offered when there isn't one. |
 | Channel scan says every channel is loud | A transmitter is very close to the receiver — usually a spare locator left switched on. Move it; don't change channel (§2.5). |
 | Channel scan refuses to run | The locator is armed, or a flight data transfer is in progress. Disarm or wait (§2.5). |
 | Receiver's new name won't show up | Bluetooth name cache. "Forget" the receiver in your phone's Bluetooth settings, then reconnect (§2.7). |

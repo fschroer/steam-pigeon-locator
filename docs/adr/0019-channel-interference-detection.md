@@ -159,6 +159,39 @@ The receiver is a LoRa receiver on the same SF and bandwidth, so it can simply *
 
 Two things fall out. Frames are counted **and the packet dropped**, not relayed: during a sweep these are other people's broadcasts on channels the receiver is only visiting, and forwarding them put a stranger's `PreLaunchData` in front of the app mid-scan. And the home channel is excluded on its own evidence when it is shortlisted, because the locator transmitting on it is yours — correct, if for a reason worth knowing.
 
+### Measuring a channel nobody is transmitting on (2026-08-11)
+
+Reported from the bench: *"Interference detected"* stayed on screen both when the **locator** was switched off and when the **receiver** was switched off. In the second case there was no radio in the system at all.
+
+**Every channel measurement rode on a locator broadcast.** `noise_floor` and `bad_frames` were appended to `PreLaunchMessageExtended` and `TelemetryMessageExtended` and nowhere else, so silence was unmeasurable — and the verdict, which by then re-evaluated on a timer (the fourth row of the table above), kept re-deriving itself from whatever the last surviving packet had reported. `lossy` is permanently true once a gap stops closing, so a final floor that happened to read above `BUSY_FLOOR_DBM` pinned the alert on forever.
+
+This is the **inverse** of the recurring pattern above. Those four were detectors disabled by the condition they detect. This one is a detector that **cannot turn off in the absence of its condition** — and it is the more dangerous shape, because a detector that fails silent is discovered when someone needs it, while a detector that fails loud is discovered only when someone stops believing it. The test to add alongside the earlier one: **assume the condition is fully absent, and check the detector goes quiet.**
+
+**1. Evidence expires.** A measurement describes the instant it was taken. `STALE_MEASUREMENT_MS` (3 s) bounds how long one may stand in for a live reading, and `rssi`/`snr` age on a **separate clock** from the floor, because the two no longer share a source. Once both lapse, only live evidence — a decoded foreign `locator_id`, a bad-frame count, a freshly polled floor — can still convict.
+
+**2. `ReceiverInfo` carries the channel status.** It is the only message the receiver sends with **no locator involved**, which makes it the only possible carrier for a measurement taken during silence. `int16_t noise_floor` + `uint8_t bad_frames`, same fields and same drain-on-read meaning as the broadcast trailer. `ReceiverInfoMessage` 27 → 30 bytes (app payload 21 → 24), size-pinned on both sides.
+
+The measurement itself already existed: `ServiceNoiseFloor`'s overdue branch — added to fix the *first* row of the table above — samples right through a dropout. It simply had nowhere to go.
+
+**3. The app polls it after 5 s of locator silence, every 2 s.** Not at the first missed broadcast, for a reason that is not obvious: the floor is a **peak since last report** that every reader drains, so an extra reader shortens the window the next report covers, and a peak over a shorter window is never higher. Polling through the one or two broadcasts a distant rocket routinely drops would have biased the whole measurement downward during flight. Five seconds sits above normal in-flight loss and far below any real locator-off case. The poll never touches the radio — it is receiver-directed over BLE ([ADR-0020](0020-targeted-locator-commands.md) Decision 3) — so it costs no channel time and cannot collide with a broadcast.
+
+**4. One baseline per sampling regime — the correction that mattered most.** The first attempt at 1–3 still latched, and permanently, which is the detail that gives the mechanism away.
+
+While the locator transmits, the receiver samples the floor only inside the ADR-0009 safe window. Once it goes overdue, it samples **continuously**. Same field, same units, same "peak since last report" wording — several times as many samples, and *the peak of more samples is higher*. Nothing about the channel changed; only the size of the maximum being taken over it.
+
+Judged against the broadcast-era baseline, that difference could never resolve: the baseline keeps the **minimum**, so readings from the busier regime can never pull it up, and `BUSY_FLOOR_DBM` is absolute, so nothing could bring it back down either. The app therefore keeps `quietestPolledFloor` alongside `quietestNoiseFloor` and compares like with like, and the absolute test is **not applied to polled readings** at all — it was calibrated against the safe-window statistic and means nothing against this one.
+
+> **A statistic is defined by how it was sampled, not by its units.** Two `int16_t` dBm fields with identical names and identical documentation were different measurements, and the code that mixed them was reading a duty cycle as a channel.
+
+**5. The note is suppressed unless the receiver is connected.** Every measurement the verdict rests on is made by the receiver; with none connected the app is not holding a stale reading but no reading at all. `Congested` is additionally held back while the locator is unheard, because *"your link is clean"* is a claim about a link.
+
+**Consequences.**
+
+- **Breaking receiver↔app wire change — flash the receiver and update the app together.** Worse than the ADR-0019 original: the app frames `ReceiverInfo` by exact length *before* checking its CRC, so a mismatched pair desynchronises the framer rather than failing a check — the app waits for bytes that never arrive, the health probe goes unanswered, and [ADR-0012](0012-app-ble-connection-health-probe.md)'s watchdog declares a phantom connection and reconnects in a loop. **The locator is unaffected.**
+- The app can now report a busy channel to someone who has switched on and is hearing nothing — the most useful moment to say it, and previously unreachable.
+- **Dropping the absolute test during silence reopens the hole it was added to plug** (the second row of the table above): a *continuous* emitter already present when polling starts sits inside the polled baseline and reads as quiet, and if it is not LoRa it produces no bad frames and no decoded frames either. Nothing in the passive path catches that. The tier-3 survey does, because it compares channels against each other rather than against a same-channel history — which is an argument for offering it from the no-locator state.
+- **Bench-validated** for the two reported cases: locator switched off and receiver switched off both go quiet. **Not** validated against a real interferer during locator silence, which is the case decision 4 is tuned for.
+
 ### Status
 
 Tiers 1 and 2 are bench-validated ([#32](https://github.com/fschroer/steam-pigeon-locator/issues/32), closed). Tier 3's sweep is validated except for the known-interferer case, which RSSI alone cannot establish ([#33](https://github.com/fschroer/steam-pigeon-locator/issues/33), open). Thresholds remain reasoned rather than fitted, and all of them are app-side so tuning needs no reflash.
