@@ -1271,16 +1271,27 @@ Reading it:
 | `test` | Deployment test menu |
 | `dfu` | Firmware update mode |
 
+**On the locator**, if you forget any of this, press `?` with no menu open and
+it prints the list — the commands above, plus the service keys below. It comes
+from the firmware actually on the device, so where it and this page disagree,
+believe the locator. The receiver console has no `?`, and offers only `config`
+and `dfu`.
+
 ## Service diagnostics (locator)
 
-Type these at the console with no menu open, and with the locator **disarmed**. They exist for diagnosing a locator that is behaving oddly; the output is intended for service rather than for pre-flight checks, and you do not need to understand it to use it.
+Type these at the console with **no menu open** and the locator **disarmed**. Both conditions apply to every key in this table. They exist for diagnosing a locator that is behaving oddly; the output is intended for service rather than for pre-flight checks, and you do not need to understand it to use it.
+
+If a key seems to do nothing, you are in a menu — press Esc. If it answers `REFUSED - disarm first`, the locator is armed. These are ground tools; nothing in this table is meant to be reached in flight.
 
 | Key | Action |
 |---|---|
 | `v` | Battery-sense check. Prints how the battery measurement behaves over ~100 ms. **If the numbers don't respond at all, the fault is in the locator's battery-sense circuit rather than the battery** — which is the one case an empty gauge cannot distinguish on its own (Part 11). |
 | `h` | Holds the battery-sense circuit powered for ~10 seconds so it can be measured with a meter. Press again to release early. Releases on its own regardless. |
+| `/` | Prints the last fault the locator recorded, if any — what kind, what reset it, and how long it had been running. Says `DIAG\|NONE` when there is nothing stored, which is the normal, healthy answer. Service will ask for this text if you send a locator in. |
 
-Neither key affects flight behavior, and both are refused while the locator is armed.
+None of these affects flight behavior, and all of them are refused while the locator is armed.
+
+`?` is the exception to the rule above: it still needs no menu open, but it answers whether the locator is armed or not — so a list of the commands is always available, even when the commands themselves are not.
 
 ## Editing keys (configuration menu)
 

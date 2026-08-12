@@ -92,10 +92,10 @@ void Factory::Init(const Radio_s *radio) {
 #endif
 
 	// A captured fault (HardFault / assert / watchdog hang) is deliberately left
-	// in the .noinit record so it can be read over the USB-C console with '?'
+	// in the .noinit record so it can be read over the USB-C console with '/'
 	// after the reset that produced it.  Clearing it here (as an earlier version
 	// did) destroyed the evidence before it could ever be read, defeating both
-	// the '?' dump and the boot-loop count.  It now persists until it is cleared
+	// the '/' dump and the boot-loop count.  It now persists until it is cleared
 	// explicitly ('~' console key) or overwritten by the next fault
 	// (see Faultlog.hpp; NFR-10 / issue #17).
 }
@@ -512,11 +512,37 @@ void Factory::ServiceConsole() {
 }
 
 void Factory::HandleConsoleChar(uint8_t uart_char) {
-    if (uart_char == '?') {
+    // Root-level command list.  Gated on an idle console for the same reason
+    // 'm' and the bench-replay digits are: a menu owns the keyboard while it is
+    // open, and a list of TOP-LEVEL commands is the wrong answer to a keypress
+    // made inside one.  Falling through also lets '?' be typed into the device
+    // name and password fields, which the old unconditional handler swallowed.
+    if (config_.IsConsoleIdle() && uart_char == '?') {
+        PrintConsoleHelp();
+        return;
+    }
+    // Fault dump.  Moved off '?' when that became the command list.  Gated like
+    // 'm', 'v' and 'h': idle console AND Disarmed.  The diagnostics are ground
+    // tools as a class — the console is a cable you are holding, so wanting one
+    // in flight means something has already gone wrong with the plan — and one
+    // uniform rule is worth more here than four keys each with its own carve-out
+    // for an operator to remember on a range.  It is not free either: the dump
+    // is up to five UartSend calls, each of which can hold the super-loop for
+    // its 100 ms timeout if the line ever backs up.
+    //
+    // '/' is the same physical key as '?' unshifted, so bench notes translate
+    // directly; a letter could not be used at all, since root-level letters are
+    // intercepted ahead of the command-word buffer and 'f' would have eaten the
+    // 'f' in "dfu".
+    if (config_.IsConsoleIdle() && uart_char == '/') {
+        if (device_state_ != DeviceState::Disarmed) {
+            UartSend("\r\nDIAG|FAULT: REFUSED - disarm first\r\n");
+            return;
+        }
         // ----------------------------------------------------------------
         // Dump fault log over UART2.
         // Connect any USB-UART adapter to UART2 TX and open a terminal
-        // at the configured baud rate.  Type '?' to request the report.
+        // at the configured baud rate.  Type '/' to request the report.
         // ----------------------------------------------------------------
         char buf[192];
 
@@ -609,17 +635,24 @@ void Factory::HandleConsoleChar(uint8_t uart_char) {
 
         UartSend("--- END ---\r\n");
 
-        // Not cleared here — the record persists across multiple '?' queries
+        // Not cleared here — the record persists across multiple '/' queries
         // until the '~' console key clears it (or the next fault overwrites it).
         return;
     }
     // Mounting diagnostic.  Not a bench-only key: "did my nose-axis setting
-    // take effect?" is a legitimate pre-flight question in the field, and there
+    // take effect?" is a legitimate PRE-flight question in the field, and there
     // is no other way to answer it short of flying.  Gated on an idle console
     // so it can never shadow a menu key — the mistake the bench-replay keys
-    // made with digits.
+    // made with digits — and on Disarmed with the rest of the diagnostics.
+    // Disarming costs nothing here: the question this answers is one you ask
+    // while the rocket is still in your hands, and an answer obtained after
+    // arming would be too late to act on anyway.
     else if (config_.IsConsoleIdle() && (uart_char == 'm' || uart_char == 'M')) {
-        PrintMountingDiag();
+        if (device_state_ == DeviceState::Disarmed) {
+            PrintMountingDiag();
+        } else {
+            UartSend("\r\nDIAG|MOUNT: REFUSED - disarm first\r\n");
+        }
     }
     // Battery-sense diagnostic.  Like 'm', gated on an idle console so it cannot
     // shadow a menu key.  Additionally refused unless disarmed: it blocks the
@@ -661,7 +694,7 @@ void Factory::HandleConsoleChar(uint8_t uart_char) {
     // -----------------------------------------------------------------------
     // Hidden fault-injection keys (issue #17).  Compiled out unless
     // SP_FAULT_INJECT == 1.  Each deliberately crashes the device; after the
-    // reset, read the captured record with '?'.
+    // reset, read the captured record with '/'.
     // -----------------------------------------------------------------------
     else if (uart_char == '!') {          // force a HardFault
         UartSend("\r\nDIAG|INJECT HardFault - resetting...\r\n");
@@ -797,6 +830,73 @@ void Factory::HandleConsoleChar(uint8_t uart_char) {
     else {
     	config_.ProcessChar(uart_char, device_state_);
     }
+}
+
+// ---------------------------------------------------------------------------
+// PrintConsoleHelp — '?' console key
+//
+// The root console had no way to discover itself: the four command words and
+// the single-key diagnostics existed only in the manual and in this file, so an
+// operator at a terminal with no documentation to hand had nothing to try.
+//
+// The build-flag sections are inside the SAME #if guards that create the keys,
+// which is the only arrangement that cannot drift — a list maintained separately
+// from the dispatch would eventually advertise a key compiled out of the build,
+// or omit one compiled into it, and either way the list stops being evidence.
+//
+// Sent a few lines at a time rather than as one string: UartSend gives each call
+// a 100 ms budget, which the whole listing would strain at the lower baud rates.
+// ---------------------------------------------------------------------------
+void Factory::PrintConsoleHelp() {
+	UartSend("\r\n--- CONSOLE ---\r\n");
+	UartSend("Command words (type, then Enter):\r\n"
+			 "  config   configuration menu\r\n"
+			 "  data     flight data menu\r\n");
+	UartSend("  test     deployment test menu\r\n"
+			 "  dfu      firmware update mode\r\n");
+
+	// '?' sits alone: it is the only root key that answers while armed, which is
+	// the point of saying so on its own line rather than in a footnote.  An
+	// operator who has just been refused by one of the four below needs to know
+	// the refusal was the arm state and not a dead console.
+	UartSend("\r\nKeys (no menu open):\r\n"
+			 "  ?        this list - works armed or disarmed\r\n");
+
+	// The diagnostics carry one shared rule instead of four per-line carve-outs.
+	// Naming the requirement in the heading is what makes a refusal legible: the
+	// key that just printed REFUSED is listed under the condition it failed.
+	UartSend("\r\nDiagnostics (no menu open, DISARMED only):\r\n"
+			 "  /        dump the stored fault record\r\n"
+			 "  m        mounting / nose-axis diagnostic\r\n");
+	UartSend("  v        battery-sense diagnostic\r\n"
+			 "  h        hold battery sense on for metering\r\n");
+#if SP_BENCH_REPLAY
+	// Deliberately NOT disarm-gated, and listed apart so the heading above does
+	// not appear to cover it: replaying a flight while Disarmed is the whole
+	// point of the feature, but replaying while Armed is the case a real launch
+	// cannot be arranged to test, so 'B' takes the arm state as it finds it.
+	UartSend("\r\nBench replay (no menu open, current arm state):\r\n"
+			 "  0-9      select the archive record to replay\r\n"
+			 "  B        start the replay\r\n");
+#endif
+
+	// Keys that answer in any state, menu open or not.  Every one of them is
+	// build-flagged, so the heading has to be guarded too — unguarded it would
+	// print over an empty list in the stock build that most people are running.
+#if SP_FAULT_INJECT || SP_LOSS_INJECT
+	UartSend("\r\nKeys (any time):\r\n");
+#endif
+#if SP_FAULT_INJECT
+	UartSend("  !        inject a HardFault (resets)\r\n"
+			 "  @        inject a watchdog hang (resets)\r\n");
+	UartSend("  %        inject a FAULT_ASSERT (resets)\r\n"
+			 "  ~        clear the stored fault record\r\n");
+#endif
+#if SP_LOSS_INJECT
+	UartSend("  &        drop the next config-change request\r\n"
+			 "  #        cycle flight-data drop-per-group\r\n");
+#endif
+	UartSend("--- END ---\r\n");
 }
 
 // ---------------------------------------------------------------------------

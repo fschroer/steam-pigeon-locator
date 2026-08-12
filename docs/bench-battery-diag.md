@@ -82,7 +82,9 @@ python Tools/serial/sp_capture.py monitor --port COM7 --out batt
 
 Both are refused unless the locator is **disarmed** — the profile blocks the
 super-loop for ~120 ms, which on the pad would drop two navigation cycles — and
-both are ignored while a console menu is open, like `m`.
+both are ignored while a console menu is open. `m` and `/` now carry the same
+two conditions, so the rule for the root-level diagnostics is uniform: idle
+console, disarmed. `?` is the exception and answers in any arm state.
 
 BATTRD is restored to whatever state it was in on entry, so a `v` run mid-cycle
 cannot leave the load switch somewhere production did not put it. `v` cancels

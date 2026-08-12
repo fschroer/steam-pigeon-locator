@@ -48,9 +48,12 @@ python ../Tools/serial/sp_capture.py monitor --port COM7
 | `#` | cycle flight-data **drop-per-group** 0 → 1 → 2 → 0 (#18); prints the new value |
 | `&` | arm a one-shot **forced miss** of the next `LocatorCfgChgRequest` (#20) |
 
-Both are hidden keys handled before the normal menu parser, the same pattern as
-the `?` fault dump. In a production build (`SP_LOSS_INJECT == 0`) they pass
-straight through to the console parser.
+Both are hidden keys handled before the normal menu parser. Unlike the `/` fault
+dump they are not gated on an idle console — they answer in any state, menu open
+or not, which is safe only because they are bench-only and never shipped. In a
+production build (`SP_LOSS_INJECT == 0`) they pass straight through to the
+console parser. In a `SP_LOSS_INJECT == 1` build the `?` command list grows both
+rows, so the console shows whether they are live.
 
 ## #18 procedure — flight-data under loss
 

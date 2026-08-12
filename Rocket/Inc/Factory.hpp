@@ -67,6 +67,12 @@ private:
 	// navigation_.Update().
 	void ServiceConsole();
 	void HandleConsoleChar(uint8_t uart_char);
+	// '?' console key: list the root-level commands.  The console was previously
+	// undiscoverable from the console itself — the command words and the
+	// single-key diagnostics were documented only in the manual and in
+	// HandleConsoleChar.  Build-flagged keys are listed under the same #if guards
+	// that create them, so the list cannot advertise a key this build lacks.
+	void PrintConsoleHelp();
 	// 'm' console key: report the configured nose axis, the committed mounting
 	// frame, and raw vs body accel side by side.  Answers "did my nose-axis
 	// setting actually take effect?", which otherwise cannot be seen without

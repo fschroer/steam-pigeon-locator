@@ -69,6 +69,9 @@ Cost when enabled: ~1.5 KB flash and ~5.2 KB RAM for the replay sample buffer.
 | `0`–`9` | Select the archive record to replay |
 | `B` | Start the replay in the **current** arm state |
 
+Both are listed by the `?` command list when `SP_BENCH_REPLAY == 1`, so a build
+with replay compiled in says so at the console.
+
 **Both only work at the top level, with no menu open.** Inside the config menu
 digits select items, and in the data menu they choose a flight to export, so the
 menus keep them whenever one is open. The first version of these keys claimed
@@ -162,7 +165,8 @@ outside world only through the archived record — i.e. only by flying.
 
 Hence the **`m` console key** (always compiled in, not gated on this flag —
 "did my nose-axis setting take effect?" is a fair pre-flight question in the
-field):
+field; it is gated on an idle console and on Disarmed, with the other
+diagnostics):
 
 ```
 DIAG|MOUNT: nose axis = Y  (configured)
@@ -207,7 +211,11 @@ Procedure, no flight needed:
    headline number stops being the tell. Keep the same face and the two logs
    differ in exactly one place.
 
-`m` only responds at the top level, with no menu open — press Esc first.
+`m` only responds at the top level, with no menu open **and the locator
+disarmed** — press Esc first, and disarm. Armed it prints
+`DIAG|MOUNT: REFUSED - disarm first`. Note this cuts across the replay steps
+above: the replay keys themselves take the arm state as they find it, so an
+armed replay run cannot be interleaved with `m` checks.
 
 ## Caveats
 

@@ -11,11 +11,11 @@ path ([ADR-0008](adr/0008-watchdog-fault-log.md)).
 - **Watchdog-hang classification** (`Rocket/Src/Faultlog.cpp`, `FaultLogInit`):
   an IWDG reset now tags the record `WatchdogHang` (guarded so it never
   overwrites a HardFault/assert record), so the last checkpoint tag + uptime are
-  reported. This lights up the previously-dead `WDG_HANG` branch of the `?` dump.
+  reported. This lights up the previously-dead `WDG_HANG` branch of the `/` dump.
 - **The boot-time clear was removed** (`Rocket/Src/Factory.cpp`, `Factory::Init`).
   Previously the record was wiped on every boot, so a fault could never be read
   after the reset that produced it. It now persists until cleared with `~` or
-  overwritten by the next fault. This also makes the `?` dump and the boot-loop
+  overwritten by the next fault. This also makes the `/` dump and the boot-loop
   count actually work in production — no new output is emitted.
 
 ## Enable the injection build
@@ -42,23 +42,36 @@ python ../Tools/serial/sp_capture.py monitor --port COM7 --out fault17
 
 ## Console keys
 
-These are hidden keys (not shown in any menu), handled before the normal menu
-parser — the same pattern as the existing `?` dump.
+All of these are handled before the normal menu parser.
 
-| Key | Action |
-|-----|--------|
-| `?` | Dump the stored fault record (type, reset cause, boots, uptime, and the type-specific fields) |
-| `!` | Force a **HardFault** (unmapped write → BusFault → HardFault) |
-| `@` | Force a **watchdog hang** (checkpoint tagged `0xDEAD`, then spin until IWDG reset) |
-| `%` | Force a **`FAULT_ASSERT`** failure (records `__FILE__`/`__LINE__`) |
-| `~` | Clear the stored fault record |
+| Key | Action | Build | Available |
+|-----|--------|-------|-----------|
+| `/` | Dump the stored fault record (type, reset cause, boots, uptime, and the type-specific fields) | always | top level, disarmed |
+| `!` | Force a **HardFault** (unmapped write → BusFault → HardFault) | `SP_FAULT_INJECT` | any state |
+| `@` | Force a **watchdog hang** (checkpoint tagged `0xDEAD`, then spin until IWDG reset) | `SP_FAULT_INJECT` | any state |
+| `%` | Force a **`FAULT_ASSERT`** failure (records `__FILE__`/`__LINE__`) | `SP_FAULT_INJECT` | any state |
+| `~` | Clear the stored fault record | `SP_FAULT_INJECT` | any state |
 
-Each of `!`, `@`, `%` resets the device. After it comes back up, press `?` to
+**`/` only answers at the top level with the locator disarmed** — the same gate
+as `m`, `v` and `h`. Press Esc to leave a menu, and disarm; armed, it prints
+`DIAG|FAULT: REFUSED - disarm first`. The injection keys are deliberately not
+gated either way: they are bench-only and never shipped, so there is no menu key
+for them to shadow and no flight for them to disturb in a build anyone flies.
+
+This matters to the procedures below, because each of `!`, `@` and `%` resets
+the device — and the locator comes back up **disarmed**, so the `/` that reads
+the record is unaffected. It only bites if you armed the device again first.
+
+The injection keys are also hidden — they appear in no menu. The `/` dump is
+not: it is listed by the `?` command list, which grows the four injection rows
+when `SP_FAULT_INJECT == 1`, so the console tells you which build you are on.
+
+Each of `!`, `@`, `%` resets the device. After it comes back up, press `/` to
 read what was captured.
 
 ## Validating each #17 item
 
-1. **HardFault capture.** Press `!`. After reset, `?` should report
+1. **HardFault capture.** Press `!`. After reset, `/` should report
    `Type: HARDFAULT`, `Reset: SOFTWARE`, and a non-zero `PC`/`LR`/`CFSR`/`HFSR`.
    Resolve the faulting instruction:
    ```sh
@@ -66,13 +79,13 @@ read what was captured.
    ```
    It should point into `Factory::HandleConsoleChar` (the injected write).
 
-2. **`FAULT_ASSERT` capture.** Press `%`. After reset, `?` should print an
+2. **`FAULT_ASSERT` capture.** Press `%`. After reset, `/` should print an
    `Assert : Factory.cpp:<line>` line. (Without a debugger attached the
    `__BKPT` in `FaultAssert()` escalates to a HardFault, so `Type` may read
    `HARDFAULT` — the assert file/line are captured and printed regardless.)
 
 3. **Watchdog hang + checkpoint persistence.** Press `@`. The device stops
-   kicking the IWDG and resets after the watchdog period. After reset, `?`
+   kicking the IWDG and resets after the watchdog period. After reset, `/`
    should report `Type: WDG_HANG`, `Reset: IWDG`, and `Checkpoint: 57005`
    (0xDEAD) — proving the last checkpoint survived in `.noinit`.
 

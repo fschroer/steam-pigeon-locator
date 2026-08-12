@@ -294,8 +294,10 @@ The strapdown drives the orientation display correctly (pitch/roll/yaw track the
 > modes, channel, device name, nose axis), which is a separate journal. Same
 > one-time migration ADR-0006 already went through; see its 2026-07-04 note.
 >
-> `m` is the mounting diag: top level, no menu open, prints configured nose
-> axis, committed body-from-sensor frame, and raw vs body accel side by side.
+> `m` is the mounting diag: top level, no menu open, **disarmed**, prints
+> configured nose axis, committed body-from-sensor frame, and raw vs body accel
+> side by side. (All four root diagnostics -- `/`, `m`, `v`, `h` -- now share
+> that gate; `?` lists them and answers in any arm state.)
 > It now labels **both** outcomes -- `(identity - never committed)` and
 > `(non-identity - committed)`; before, a passing run printed a bare frame line
 > and read as "nothing happened". Procedure:

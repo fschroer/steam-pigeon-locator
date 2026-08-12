@@ -77,7 +77,7 @@ MANUAL_CHECKS = [
         "doc": "docs/bench-fault-injection.md",
         "requires": "Locator flashed with -DSP_FAULT_INJECT=1; USB-C console open",
         "steps": ["Press '!' on the console (device resets)",
-                  "After reboot press '?' to dump the record"],
+                  "After reboot press '/' to dump the record"],
         "expect": "Type: HARDFAULT, non-zero PC/LR/CFSR/HFSR; "
                   "addr2line -e Locator.elf 0x<PC> lands in HandleConsoleChar",
     },
@@ -87,7 +87,7 @@ MANUAL_CHECKS = [
         "issues": ["#17"],
         "doc": "docs/bench-fault-injection.md",
         "requires": "SP_FAULT_INJECT build; console open",
-        "steps": ["Press '%' (resets)", "After reboot press '?'"],
+        "steps": ["Press '%' (resets)", "After reboot press '/'"],
         "expect": "An 'Assert : Factory.cpp:<line>' line is printed",
     },
     {
@@ -96,7 +96,7 @@ MANUAL_CHECKS = [
         "issues": ["#17"],
         "doc": "docs/bench-fault-injection.md",
         "requires": "SP_FAULT_INJECT build; console open",
-        "steps": ["Press '@' (spins until IWDG reset)", "After reboot press '?'"],
+        "steps": ["Press '@' (spins until IWDG reset)", "After reboot press '/'"],
         "expect": "Type: WDG_HANG, Reset: IWDG, Checkpoint: 57005 (0xDEAD)",
     },
     {
@@ -106,7 +106,7 @@ MANUAL_CHECKS = [
         "doc": "docs/bench-fault-injection.md",
         "requires": "SP_FAULT_INJECT build",
         "steps": ["Force any fault, then power-cycle (not just reset) 2-3x without clearing",
-                  "Press '?' after each boot"],
+                  "Press '/' after each boot"],
         "expect": "Boots increments each power-on, fault fields stay intact "
                   "(else .noinit section missing from the .ld)",
     },
