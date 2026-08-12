@@ -25,22 +25,32 @@ The magnetometer error was real too, and stacks on top. Hard and soft iron near 
 
 3. **Calibration status is taken from both sensors, worst-of whichever have spoken.** *(Amended 2026-08-11 — this decision originally read "from the raw magnetometer, never from the fused rotation vector", which was one device's evidence generalized into a rule. See below.)*
 
-   `TYPE_MAGNETIC_FIELD` is registered purely for its accuracy callback; its readings are discarded, and it samples at 1 s because accuracy callbacks are event-driven and arrive regardless of sampling period. `TYPE_ROTATION_VECTOR`'s accuracy is consumed on equal terms.
+   `TYPE_MAGNETIC_FIELD` is registered for its accuracy callback, at a requested 1 s period. **The request is a hint and is not honored** — measured at 85–100 ms on a Moto G 5S, because `TYPE_ROTATION_VECTOR` is registered at `SENSOR_DELAY_UI` and a fused rotation vector is built on the magnetometer, so the sensor runs at the fastest client's rate and every client sees it. Nothing may assume a 1 s cadence; anything on this path is a hot path. `TYPE_ROTATION_VECTOR`'s accuracy is consumed on equal terms.
 
-   **Which sensor is alive is a property of the device, and cannot be known in advance:**
+   **Which flags are alive is a property of the device, and cannot be known in advance:**
 
    | Device | `TYPE_MAGNETIC_FIELD` | `TYPE_ROTATION_VECTOR` |
    |---|---|---|
    | Pixel 9 Pro XL | reports, responds to a magnet in ms | **never fires** |
-   | Moto G 5S | **never fires** | reports |
+   | Moto G 5S | **never fires** | fires `HIGH` once, then **pinned** |
+   | Pixel 3 XL | **never fires** | **never fires** |
 
-   Exactly reversed, and each device has precisely one live source. Committing to either alone leaves the warning silently unreachable on the other — which is not a hypothetical, it is the bug this ADR was written to fix, reintroduced on different hardware. A source that has never reported contributes nothing to the verdict rather than contributing `HIGH`, so a silent sensor cannot outvote a live one.
+   Three devices, three different failure patterns, and **only one of the three has a usable flag at all**. Committing to either flag alone leaves the warning silently unreachable elsewhere — not a hypothetical, it is the bug this ADR was written to fix, reintroduced twice on different hardware. A source that has never reported contributes nothing to the verdict rather than contributing `HIGH`, so a silent sensor cannot outvote a live one.
 
    Where both report, the **pessimistic** reading wins. A missed warning costs someone walking a wrong bearing through brush; a spurious one costs an unnecessary figure-eight. That trade is not symmetric. This is also the case not yet seen on real hardware — a device whose sources disagree persistently would show the prompt for as long as the gloomier one is unhappy.
 
-3b. **A third source asks the physics rather than the vendor: total field strength.** *(Added 2026-08-11.)* Neither flag is usable on the Moto G 5S — the magnetometer never fires and the rotation vector reports `HIGH` once and stays pinned there with a magnet held against the case. A flag pinned at `HIGH` is indistinguishable from a healthy compass, so no arrangement of the two flags can reach the warning on that device.
+3b. **A third source asks the physics rather than the vendor: total field strength.** *(Added 2026-08-11.)* On two of the three devices measured, no flag is usable at all — a flag pinned at `HIGH`, or one that never fires, is indistinguishable from a healthy compass, so no arrangement of the two can reach the warning there. On the Pixel 3 XL this source is not a fallback, it is the *only* thing between the user and a silently untrustworthy heading.
 
-   The Earth's field is **22–67 µT** anywhere on the surface. A total magnitude outside a slightly widened envelope is therefore not the Earth: something local is adding to it or shielding it. Inside 20–70 µT reads `HIGH`; outside that but within 10–100 µT reads `LOW` (prompt, no suppression); beyond 10–100 µT reads `UNRELIABLE`. A fridge magnet at a few centimetres reads in the hundreds or thousands, so the gross band is not a close call. The readings were already arriving and being discarded — only their magnitude is used, never as a heading.
+   The Earth's field is **22–67 µT** anywhere on the surface. A total magnitude outside a slightly widened envelope is therefore not the Earth: something local is adding to it or shielding it. Inside 20–70 µT reads `HIGH`; outside that but within 10–100 µT reads `LOW` (prompt, no suppression); beyond 10–100 µT reads `UNRELIABLE`. The readings were already arriving and being discarded — only their magnitude is used, never as a heading.
+
+   **Measured against real devices**, which is what turned the envelope from a guess into a calibrated bound:
+
+   | Device | Resting magnitude | Margin below the 70 µT ceiling |
+   |---|---|---|
+   | Pixel 3 XL | 52.3–53.2 µT | ~17 µT |
+   | Moto G 5S | ≤50 µT | ~20 µT |
+
+   A magnet swept around a Moto G peaked at **106 µT** and crossed all three bands — comfortably detectable, but an order of magnitude below the "hundreds or thousands" originally assumed for the gross band. The bands are close enough together that the reading chatters across them under a real magnet, exactly as the accuracy flags do; the same 3 s hold covers both.
 
    **This detects interference, not miscalibration.** A stale hard-iron offset rotates the heading while leaving magnitude entirely plausible, so `HIGH` here means "nothing is obviously swamping the sensor", never "the heading is right". It is a third opinion in the same worst-of verdict, not a replacement for flags on devices where those work. It is also the first part of this ADR with unit coverage (`FieldMagnitudeTest`), because unlike the flags it is arithmetic rather than a vendor's opinion.
 
@@ -59,7 +69,9 @@ The magnetometer error was real too, and stacks on top. Hard and soft iron near 
 - **Decision 3 was device-specific evidence generalized into a rule, and it did not survive contact with a second phone.** It originally sourced calibration status from the magnetometer alone, on the strength of one Pixel where the fused sensor is inert. A Moto G 5S then showed the exact reverse. The corrected decision reads both sensors, but the lesson generalizes past this ADR: **an accuracy field that never fires is indistinguishable from one reporting `HIGH`**, so a feature gated on it looks like it works right up until someone tries to trigger it. Any future addition here needs testing on a device where the warning is expected to *fire*, not only on one where it stays quiet.
 - **A device where neither flag reports is not hypothetical — it is the Moto G 5S**, which is what forced Decision 3b. Field magnitude covers it, and covers any device with a working magnetometer, but the coverage is narrower than the flags claim to offer: interference only.
 - **Nothing detects a stale hard-iron calibration on a device with pinned flags.** Magnitude stays plausible, both flags say `HIGH`, and the heading can still be tens of degrees out. On such a phone the app cannot tell the user their compass has drifted — the figure-eight advice in the manual is the mitigation, and it is why §9.3 tells the user to do it on arrival rather than waiting for a prompt.
-- **The magnitude thresholds are judgement, not measurement.** 20–70 µT is the Earth's 22–67 µT span with margin; 10–100 µT for the gross band is round-number reasoning about how far out a reading has to be before the overlay should go. Neither is calibrated against recorded interference, and both are deliberately loose — a false prompt is an unnecessary figure-eight, while a false suppression removes what the user is walking by.
+- **The magnitude envelope is now measured; the gross band is still judgement.** Two devices rest at 50–53 µT, leaving ~17–20 µT of headroom below the 70 µT ceiling, so the inner band is not going to cry wolf on either. The 10–100 µT gross band is still round-number reasoning about how far out a reading must be before the overlay should go, and the one magnet measured peaked at 106 µT — barely past it, against an assumption of "hundreds or thousands". A weaker magnet, or one held further away, would register as `LOW` and prompt without suppressing. That is the intended graceful degradation, but it was not designed against a measurement.
+- **Declination is zero until the first GPS fix**, so the heading carries the full uncorrected error until then — 15° here. Unavoidable: declination is a function of position, and there is no position yet. It resolves itself within seconds outdoors, and matters least then, since recovery navigation is not happening before the app has a fix. Worth knowing when the map first opens indoors and reads visibly wrong.
+- **Anything on the magnetometer path is a hot path.** The 1 s sampling request is not honored where the rotation vector is already driving that sensor: 85–100 ms measured. Logging or allocation added there is ~11× more expensive than the registration implies.
 - **The thresholds are calibrated against one phone.** `LOW` means interference on a Pixel 9 Pro XL, which rests at `MEDIUM` once calibrated. A device that idles at `LOW` would show the prompt permanently — the habituation failure the pad-alert banner already argues against — and would need Decision 5 revisited rather than the prompt tolerated.
 - **`GeomagneticField` carries a World Magnetic Model with an epoch.** Drift is a fraction of a degree per year and far below the sensor's own error, but the model does eventually expire on an un-updated Android version.
 
