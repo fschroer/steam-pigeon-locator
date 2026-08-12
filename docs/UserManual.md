@@ -903,7 +903,7 @@ The map rotation and the heads-up overlay both come from the magnetic compass in
 
 **Iron and magnets near the phone are what do it.** A truck bed or tailgate, a steel launch rail, a magnetic phone mount or a case with magnets in it, the car you are standing beside. The phone does not need to touch any of it.
 
-⚡ **An ∞ symbol beside the compass rose — bottom-left of the map, above the scale bar — means the heading is being disturbed. It is a picture of what to do about it: sweep the phone through a figure-eight in the air.** A couple of loops, turning your wrist as you go, so the phone points in a lot of different directions. Step away from vehicles and metal first, or you will be recalibrating against the thing causing the problem. The symbol clears within a few seconds of the compass recovering, and you can watch the map swing onto the correct heading as it does.
+⚡ **An ∞ symbol across the bottom of the compass rose — the dial at the bottom-left of the map, above the scale bar — means the heading is being disturbed. It is a picture of what to do about it: sweep the phone through a figure-eight in the air.** A couple of loops, turning your wrist as you go, so the phone points in a lot of different directions. Step away from vehicles and metal first, or you will be recalibrating against the thing causing the problem. The symbol clears within a few seconds of the compass recovering, and you can watch the map swing onto the correct heading as it does.
 
 **The color tells you how bad it is:**
 
