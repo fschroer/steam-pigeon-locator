@@ -58,7 +58,13 @@ The magnetometer error was real too, and stacks on top. Hard and soft iron near 
 
 5. **Two thresholds, one level apart, because they cost different things.** `ACCURACY_LOW` or worse raises the on-map calibration prompt — advisory, and the level this phone reaches next to a laptop. Only `UNRELIABLE` suppresses the AR overlay, via the same mechanism [ADR-0022](0022-distance-bearing-plausibility.md) uses for an implausible position. Suppressing at `LOW` would have taken the overlay away in ordinary use; warning only at `UNRELIABLE` would have stayed silent through exactly the desk-side interference that prompted this.
 
-6. **The prompt asks for the figure-eight, because that is the only repair available.** The fusion owns the magnetometer and there is no API into its calibration. Sweeping the phone through varied orientations is what lets the estimator re-solve for the local hard-iron offset — confirmed in the field, with the map orientation visibly correcting itself mid-gesture.
+6. **The indicator asks for the figure-eight, because that is the only repair available.** The fusion owns the magnetometer and there is no API into its calibration. Sweeping the phone through varied orientations is what lets the estimator re-solve for the local hard-iron offset — confirmed in the field, with the map orientation visibly correcting itself mid-gesture.
+
+   **It is an ∞ glyph, not words.** *(Changed 2026-08-11.)* It first read "Compass off / figure-8 to fix", which invites the reading that the compass has been *switched* off — sending the user to look for a setting to turn back on, when the problem is the truck they are standing next to. The symbol cannot be misread that way because it asserts nothing: it is a picture of the gesture to make, and the gesture is the entire remedy.
+
+   **Yellow at `LOW`, red at `UNRELIABLE`**, so the color change and the AR marker vanishing are one event with one cause rather than two unexplained ones. The comparison is `<=`, not `==`: `SENSOR_STATUS_NO_CONTACT` sorts *below* `UNRELIABLE` and is worse, so an equality test would read the worst state the API can report as fine. That bug was live in the AR-suppression gate until this change.
+
+   **What this trades away is self-evidence.** A glyph with no text cannot teach a first-time user what it wants. Two things carry that load instead: a `contentDescription` for screen readers, and §9.3 of the manual, which now has to explain both colors — including that a red ∞ and a missing heads-up marker are the same event. The manual moved from useful to load-bearing when the words came off the screen.
 
 ## Consequences
 

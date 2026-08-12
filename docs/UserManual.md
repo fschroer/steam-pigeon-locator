@@ -903,13 +903,22 @@ The map rotation and the heads-up overlay both come from the magnetic compass in
 
 **Iron and magnets near the phone are what do it.** A truck bed or tailgate, a steel launch rail, a magnetic phone mount or a case with magnets in it, the car you are standing beside. The phone does not need to touch any of it.
 
-⚡ **If the app shows a yellow "Compass off — figure-8 to fix" next to the compass rose, do not walk the bearing until you have cleared it.** The app is telling you the heading is being disturbed. Step away from vehicles and metal first, then sweep the phone through a figure-eight in the air — a couple of loops, turning your wrist as you go, so the phone points in a lot of different directions. The warning clears within a few seconds of the compass recovering, and you can watch the map swing onto the correct heading as it does.
+⚡ **An ∞ symbol beside the compass rose — bottom-left of the map, above the scale bar — means the heading is being disturbed. It is a picture of what to do about it: sweep the phone through a figure-eight in the air.** A couple of loops, turning your wrist as you go, so the phone points in a lot of different directions. Step away from vehicles and metal first, or you will be recalibrating against the thing causing the problem. The symbol clears within a few seconds of the compass recovering, and you can watch the map swing onto the correct heading as it does.
+
+**The color tells you how bad it is:**
+
+| Symbol | Meaning | What the app does |
+|---|---|---|
+| **Yellow ∞** | The heading is disturbed and probably wrong | Still shows you a bearing — treat it with suspicion |
+| **Red ∞** | The heading cannot be trusted at all | Stops aiming the heads-up marker (see below) |
+
+⚡ **On red, do not walk the bearing until you have cleared it.** A red ∞ and the heads-up marker disappearing are the same event, not two separate faults.
 
 💡 **The figure-eight is the only repair there is.** There is no calibration button — on Android the compass calibrates itself from movement, and the gesture is simply how you give it enough movement to work with. It is worth doing once when you arrive at the site, before you need it.
 
-> ⚠️ **No warning is not the same as a good compass.** The app can spot a field that is obviously being swamped — a magnet, a vehicle, a laptop — but a compass that has simply drifted out of calibration reads as perfectly normal from the inside, and on some phones the operating system never reports its calibration state at all. **Do the figure-eight on arrival regardless of whether you have been prompted.** It costs five seconds and it is the only thing that rules this out.
+> ⚠️ **No ∞ is not the same as a good compass.** The app can spot a field that is obviously being swamped — a magnet, a vehicle, a laptop — but a compass that has simply drifted out of calibration reads as perfectly normal from the inside, and on some phones the operating system never reports its calibration state at all. **Do the figure-eight on arrival regardless of whether the symbol has appeared.** It costs five seconds and it is the only thing that rules this out.
 
-**If the overlay marker disappears** while the crosshair and the scales stay on screen, the app has decided it cannot aim it — either the position is one it will not vouch for (§9.5) or the compass is too disturbed to trust. Fall back to the map, the distance readout and the beacon. The marker comes back on its own.
+**If the overlay marker disappears** while the crosshair and the scales stay on screen, the app has decided it cannot aim it. Two possible causes, and the map tells you which: **a red ∞** means the compass, and **no ∞** means the position is one it will not vouch for (§9.5). Fall back to the map, the distance readout and the beacon. The marker comes back on its own.
 
 > ⚠️ **The compass affects the picture, not the position.** The rocket's coordinates come from its own GPS and are unaffected by any of this. If in doubt, tap the coordinates to hand them to a maps app (§9.2), or read the bearing off the map against a landmark — a compass problem cannot move the rocket marker on the map, only rotate the map underneath it.
 
@@ -1154,7 +1163,8 @@ AT THE FLIGHT LINE
 □ Tap the coordinates → opens your maps app
 □ Receiver vertical, out of pocket
 □ Step away from vehicles/metal — compass
-□ Yellow "Compass off"? → figure-8, then walk
+□ ∞ by the compass? → figure-8 the phone
+□    yellow = suspect   red = do not walk it
 □ Landscape = heads-up view, walk the bearing
 □ Stop and listen for the loud beacon
 
