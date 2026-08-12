@@ -1328,7 +1328,7 @@ For text fields (name, password), just type; Enter saves, Esc cancels.
 | `7` | Main Backup Deploy Altitude (m) |
 | `8` | LoRa Channel (0–63) |
 | `9` | Device Name |
-| `p` | Password — shows `(set)` or `(not set)`; type a new one, blank clears it |
+| `p` | Password — shows the current password, or `(not set)`; type a new one (it echoes as you type), blank clears it |
 
 ## `data` — Rocket Locator Data Menu
 

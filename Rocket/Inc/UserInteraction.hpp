@@ -111,7 +111,6 @@ private:
   const char* nose_axis_y_text_ = "Y\0";
   const char* nose_axis_z_text_ = "Z\0";
   const char* password_text_ = "p) Password:\t\t\t\t\0";
-  const char* password_set_text_ = "(set)\0";
   const char* password_unset_text_ = "(not set)\0";
   const char* password_edit_guidance_text_ = "Type new password (blank clears). Enter to save, Esc to cancel.\r\n\0";
   const char* num_edit_guidance_text_ = "[ = down, ] = up. Hit Enter to update, Esc to cancel.\r\n\0";

@@ -644,13 +644,14 @@ void UserInteraction::AdjustConfigTextSetting(uint8_t uart_char, char *config_mo
 	}
 }
 
-// Write-only password entry.  Echoes '*' for each character and never stores or
-// displays the plaintext: on Enter it derives the FNV-1a key and persists only
-// that (0 when blank, i.e. "open").  Stored via Archive in the locator-only
-// runtime journal, so the password is never transmitted over the air.
+// Password entry.  Echoes the characters as typed — the password is not a
+// secret against anyone with the cable, since the config menu displays the
+// stored value anyway (ADR-0006: it is a convenience gate, and the owner must
+// be able to read back what they set).  On Enter it is stored via Archive in
+// the locator-only runtime journal, so it is never transmitted over the air;
+// the FNV-1a key is derived from it on use (blank = 0, i.e. "open").
 void UserInteraction::AdjustPasswordSetting(uint8_t uart_char) {
 	static uint16_t char_pos = 0;
-	const char* masked = "*\0";
 	if (uart_char == 13 || uart_char == 27) {
 		if (uart_char == 13) {
 			user_input_[char_pos] = 0;
@@ -665,7 +666,7 @@ void UserInteraction::AdjustPasswordSetting(uint8_t uart_char) {
 		HAL_UART_Transmit(&huart2_, (uint8_t*) bs_, 3, uart_timeout);
 		user_input_[--char_pos] = 0;
 	} else if (uart_char >= ' ' && uart_char <= '~' && char_pos < USER_INPUT_MAX_LENGTH) {
-		HAL_UART_Transmit(&huart2_, (uint8_t*) masked, 1, uart_timeout);
+		HAL_UART_Transmit(&huart2_, &uart_char, 1, uart_timeout);
 		user_input_[char_pos++] = uart_char;
 	}
 }
