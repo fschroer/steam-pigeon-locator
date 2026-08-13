@@ -367,6 +367,8 @@ Each locator identifies itself with a permanent hardware ID and, optionally, a p
 
 ⚠️ **Set the password over USB-C at home, and write it down somewhere you'll find it.** It cannot be read or changed over the air, only over the cable. Maximum 15 characters; blank clears it.
 
+⚠️ **A firmware update can clear the password.** When it does, the locator comes back *open* — the app will pick it up with no prompt, which looks like everything is fine rather than like something was lost. After updating a locator, check §2.6 in the `config` menu and re-enter the password if it reads `(not set)`. This is why the note above says write it down.
+
 📋 The password is a convenience gate, not a security system. It keeps your app from acting on someone else's rocket and vice versa. Don't treat it as protection against a determined third party.
 
 ## 2.7 Device names
@@ -1036,7 +1038,7 @@ And per channel:
 This gives you everything the locator recorded, at full rate, for analysis in a spreadsheet or a plotting tool.
 
 1. Connect the locator to a computer with USB-C.
-2. Open a serial terminal at **921600 baud** (§Appendix D).
+2. Open a serial terminal at the locator's console baud rate — **921600 unless you changed it** (§Appendix D).
 3. Type `data` and press Enter. You'll get a numbered list of stored flights with dates, apogees and times to apogee.
 4. **Start your terminal's logging-to-file** *before* the next step — the export scrolls past as plain text.
 5. Type the number of the flight you want. The CSV streams out, followed by a summary of the flight's events and per-channel deployment statistics.
@@ -1099,6 +1101,8 @@ This gives you everything the locator recorded, at full rate, for analysis in a 
 | Locator Settings / Flight Profiles aren't in the menu | They only appear while the locator is powered, in range, and **disarmed** (§2.1). |
 | Ready-beep never starts after arming | Flight memory full (§3.6) or battery too low. **Don't launch** (§7.4). |
 | Battery gauge reads empty on a battery you know is charged | The gauge cannot tell a flat cell from a broken battery-sense circuit — both read empty. Before you replace the battery, check it over USB-C: press `v` at the console (disarmed). If the readings there don't respond at all, the fault is in the locator, not the battery, and it needs service (Appendix D). |
+| USB-C console shows nothing, or a screen of random characters | Baud mismatch — not a fault, and nothing is lost. Set your terminal to the rate you want and **hold Shift+U** for a second; the device will match you and say so (Appendix D). |
+| Console text is garbled but **pastes correctly**, digits and CAPITALS readable | Not a baud problem at all. A stray control code has put your terminal into its line-drawing character set. **Reset the terminal.** Changing baud rate or power-cycling the device will not fix it (Appendix D). |
 | Can't disarm | Not while it's flying. This is intentional (§7.5). |
 | Telemetry drops out mid-flight | Normal at range and altitude. The rocket is unaffected (§8.4). |
 | Altitude looks stepped or jumpy | Sunlight on the barometer, most likely in a clear payload bay (§1.7). |
@@ -1238,6 +1242,7 @@ AT THE FLIGHT LINE
 | Locator Name | App, USB-C | 20 characters | blank | |
 | Receiver Name | App, USB-C | 20 characters | blank | Requires Bluetooth "Forget" to refresh (§2.7) |
 | Connection Password | **USB-C only** | 15 characters, blank = open | blank | Cannot be read or set over the air |
+| Console Baud | **USB-C only** | 9600 / 19200 / 38400 / 57600 / 115200 / 230400 / 460800 / 921600 | 921600 | Locator and receiver each have their own. Cannot be set over the air. Set it wrong and you recover by holding `U` — §Appendix D |
 | Enable Speech | App | on / off | on | |
 | Voice Name | App | your phone's installed voices | system default | |
 
@@ -1245,7 +1250,53 @@ AT THE FLIGHT LINE
 
 # Appendix D — USB-C console reference
 
-**Connection:** USB-C from the locator (or receiver) to a computer. Serial terminal at **921600 baud**.
+**Connection:** USB-C from the locator (or receiver) to a computer. Serial terminal at **921600 baud, 8-N-1** — that is the factory rate, and it is what a device you have never reconfigured will be using.
+
+## Changing the console baud rate
+
+The rate is a setting in the `config` menu, key `b`. The locator and the receiver hold their own rates independently, and neither travels over the radio — you can only change a device's console rate over its own cable.
+
+Most people never need to touch it. The reasons to:
+
+- your USB-serial adapter or terminal program will not go as high as 921600;
+- you are running a long or noisy cable and a slower rate is more reliable.
+
+The cost of a slower rate is the CSV export (§10.4), which is the one thing on this console that moves real volume — at 9600 baud a long flight takes minutes rather than seconds.
+
+**The change takes effect the moment you press Enter**, so the menu redraws at the new rate and turns to garbage until you change your terminal to match. That is expected, and the next screen you draw after switching will be clean.
+
+## If the console is unreadable
+
+**The symptom:** you connect, and instead of a menu you get nothing at all, or a screen of random characters that changes when you type. Nothing is broken — the device and your terminal are simply at different baud rates. This is what you would see after setting the rate to something your adapter cannot do, or after picking up a device you configured months ago and forgot about.
+
+**First, check which kind of garbled you have.** Select the garbled text and paste it somewhere:
+
+- **The paste is nonsense too** → a genuine baud mismatch. Use the fix below.
+- **The paste is perfectly readable** → the *bytes* are fine and your terminal is only drawing them wrong. **Reset your terminal** (most have a Reset command; otherwise close and reopen the session). Changing baud rates will not help, and neither will power-cycling the device, because the problem is in the terminal.
+
+The second case is easy to mistake for the first. Its tell is that **digits and CAPITAL letters look fine while lowercase letters turn into line-drawing symbols** — a terminal that has been switched into its line-drawing character set by a stray control code, which the random bytes of a real baud mismatch can produce by chance. Once you have reset the terminal it will not come back on its own.
+
+**The fix for a genuine mismatch — hold down `U`.** Set your terminal to the rate **you** want, 8-N-1, then hold Shift+U for a second or two. The device recognises the stream, measures your rate from it, and matches you, replying:
+
+```
+DIAG|BAUD: detected 115200 - saved
+```
+
+That line arriving legibly *is* the confirmation — it is sent at the newly matched rate, so if you can read it, it worked. The rate is saved, so the device comes back at it after a power cycle. Press Enter afterwards to clear any leftover `U`s from the input line.
+
+Hold the key rather than counting presses: the leading characters are what tell the device the two ends disagree, and the rest are the measurement and its confirmation.
+
+⏱️ **If you have just changed the rate yourself, wait about 10 seconds before holding `U`.** The device deliberately ignores mismatch signals for a few seconds after a deliberate change, so that switching your terminal over does not look like a cry for help.
+
+**If that does not work — find the rate by hand.** The device is always at one of eight rates, so this takes under a minute and cannot fail: set your terminal to **9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600** in turn, and at each one press Enter and type `config`. When the menu appears, that is the device's rate. Then press `b` and set the rate you actually want.
+
+Nothing is lost and nothing is broken while you are hunting; a device at the wrong rate is simply not being understood, and it recovers completely the moment the two ends agree.
+
+⚠️ **The listener stops after arming.** A device in flight must not be able to have its console rate moved by whatever the cable picks up. If you need to recover, do it on the bench, disarmed.
+
+📋 While the rates agree the listener does nothing at all — it only wakes on the flood of unreadable characters a mismatch produces, so it costs nothing during normal use and cannot be triggered by ordinary typing or by pasting text.
+
+📋 Why `U`: at 8-N-1 the letter `U` is the bit pattern `01010101`, an even square wave. That regularity is what lets the device time your terminal's bit rate off the signal itself, without having to understand a single character first. It is the same trick STM32CubeProgrammer uses to talk to a chip it has never met.
 
 **Channel scan trace (receiver only).** While a channel scan is running (§2.5), the receiver prints a trace to its console. Nothing needs to be enabled — a scan is a deliberate, one-off action, so there is no background chatter. It is there so a scan that misbehaves can be diagnosed directly instead of by guesswork:
 
@@ -1393,7 +1444,7 @@ Puts the device into firmware-update mode. It will not work again until it is re
 | Power switch | Magnetic (Hall sensor + latch); no mechanical switch |
 | Battery charging | Up to 1 A, over USB-C |
 | Audio | Piezo buzzer |
-| Data interface | USB-C, 921600 baud |
+| Data interface | USB-C, 921600 baud default (9600–921600, configurable per device) |
 | Sample rate | 20 samples per second |
 | Max recorded flight | 8 minutes |
 

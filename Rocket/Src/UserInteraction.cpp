@@ -20,8 +20,15 @@ constexpr uint16_t max_main_backup_deploy_altitude = 400;
 constexpr uint16_t max_lora_channel = 63;
 
 UserInteraction::UserInteraction(FlightManager &flight, Communication::Communication &comm, Archive &archive,
-		Deployment &deploy, UART_HandleTypeDef &huart2) :
-		flight_(flight), comm_(comm), archive_(archive), deploy_(deploy), huart2_(huart2) {
+		Deployment &deploy, UART_HandleTypeDef &huart2, ConsoleBaud &console_baud) :
+		flight_(flight), comm_(comm), archive_(archive), deploy_(deploy), huart2_(huart2), console_baud_(console_baud) {
+}
+
+int UserInteraction::ConsoleBaudIndexOf(uint32_t rate) {
+	for (std::size_t i = 0; i < ConsoleBaudRates::kStandardRateCount; i++)
+		if (ConsoleBaudRates::kStandardRates[i] == rate)
+			return static_cast<int>(i);
+	return static_cast<int>(ConsoleBaudRates::kStandardRateCount) - 1;  // kFallbackRate is the last entry
 }
 
 void UserInteraction::ProcessChar(uint8_t uart_char, DeviceState &device_state) {
@@ -51,6 +58,10 @@ void UserInteraction::ProcessChar(uint8_t uart_char, DeviceState &device_state) 
 					lora_channel_ = locator_settings.lora_channel;
 					nose_axis_ = locator_settings.nose_axis;
 					std::memcpy(device_name_, locator_settings.device_name, device_name_length);
+					// Seeded from the live rate, not from flash: after a sync-byte
+					// recovery those differ until the detection is saved, and the
+					// menu must show what the operator is actually connected at.
+					console_baud_index_ = ConsoleBaudIndexOf(console_baud_.CurrentRate());
 					DisplayConfigSettingsMenu();
 				} else if (StrCmp(user_input_, data_command_, char_pos)) {
 					device_state = DeviceState::Config;
@@ -161,6 +172,11 @@ void UserInteraction::ProcessChar(uint8_t uart_char, DeviceState &device_state) 
 			user_interaction_state_ = UserInteractionState::EditPassword;
 			uart_line_len = MakeLine(uart_line_, password_edit_guidance_text_);
 			break;
+		case 'b': // b = Edit console baud (stored locally; never sent over the air)
+		case 'B':
+			user_interaction_state_ = UserInteractionState::EditConsoleBaud;
+			uart_line_len = MakeLine(uart_line_, console_baud_edit_text_, num_edit_guidance_text_);
+			break;
 		}
 		HAL_UART_Transmit(&huart2_, (uint8_t*) uart_line_, uart_line_len, uart_timeout);
 		break;
@@ -199,6 +215,9 @@ void UserInteraction::ProcessChar(uint8_t uart_char, DeviceState &device_state) 
 		break;
 	case UserInteractionState::EditPassword:
 		AdjustPasswordSetting(uart_char);
+		break;
+	case UserInteractionState::EditConsoleBaud:
+		AdjustConsoleBaudSetting(uart_char);
 		break;
 	case UserInteractionState::DataHome:
 		if (erase_all_pending_) {
@@ -430,6 +449,12 @@ void UserInteraction::DisplayConfigSettingsMenu() {
 	uart_line_len = MakeLine(uart_line_, password_text_,
 			archive_.GetPassword()[0] != 0 ? archive_.GetPassword() : password_unset_text_);
 	HAL_UART_Transmit(&huart2_, (uint8_t*) uart_line_, uart_line_len, uart_timeout);
+	uart_line_len = MakeLine(uart_line_, crlf_);
+	HAL_UART_Transmit(&huart2_, (uint8_t*) uart_line_, uart_line_len, uart_timeout);
+	// Written through StaticStringWriter rather than MakeLine/ToStr because the
+	// rates run past 65535 and ToStr takes a uint16_t.
+	StaticStringWriter<64> baud_line(&huart2_);
+	baud_line.WriteMany(console_baud_text_, ConsoleBaudRates::kStandardRates[console_baud_index_]);
 	uart_line_len = MakeLine(uart_line_, crlf_, crlf_);
 	HAL_UART_Transmit(&huart2_, (uint8_t*) uart_line_, uart_line_len, uart_timeout);
 }
@@ -617,6 +642,52 @@ void UserInteraction::AdjustConfigNumericSetting(uint8_t uart_char, int *config_
 	if (uart_char == 91 || uart_char == 93) {
 		uart_line_len = MakeLine(uart_line_, cr_, ToStr(*config_mode_setting, tenths));
 		HAL_UART_Transmit(&huart2_, (uint8_t*) uart_line_, uart_line_len, uart_timeout);
+	}
+}
+
+void UserInteraction::AdjustConsoleBaudSetting(uint8_t uart_char) {
+	switch (uart_char) {
+	case 13: { // Enter key — apply and persist
+		const uint32_t rate = ConsoleBaudRates::kStandardRates[console_baud_index_];
+		// Persist BEFORE switching the line.  If the operator has the rate wrong
+		// they are about to stop being able to read anything, and a rate that was
+		// applied but never stored would come back as the old one after a reset —
+		// which sounds like a mercy, but it would also silently undo a sync-byte
+		// recovery the moment the device was power-cycled.
+		const bool saved = archive_.SetConsoleBaud(rate);
+		{
+			// Emitted at the OLD rate, while the operator can still read it.
+			StaticStringWriter<UART_LINE_MAX_LENGTH> line(&huart2_);
+			if (saved)
+				line.WriteMany(crlf_, "Console baud set to ", rate, " - switch your terminal now.", crlf_);
+			else
+				line.WriteMany(crlf_, "Console baud NOT saved - rate unchanged.", crlf_);
+		}
+		if (saved)
+			console_baud_.SetRate(rate);
+		user_interaction_state_ = UserInteractionState::ConfigHome;
+		DisplayConfigSettingsMenu();
+		break;
+	}
+	case 27: // Esc key
+		console_baud_index_ = ConsoleBaudIndexOf(console_baud_.CurrentRate());
+		user_interaction_state_ = UserInteractionState::ConfigHome;
+		DisplayConfigSettingsMenu();
+		break;
+	case 91: // [ = next rate down
+		if (console_baud_index_ > 0)
+			console_baud_index_--;
+		break;
+	case 93: // ] = next rate up
+		if (console_baud_index_ < static_cast<int>(ConsoleBaudRates::kStandardRateCount) - 1)
+			console_baud_index_++;
+		break;
+	}
+	if (uart_char == 91 || uart_char == 93) {
+		// Trailing blanks cover the digits of a wider rate when stepping down, so
+		// 921600 -> 9600 does not read as "9600 0".
+		StaticStringWriter<64> line(&huart2_);
+		line.WriteMany(cr_, ConsoleBaudRates::kStandardRates[console_baud_index_], "   ");
 	}
 }
 

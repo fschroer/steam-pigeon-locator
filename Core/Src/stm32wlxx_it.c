@@ -47,7 +47,9 @@
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN PFP */
-
+/* Defined in Rocket/Common/Src/ConsoleBaud.cpp. Declared here rather than via a
+   header so this generated file keeps its existing include set. */
+extern void ConsoleBaud_NoteRxError(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -298,6 +300,17 @@ void USART2_IRQHandler(void)
   {
     /* Call Error function */
     UART_Error_Callback();
+  }
+
+  /* Console baud auto-detection needs to know about framing/noise errors, and
+     this is the only place they are still visible: HAL_UART_IRQHandler below
+     clears FE and NE before returning, so nothing polled from the main loop can
+     ever observe one. Counting them here, ahead of that call, is what lets the
+     console tell "the operator is holding the sync key at a rate I am not set to"
+     apart from ordinary traffic. */
+  if (LL_USART_IsActiveFlag_FE(USART2) || LL_USART_IsActiveFlag_NE(USART2))
+  {
+    ConsoleBaud_NoteRxError();
   }
 
   /* USER CODE END USART2_IRQn 0 */

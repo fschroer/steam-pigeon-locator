@@ -82,6 +82,14 @@ public:
 	const char* GetPassword() const { return runtime_.password; }
 	uint32_t GetPasswordKey() const { return PasswordKdf::DeriveKey(runtime_.password); }
 	bool SetPassword(const char* password);
+	// UART console baud rate.  In the runtime metadata journal beside the password
+	// and for the same reason: RocketPersistentSettings is the payload of the
+	// over-the-air LocatorSettings message, so a console rate stored there could
+	// be pushed to a locator by radio — muting the console of a device that may be
+	// nowhere near the operator.  Returns the fallback when nothing valid is
+	// stored; SetConsoleBaud rejects anything outside ConsoleBaudRates.
+	uint32_t GetConsoleBaud() const;
+	bool SetConsoleBaud(uint32_t baud);
 	bool IsActiveOpen() {
 		return archive_.IsActiveOpen();
 	}

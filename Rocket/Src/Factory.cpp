@@ -12,6 +12,7 @@ extern "C" {
 #include "CycleProfiler.hpp"
 #include "StRadioAdapter.hpp"
 #include "Constants.hpp"
+#include "StaticStringWriter.hpp"
 #include "RgbLed.hpp"
 #include "Deployment.hpp"
 #include "Buzzer.hpp"
@@ -39,10 +40,18 @@ Factory::Factory(UART_HandleTypeDef &huart2, SPI_HandleTypeDef &hspi2, I2C_Handl
 				power_), navigation_(&hspi2, &hi2c2, &htim17, CS_IMU_GPIO_Port, CS_IMU_Pin, CSB_ALT_GPIO_Port,
 		CSB_ALT_Pin), comm_(deviceUID_, flight_, navigation_, archive_, power_, deploy_), flash_(&hspi2_,
 		CSB_MEM_GPIO_Port,
-		CSB_MEM_Pin), archive_(deviceUID_, flash_), config_(flight_, comm_, archive_, deploy_, huart2_), power_(&hadc), deploy_() {
+		CSB_MEM_Pin), archive_(deviceUID_, flash_), console_baud_(huart2_), config_(flight_, comm_, archive_, deploy_,
+		huart2_, console_baud_), power_(&hadc), deploy_() {
 }
 
 void Factory::Init(const Radio_s *radio) {
+	// Before anything that can block.  The PowerOn sequence below spends a second
+	// or more in HAL_Delay, and the flash reset and archive scan after it are not
+	// quick either — an operator whose console is unreadable should not have to win
+	// a race against all of that to get a sync run in.  The window opens here and
+	// stays open until the locator is armed.
+	console_baud_.Begin();
+
 	// Play the PowerOn sequence synchronously before initialization tasks begin so the
 	// user hears immediate audio feedback on power-up.  Each duration unit is one
 	// main-loop tick (1000 / SAMPLES_PER_SECOND ms).  buzzer_phase_ is set to Idle
@@ -65,6 +74,10 @@ void Factory::Init(const Radio_s *radio) {
 	flash_.ResetChip();
 
 	archive_.Init();
+	// The stored rate lives on the external SPI flash, so this is the first point
+	// at which it can be read.  A detection that already fired during the boot
+	// delays above outranks it and is left alone.
+	console_baud_.ApplyStoredRate(archive_.GetConsoleBaud());
 	radio_adapter_ = new StRadioAdapter(radio);
 	comm_.Init(*radio_adapter_);
 	navigation_.Init(SAMPLES_PER_SECOND);
@@ -122,6 +135,11 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 
 	if (device_state_ != prev_device_state_) {
 		if (device_state_ == DeviceState::Armed) {
+			// Arming shuts the detection window for the rest of the session.  The
+			// console rate is a bench concern; leaving it movable by whatever the
+			// RX pin picks up during a flight buys nothing and risks the link the
+			// operator would want at recovery.
+			console_baud_.CloseWindow();
 			BuzzerReset();
 			buzzer_phase_ = BuzzerPhase::Arming;
 			// Full reset so the locator can be re-armed after a landing without a
@@ -504,14 +522,43 @@ void Factory::ProcessUART2Char(uint8_t uart_char) {
 // the ISR and handles them here, where flash access is serialized with
 // navigation's SPI2 transactions.
 void Factory::ServiceConsole() {
+    ServiceConsoleBaud();
     while (uart2_rx_tail_ != uart2_rx_head_) {
         const uint8_t c = uart2_rx_buf_[uart2_rx_tail_];
         uart2_rx_tail_ = (uart2_rx_tail_ + 1u) & (kUart2RxBufSize - 1u);
         HandleConsoleChar(c);
     }
+    // The live rate changed somewhere in the pass above.  Everything still queued
+    // was sampled at the OLD rate and is noise now, so it is dropped rather than
+    // handed to the console — otherwise a rate change that worked perfectly still
+    // paints a screen of garbage and reads as a failure.
+    if (console_baud_.TakeRateChanged())
+        uart2_rx_tail_ = uart2_rx_head_;
+}
+
+void Factory::ServiceConsoleBaud() {
+    console_baud_.Poll(HAL_GetTick());
+
+    uint32_t detected_rate = 0;
+    if (!console_baud_.TakeCommittedRate(detected_rate))
+        return;
+    const bool saved = archive_.SetConsoleBaud(detected_rate);
+    // Emitted at the rate just adopted, so the line is its own proof the link
+    // works — if the operator can read this, the recovery succeeded.
+    // Charset reset first: this line follows a stretch of garbage by definition,
+    // and that garbage may have left the terminal in DEC Special Graphics.
+    StaticStringWriter<96> line(&huart2_);
+    line.WriteMany(ConsoleBaud::kAsciiCharsetReset, "\r\nDIAG|BAUD: detected ", detected_rate,
+            saved ? " - saved\r\n" : " - SAVE FAILED\r\n");
 }
 
 void Factory::HandleConsoleChar(uint8_t uart_char) {
+    // The sync machinery gets first look.  It claims a byte only while a verified
+    // sync run is actually in progress; at a matched rate it never arms and every
+    // byte passes straight through.
+    if (console_baud_.OnByte(uart_char))
+        return;
+
     // Root-level command list.  Gated on an idle console for the same reason
     // 'm' and the bench-replay digits are: a menu owns the keyboard while it is
     // open, and a list of TOP-LEVEL commands is the wrong answer to a keypress

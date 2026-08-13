@@ -68,6 +68,13 @@ struct RocketRuntimeMetadata
     // it is never carried over the air by LocatorCfgChgRequest.  Sized for the
     // 15-char UART input limit + null terminator.
     char password[16] = {0};
+    // UART console baud rate.  Here for the same reason as the password: it is a
+    // host-link setting, and RocketPersistentSettings is the payload of the
+    // over-the-air LocatorSettings message, so a value placed there could be
+    // pushed to a locator by radio — muting the console of a device that may be
+    // out of reach.  Always one of ConsoleBaudRates::kStandardRates; 0 means
+    // "never set", which resolves to ConsoleBaudRates::kFallbackRate at load.
+    uint32_t console_baud = 0;
 };
 
 #pragma pack(pop)

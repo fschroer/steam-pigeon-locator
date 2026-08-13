@@ -18,6 +18,7 @@ extern "C" {
 #include "MX25L6436F.hpp"
 #include "StRadioAdapter.hpp"
 #include "Deployment.hpp"
+#include "ConsoleBaud.hpp"
 
 enum FlightProfileState {
 	kIdle = 0, kMetadataRequested = 1
@@ -67,6 +68,10 @@ private:
 	// navigation_.Update().
 	void ServiceConsole();
 	void HandleConsoleChar(uint8_t uart_char);
+	// Runs the sync-byte verify timeout and persists a detection once it commits.
+	// Called from ServiceConsole so it ticks on the 50 ms cycle whether or not any
+	// bytes arrived — a half-finished detection has to time out on its own.
+	void ServiceConsoleBaud();
 	// '?' console key: list the root-level commands.  The console was previously
 	// undiscoverable from the console itself — the command words and the
 	// single-key diagnostics were documented only in the manual and in
@@ -106,6 +111,9 @@ private:
 	Communication::Communication comm_;
 	MX25L6436F flash_;
 	Archive archive_;
+	// Declared ahead of config_ so it is constructed first: UserInteraction takes
+	// a reference to it.
+	ConsoleBaud console_baud_;
 	UserInteraction config_;
 	PowerManagement power_;
 	StRadioAdapter *radio_adapter_ = nullptr;

@@ -12,6 +12,7 @@ extern "C" {
 #include "Archive.hpp"
 #include "Deployment.hpp"
 #include "PasswordKdf.hpp"
+#include "ConsoleBaud.hpp"
 
 // Longest single WriteMany() a UART screen emits.  StaticString<N> holds N-1
 // characters plus a terminator, and AppendMany() silently discards the overflow
@@ -43,6 +44,7 @@ enum UserInteractionState
   EditDeviceName,
   EditNoseAxis,
   EditPassword,
+  EditConsoleBaud,
   DataHome,
   TestHome,
   TestDeploy1,
@@ -58,7 +60,8 @@ public:
   		Communication::Communication& comm,
 			Archive& archive,
 			Deployment& deploy,
-			UART_HandleTypeDef& huart2);
+			UART_HandleTypeDef& huart2,
+			ConsoleBaud& console_baud);
   void ProcessChar(uint8_t uart_char, DeviceState& device_state);
   void SetUserInteractionState(UserInteractionState user_interaction_state);
   // True when no menu is open, i.e. ProcessChar is only accumulating a command
@@ -74,12 +77,26 @@ private:
   Archive& archive_;
   Deployment& deploy_;
   UART_HandleTypeDef& huart2_;
+  ConsoleBaud& console_baud_;
 
   UserInteractionState user_interaction_state_ = WaitingForCommand;
   bool erase_all_pending_ = false;  // data menu: awaiting Y confirmation for full erase
   char* uart_line_ = new char[UART_LINE_MAX_LENGTH + 1];
   char* user_input_ = new char[USER_INPUT_MAX_LENGTH + 1];
-  const char* clear_screen_ = "\x1b[2J\r\0";
+  // ESC ( B  designates US-ASCII as G0; SI (0x0F) invokes G0.  Both are needed
+  // because a terminal can be put into DEC Special Graphics either by ESC ( 0 or
+  // by SO (0x0E) with G1 already designated as graphics.
+  //
+  // This is not decoration.  Garbage emitted while the console and the terminal
+  // are at different baud rates will, sooner or later, contain one of those
+  // sequences by chance — and once it does, the terminal renders every LOWERCASE
+  // letter as a line-drawing glyph while digits and capitals come through
+  // untouched (the graphics set only remaps 0x5F-0x7E).  The result reads exactly
+  // like a baud mismatch, survives power-cycling the locator, and is immune to
+  // changing baud rate on either end, because the broken state lives in the
+  // terminal.  Diagnosed on the bench 2026-08-12 after a copy/paste of the
+  // "garbled" config screen turned out to be byte-perfect.
+  const char* clear_screen_ = "\x1b[2J" "\x1b(B" "\x0f" "\r\0";
   const char* config_command_ = "config\0";
   const char* data_command_ = "data\0";
   const char* test_command_ = "test\0";
@@ -112,6 +129,16 @@ private:
   const char* nose_axis_z_text_ = "Z\0";
   const char* password_text_ = "p) Password:\t\t\t\t\0";
   const char* password_unset_text_ = "(not set)\0";
+  const char* console_baud_text_ = "b) Console Baud:\t\t\t\0";
+  // Says how to get back in, on the one screen an operator is looking at when
+  // they are about to make the console unreadable.  The procedure is deliberately
+  // stated here and not only in the manual, because the manual is not what you
+  // have in front of you when the terminal has just filled with garbage.
+  const char* console_baud_edit_text_ = "Edit Console Baud:\r\n"
+		  "Takes effect immediately - change your terminal to match.\r\n"
+		  "If the console goes unreadable, nothing is lost. Either:\r\n"
+		  " - set your terminal to the rate you want and hold Shift+U, or\r\n"
+		  " - step your terminal through the rates until this menu returns.\r\n\0";
   const char* password_edit_guidance_text_ = "Type new password (blank clears). Enter to save, Esc to cancel.\r\n\0";
   const char* num_edit_guidance_text_ = "[ = down, ] = up. Hit Enter to update, Esc to cancel.\r\n\0";
   const char* text_edit_guidance_text_ = "Type text. Hit Enter to update, Esc to cancel.\r\n\0";
@@ -152,8 +179,9 @@ private:
   // the first data row ran onto the header line.
   static constexpr char export_header_text_[] = "time_ms,raw_baro_agl_m,fused_agl_m,raw_baro_vel_mps,fused_vspeed_mps,accel_x_g,accel_y_g,accel_z_g,gyro_x_dps,gyro_y_dps,gyro_z_dps,lat_deg,lon_deg,flight_state,armed,oc_start_us,oc_end_us,process_start_us,process_dur_us,tilt_deg,q_w,q_x,q_y,q_z,fix_type,num_sv";
 
-  // clear_screen_ ("\x1b[2J\r") + crlf_ ("\r\n") share the header's line buffer.
-  static constexpr size_t kExportHeaderOverheadChars = 5u + 2u;
+  // clear_screen_ ("\x1b[2J" + "\x1b(B" + SI + "\r" = 9) + crlf_ ("\r\n" = 2)
+  // share the header's line buffer.
+  static constexpr size_t kExportHeaderOverheadChars = 9u + 2u;
   static_assert(sizeof(export_header_text_) - 1u + kExportHeaderOverheadChars
                     <= UART_LINE_MAX_LENGTH - 1u,
                 "CSV export header + clear-screen + CRLF exceeds the UART line buffer. "
@@ -219,6 +247,10 @@ private:
   int lora_channel_;
   char device_name_[device_name_length];
   NoseAxis nose_axis_;
+  // Index into ConsoleBaudRates::kStandardRates rather than the rate itself, so
+  // the [ / ] edit keys step between legal rates instead of over a numeric range
+  // that is mostly illegal values.
+  int console_baud_index_ = 0;
 
   int MakeLine(char *target, const char *source1);
   int MakeLine(char *target, const char *source1, const char *source2);
@@ -236,6 +268,10 @@ private:
   void AdjustConfigNumericSetting(uint8_t uart_char, int *config_mode_setting, int max_setting_value, bool tenths);
   void AdjustConfigTextSetting(uint8_t uart_char, char *config_mode_setting);
   void AdjustPasswordSetting(uint8_t uart_char);
+  void AdjustConsoleBaudSetting(uint8_t uart_char);
+  // Position of `rate` in ConsoleBaudRates::kStandardRates, or the index of the
+  // fallback rate when it is not in the table.
+  static int ConsoleBaudIndexOf(uint32_t rate);
   void DisplayDataMenu();
   void DisplayTestMenu();
   void ExportData(uint16_t archive_position);

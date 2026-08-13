@@ -1,4 +1,5 @@
 #include "Archive.hpp"
+#include "ConsoleBaudRates.hpp"
 #include "CompactConfigJournal.hpp"
 #include "Types.hpp"
 #include "RandomNumGen.hpp"
@@ -190,6 +191,18 @@ bool Archive::SaveLocatorSettings(RocketPersistentSettings &locator_settings) {
 bool Archive::SetPassword(const char* password) {
 	std::strncpy(runtime_.password, password ? password : "", sizeof(runtime_.password) - 1);
 	runtime_.password[sizeof(runtime_.password) - 1] = '\0';
+	return runtimeStore_.SaveIfChanged(runtime_, runtime_saved_);
+}
+
+uint32_t Archive::GetConsoleBaud() const {
+	return ConsoleBaudRates::IsStandardRate(runtime_.console_baud) ? runtime_.console_baud
+			: ConsoleBaudRates::kFallbackRate;
+}
+
+bool Archive::SetConsoleBaud(uint32_t baud) {
+	if (!ConsoleBaudRates::IsStandardRate(baud))
+		return false;
+	runtime_.console_baud = baud;
 	return runtimeStore_.SaveIfChanged(runtime_, runtime_saved_);
 }
 
