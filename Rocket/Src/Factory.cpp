@@ -523,21 +523,37 @@ void Factory::ProcessUART2Char(uint8_t uart_char) {
 // navigation's SPI2 transactions.
 void Factory::ServiceConsole() {
     ServiceConsoleBaud();
+    // Poll() above can step the rate (a probe stop, or an adopted measurement), so
+    // check before draining as well as during: anything queued was sampled at the
+    // previous rate.
+    if (console_baud_.TakeRateChanged())
+        uart2_rx_tail_ = uart2_rx_head_;
     while (uart2_rx_tail_ != uart2_rx_head_) {
         const uint8_t c = uart2_rx_buf_[uart2_rx_tail_];
         uart2_rx_tail_ = (uart2_rx_tail_ + 1u) & (kUart2RxBufSize - 1u);
         HandleConsoleChar(c);
+        // Checked INSIDE the loop, not after it.  When a measurement is adopted
+        // mid-drain, every byte still queued was sampled at the old rate and is
+        // noise — and the next thing to look at those bytes is the sync
+        // verifier, which needs the sync byte and will abandon the measurement on
+        // the first stale one it sees.  Draining the rest before flushing threw
+        // away the detection that had just succeeded.
+        if (console_baud_.TakeRateChanged()) {
+            uart2_rx_tail_ = uart2_rx_head_;
+            break;
+        }
     }
-    // The live rate changed somewhere in the pass above.  Everything still queued
-    // was sampled at the OLD rate and is noise now, so it is dropped rather than
-    // handed to the console — otherwise a rate change that worked perfectly still
-    // paints a screen of garbage and reads as a failure.
-    if (console_baud_.TakeRateChanged())
-        uart2_rx_tail_ = uart2_rx_head_;
 }
 
 void Factory::ServiceConsoleBaud() {
     console_baud_.Poll(HAL_GetTick());
+
+    // Keep re-asserting the ASCII charset for a while after a rate change: the
+    // operator switches their terminal at a moment this code cannot know, and the
+    // garbage they saw in between can leave it drawing lowercase as line art.
+    if (console_baud_.DueForCharsetReset(HAL_GetTick()))
+        HAL_UART_Transmit(&huart2_, reinterpret_cast<const uint8_t*>(ConsoleBaud::kAsciiCharsetReset),
+                ConsoleBaud::kAsciiCharsetResetLen, 10);
 
     uint32_t detected_rate = 0;
     if (!console_baud_.TakeCommittedRate(detected_rate))

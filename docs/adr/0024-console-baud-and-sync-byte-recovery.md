@@ -197,6 +197,62 @@ reset the terminal, unreadable paste means a real mismatch.
 *bytes* against the *rendering* before touching the peripheral. Paste is the
 one-second test that separates the two.
 
+## Hardware verification (2026-08-13)
+
+Round-trip testing passed on **both** the locator and the receiver:
+
+- The rate changed deliberately from the console menu, in both directions, with
+  the terminal followed over each time — the setting takes effect and sticks,
+  and the post-change suppression window does not let the detector revert it.
+- Sync-byte recovery exercised in the working direction (device faster than the
+  terminal): holding `U` produces `DIAG|BAUD: detected <rate> - saved`, the rate
+  is persisted, and the confirmation arrives legibly at the newly adopted rate.
+- Normal console use at a matched rate does not arm the detector.
+- The DEC Special Graphics fix holds: screens redraw in readable lowercase after
+  a period of mismatched-rate garbage.
+
+The direction the limit below describes — device slower than the terminal — was
+not made to work and is not expected to. It is documented in the user manual with
+the eight-rate sweep as its answer.
+
+## Accepted limit (2026-08-13): recovery lowers the rate, it cannot raise it
+
+**Recovery works when the device is FASTER than the terminal, and never when it
+is slower.** Confirmed repeatedly on both devices, across every variant tried.
+
+Mechanism: ABR does not measure raw edges in isolation — the incoming character
+must be framable at the divider currently loaded. When the device is faster it
+oversamples the host's longer bits and frames them easily. When it is slower it
+cannot: at 115200 against a 921600 host each incoming bit is ~1.1 µs against an
+8.7 µs bit period, so the line never stays low long enough to qualify as a start
+bit and the detector has nothing to measure.
+
+What was tried against it, and rejected: error-based and byte-rate triggers, the
+two merged into one evidence pool, thresholds from 16-in-300 ms down to
+2-in-12 s, verify windows from 250 ms to 4 s, and a **probe sweep** that stepped
+the device's own divider through the whole rate table hunting for a stop that
+could frame the host. The sweep ran 33 stops in one bench run — four passes over
+the table, landing on the host's exact rate several times — and received four
+bytes total with no usable measurement, most likely because the USART withholds
+received data while an ABR request is pending, which makes such a sweep blind by
+construction. None of it succeeded once. All of it is reverted.
+
+**Why the limit is acceptable rather than a defect.** The asymmetry falls on the
+useful side. A device set FASTER than the operator's adapter cannot be reached at
+any rate they can produce — that is the genuinely stuck case, and it is the one
+recovery fixes. A device set slower is reachable by definition, so stepping the
+terminal through the eight rates finds it by hand in under a minute. The manual
+states the direction plainly and gives the sweep as the answer for the other one.
+
+**Process note.** Roughly ten bench cycles went into the failing direction. Two
+things would have shortened that: the counters instrumented every failure path
+while leaving *success* silent, so a completed recovery and an abandoned one both
+read identically; and the two rates in play during each test were never written
+down, so at least one round was run with the device and terminal on the same rate
+— a configuration in which the recovery path is correctly a no-op, since the sync
+byte `U` is printable and is deliberately never counted as evidence at a matched
+rate.
+
 ## Sync byte resolved (2026-08-13): `U` works, with two triggers
 
 `0x55` failed twice before the arming logic was right, and was reverted once on

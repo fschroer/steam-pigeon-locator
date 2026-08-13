@@ -26,6 +26,15 @@ inline constexpr std::size_t kStandardRateCount = sizeof(kStandardRates) / sizeo
 // and still far tighter than the ~50% gap between adjacent entries.
 inline constexpr uint32_t kSnapTolerancePercent = 3u;
 
+// Position of `rate` in kStandardRates, or the fallback rate's index when it is
+// not in the table.
+inline constexpr std::size_t IndexOf(uint32_t rate) {
+	for (std::size_t i = 0; i < kStandardRateCount; i++)
+		if (kStandardRates[i] == rate)
+			return i;
+	return kStandardRateCount - 1;  // kFallbackRate is the last entry
+}
+
 inline constexpr bool IsStandardRate(uint32_t rate) {
 	for (std::size_t i = 0; i < kStandardRateCount; i++)
 		if (kStandardRates[i] == rate)

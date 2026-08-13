@@ -20,130 +20,88 @@
 // operator has not got configured at the moment they discover they cannot read
 // their console.  'U' is a character anyone can hold down anywhere.
 //
-// This was tried once and reverted (ADR-0024) before the real defect was
-// understood: the mismatch gate fired on the operator's own deliberate rate
-// change, and 0x55 adopts a plausible-but-wrong measurement from garbage where
-// 0x7F rejects it.  0x7F was masking the bug, not avoiding it.  With
-// kPostChangeSuppressMs the detector no longer arms during a deliberate change,
-// which is what makes 0x55 viable.
+// ── The limit, established on the bench and NOT worth re-litigating ──────────
+// **Recovery can bring the rate DOWN to meet the terminal.  It cannot raise it.**
 //
-// Either mode measures across several bit-periods rather than the single start
-// bit mode ONSTARTBIT would use, and that span is what makes the top of the rate
-// table usable: at 48 MHz, 921600 baud is only ~52 clocks per bit, so a one-bit
-// measurement gives ±1.9% and eats most of the 8N1 budget, while measuring across
-// the frame brings quantisation down to a few tenths of a percent.
+// It works when this device is the FASTER of the two: it oversamples the host's
+// slower bits, frames a character, and ABR measures it.  When this device is the
+// slower one it never fires — at 115200 against a 921600 host each incoming bit
+// is ~1.1 us against an 8.7 us bit period, so the line never stays low long
+// enough to qualify as a start bit and the detector has nothing to measure.
 //
-// 0x7F remains the fallback of record: revert kSyncByte and the ABRMODE line in
-// ApplyRate together.
+// That was attacked at length: error-based and byte-rate triggers, a merged
+// evidence pool, thresholds from 16-in-300ms down to 2-in-12s, verify windows
+// from 250 ms to 4 s, and a probe sweep that stepped this device's own divider
+// through the whole table looking for a stop that could frame the host.  The
+// sweep ran 33 stops in one bench run — four passes over the table, landing on
+// the host's exact rate several times — and received four bytes total, with no
+// usable measurement.  Very likely because the USART withholds received data
+// while an ABR request is pending, which makes such a sweep blind by
+// construction.  None of it ever succeeded once.
 //
-// The measurement does not care that a mismatched link garbles the byte on
-// arrival: ABR times the waveform, not the decoded byte.  Verification (below)
-// works because once the measured rate is adopted, the following bytes decode
-// correctly.
-//
-// The measurement only *identifies* which rate the host is at — the UART is then
-// re-inited at the matching entry from ConsoleBaudRates::kStandardRates, so the
-// divider ends up exact rather than merely within tolerance.
-
-// Called from the USART ISR for every framing/noise error, BEFORE the HAL gets a
-// chance to consume it.
-//
-// This is not a style choice.  HAL_UART_IRQHandler clears FE and NE inside the
-// interrupt (stm32wlxx_hal_uart.c:43 and :51) and USART2_IRQHandler calls it
-// unconditionally, so by the time the main loop looks, the flags are always gone.
-// The first version of this gate polled those flags from Poll() and therefore
-// could never observe an error at all: the detector never armed, and the whole
-// recovery path was dead code that failed silently — the console simply ignored
-// the operator's sync run.  huart->ErrorCode does survive, but HAL_UART_Transmit
-// resets it on every console write, so it is not dependable either.
-extern "C" void ConsoleBaud_NoteRxError(void);
-
-// Called after every USART re-init, for whoever owns the console's receive.
-//
-// HAL_UART_Init cancels any pending HAL_UART_Receive_IT — RxState goes back to
-// READY and RxISR is cleared — and nothing re-arms it, because the completion
-// callback that normally would is exactly what stops firing.  A build whose
-// console RX runs on HAL_UART_Receive_IT therefore goes deaf on its first rate
-// change, taking the sync-byte recovery with it (it has nothing left to listen
-// to).  A build driving RX from the LL RXNE interrupt is unaffected, since
-// ApplyRate re-enables that directly.
-//
-// Weakly defined as a no-op; the owner of the receive overrides it.
-extern "C" void ConsoleBaud_OnUartReinit(void);
-
+// The asymmetry falls the right way, which is why this is documented rather than
+// engineered around: a device set FASTER than the operator's adapter cannot be
+// reached at any rate they can produce, and that is the case recovery fixes.  A
+// device set too slow is reachable by definition, so stepping the terminal
+// through the eight supported rates finds it by hand in under a minute.
 class ConsoleBaud {
 public:
+	// Called from the USART ISR for every framing/noise error, BEFORE the HAL gets
+	// a chance to consume it.
+	//
+	// HAL_UART_IRQHandler clears FE and NE inside the interrupt
+	// (stm32wlxx_hal_uart.c:43 and :51) and USART2_IRQHandler calls it
+	// unconditionally, so by the time the main loop looks, the flags are always
+	// gone.  An earlier version polled them from Poll() and therefore could never
+	// observe an error at all: the detector never armed and the whole recovery
+	// path was dead code that failed silently.  huart->ErrorCode does survive, but
+	// HAL_UART_Transmit resets it on every console write, so it is not dependable
+	// either.
+
+	// Designate US-ASCII as G0 (ESC ( B) and invoke it (SI, 0x0F).  Emitted with
+	// any message that may be the first thing a terminal sees after a period of
+	// mismatched-rate garbage: that garbage can contain ESC ( 0 or SO by chance and
+	// leave the terminal drawing every lowercase letter as a line-drawing glyph
+	// while digits and capitals come through fine.  It looks exactly like the baud
+	// fault it follows, survives power-cycling the device, and is immune to
+	// changing the rate at either end, because the broken state is in the terminal.
+	static constexpr const char *kAsciiCharsetReset = "\x1b(B" "\x0f";
+	static constexpr uint16_t kAsciiCharsetResetLen = 4u;
+
+	// The operator switches their terminal at a moment this code cannot know, so
+	// the designation is re-sent once a second for a while after any rate change
+	// rather than only riding along with a screen redraw.  Four non-printing bytes.
+	static constexpr uint32_t kCharsetResetWindowMs = 30000u;
+	static constexpr uint32_t kCharsetResetIntervalMs = 1000u;
+
 	// ── Arming, and why it is gated at all ────────────────────────────────────
 	// ABRMODE selects *how* the USART measures, not *when*.  With ABREN set the
 	// hardware measures the NEXT character it receives — whatever that character
 	// is — and writes the result straight into BRR.  Leaving it armed during
 	// healthy operation therefore makes every keystroke a measurement, and any
-	// character that is not the sync byte corrupts the divider before software
-	// gets a chance to look at it.  That is what the first cut of this file did,
-	// and what it did on the bench: input kept working (RX was re-locking to the
-	// host on every keystroke) while output turned to garbage (TX was left on
-	// whatever the last letter happened to measure).
+	// character that is not the sync byte corrupts the divider before software can
+	// look at it.  That is what the first cut of this file did, and what it did on
+	// the bench: input kept working (RX was re-locking to the host on every
+	// keystroke) while output turned to garbage.
 	//
-	// So the detector is armed only on positive evidence that the two ends
-	// disagree.  There are two independent triggers because neither covers both
-	// directions on its own.
-	//
-	// ── Trigger 1: framing-error burst ────────────────────────────────────────
-	// Effective when this device is the SLOWER of the two.  Errors must be a
-	// SUSTAINED burst, not a scattering: at least kMismatchErrorsToArm of them,
-	// spanning at least kMismatchSustainMs.  A cable being plugged in or a
-	// terminal being reconfigured produces a short flurry and is ignored.
-	// Requiring a duration as well as a count keeps the behaviour the same on both
-	// devices, whose service loops run at very different rates.
-	static constexpr uint32_t kMismatchErrorsToArm = 8u;
-	static constexpr uint32_t kMismatchSustainMs = 150u;
-	// A gap longer than this ends the burst and restarts the count, so unrelated
-	// errors minutes apart never accumulate their way to the threshold.
-	static constexpr uint32_t kMismatchIdleResetMs = 400u;
-
-	// ── Trigger 2: byte-rate burst ────────────────────────────────────────────
-	// Framing errors alone do not detect a mismatch when this device is the FASTER
-	// of the two.  Measured on the bench at device 921600 / host 115200: holding
-	// the sync key produced seven framing errors in total, nowhere near the
-	// threshold.  The ratio is exactly 8, so each host bit spans 8 device
-	// bit-times and each host byte spans 80 — exactly 8 device frames — and with
-	// 0x55's regular alternation those frames land with valid-looking stop bits.
-	// The device decodes a tidy repeating pattern of wrong bytes and reports
-	// almost no errors.  The regularity that makes 0x55 good to measure makes it
-	// nearly invisible to an error-based trigger.
-	//
-	// What IS unmistakable is the byte rate: the same mismatch multiplies it by
-	// the ratio.  A held key auto-repeats at ~30/s at worst, so kRxBurstBytesToArm
-	// bytes inside kRxBurstWindowMs (~53/s) is beyond anything a keyboard produces
-	// while still catching a 2:1 mismatch, the narrowest gap in the rate table.
-	//
-	// Only bytes that could NOT be console input are counted (see
-	// IsPlausibleConsoleByte).  Pasting text into the terminal at a matched rate
-	// easily beats this rate, and must not arm anything; mismatch garbage is
-	// mostly non-printable, so the distinction does the work.
-	static constexpr uint32_t kRxBurstBytesToArm = 16u;
-	static constexpr uint32_t kRxBurstWindowMs = 300u;
-	static constexpr uint32_t kRxBurstIdleResetMs = 300u;
+	// So the detector arms only on positive evidence that the two ends disagree —
+	// framing/noise errors from the ISR and received bytes that could not be
+	// console input, pooled together.  A matched link produces neither, so it never
+	// arms and the hardware never touches BRR.
+	static constexpr uint32_t kEvidenceToArm = 4u;
+	static constexpr uint32_t kEvidenceWindowMs = 3000u;
 
 	// After a DELIBERATE rate change the two ends legitimately disagree until the
 	// operator switches their terminal, so anything arriving in that window looks
-	// exactly like a fault.  Without this suppression the triggers fire on the
-	// operator's own rate change and the detector starts measuring garbage — which
-	// is how the 0x55 experiment failed on the bench, and what mode 0x7F was
-	// quietly masking by rejecting that garbage instead of adopting it.
-	static constexpr uint32_t kPostChangeSuppressMs = 10000u;
-	// Brief hold-off after a failed attempt so a continuously noisy line cannot
-	// churn arm/measure/restore back to back.
+	// exactly like a fault.  Without this the triggers fire on the operator's own
+	// change and the detector measures their OLD rate, quietly reverting what they
+	// just set.  Long enough to find a baud dropdown.
+	static constexpr uint32_t kPostChangeSuppressMs = 5000u;
+	// Brief hold-off after a failed attempt so a noisy line cannot churn
+	// arm/measure/restore back to back.
 	static constexpr uint32_t kAbandonBackoffMs = 2000u;
 	// Short hold-off at boot, to ride out USB-serial enumeration transients.
 	static constexpr uint32_t kStartupSuppressMs = 1500u;
-
-	// Designate US-ASCII as G0 (ESC ( B) and invoke it (SI, 0x0F).  Prefixed to any
-	// message that may be the first thing a terminal sees after a period of
-	// mismatched-rate garbage: that garbage can contain ESC ( 0 or SO by chance and
-	// leave the terminal rendering every lowercase letter as a line-drawing glyph,
-	// which looks exactly like the baud problem it follows.
-	static constexpr const char *kAsciiCharsetReset = "\x1b(B" "\x0f";
 
 	static constexpr uint8_t kSyncByte = 0x55u;  // ASCII 'U'
 	// How many 'U' bytes the host must send.  The hardware consumes the first to
@@ -152,20 +110,17 @@ public:
 	// one.  A stray 'U'-shaped glitch moves the rate for a moment, fails the
 	// check, and the previous rate goes back.
 	//
-	// The operator is told to hold the key down rather than count keystrokes: the
-	// leading bytes of the run are what arm the detector in the first place, so the
-	// useful instruction is "send a stream", not "send exactly N".
+	// The operator is told to hold the key rather than count presses: the leading
+	// bytes are what arm the detector in the first place.
 	static constexpr uint8_t kSyncBytesRequired = 3u;
 	// How long the rest of the run has to arrive before the attempt is abandoned
-	// and the previous rate restored.  Deliberately tight: the confirming bytes
-	// come from the same held key that armed the detector, so they are already in
-	// flight — even at 9600 baud a byte is ~1 ms.  This bounds how long a bad
-	// measurement can hold the console at the wrong rate, so it is a damage limit
-	// rather than a patience allowance.
-	static constexpr uint32_t kVerifyTimeoutMs = 250u;
+	// and the previous rate restored.  This bounds how long a wrong measurement can
+	// hold the console at a wrong rate — which only ever happens during a recovery
+	// attempt, since a matched link never arms the detector.
+	static constexpr uint32_t kVerifyTimeoutMs = 750u;
 	// How long the detector stays armed waiting for a measurement before giving up
-	// and putting the known-good divider back.  A burst of framing errors from a
-	// cable being plugged in must not leave the hardware armed indefinitely.
+	// and putting the known-good divider back.  A flurry of errors from a cable
+	// being plugged in must not leave the hardware armed indefinitely.
 	static constexpr uint32_t kArmTimeoutMs = 3000u;
 
 	explicit ConsoleBaud(UART_HandleTypeDef &uart) : uart_(uart) {
@@ -175,8 +130,8 @@ public:
 	// the fallback rate and opens the detection window.
 	void Begin();
 
-	// Call once Archive::Init() has made the stored rate readable.  Adopts it if
-	// it is valid and nothing has been detected in the meantime — a detection that
+	// Call once Archive::Init() has made the stored rate readable.  Adopts it if it
+	// is valid and nothing has been detected in the meantime — a detection that
 	// already fired during boot is the more recent statement of intent and wins.
 	void ApplyStoredRate(uint32_t stored_rate);
 
@@ -187,25 +142,25 @@ public:
 	// swallowing it would eat a keystroke for nothing.
 	bool OnByte(uint8_t byte);
 
-	// Call from the main loop.  Runs the verify timeout and reverts a detection
-	// that never got confirmed.
+	// Call from the main loop.  Runs the arm and verify timeouts and reverts a
+	// detection that never got confirmed.
 	void Poll(uint32_t now_ms);
 
 	// Close the detection window for good.  Called on arm: a live flight must not
 	// be able to have its console rate moved by whatever the cable picks up.
 	//
-	// Deliberately NOT called on first console use.  An earlier version did that,
-	// on the theory that a readable link means there is nothing to recover — but it
-	// also meant an operator who mistyped the rate had one power cycle to fix it.
-	// With the triggers above, a matched link produces no evidence and never arms
-	// anything, so leaving the window open costs nothing.
+	// Deliberately NOT called on first console use.  An earlier version did, on the
+	// theory that a readable link means there is nothing to recover — but it also
+	// meant an operator who mistyped the rate had one power cycle to fix it.  With
+	// the evidence gate above, a matched link never arms anything, so leaving the
+	// window open costs nothing.
 	void CloseWindow();
 
 	uint32_t CurrentRate() const {
 		return current_rate_;
 	}
 
-	// Set the rate explicitly, from the `baud` console command.  Rejects anything
+	// Set the rate explicitly, from the console's baud setting.  Rejects anything
 	// outside the table.  Applies immediately; the caller persists it.
 	bool SetRate(uint32_t rate);
 
@@ -223,17 +178,22 @@ public:
 		return changed;
 	}
 
+	// True at most once per kCharsetResetIntervalMs, for kCharsetResetWindowMs
+	// after a rate change.  Caller emits kAsciiCharsetReset.
+	bool DueForCharsetReset(uint32_t now_ms);
+
 private:
 	enum class State : uint8_t {
-		Watching,   // window open, ABR OFF, both triggers accumulating
-		Armed,      // mismatch evidence seen, ABR requested, awaiting a measurement
+		Watching,   // window open, ABR OFF, evidence accumulating
+		Armed,      // evidence seen, ABR requested, awaiting a measurement
 		Verifying,  // measurement applied; counting confirmed sync bytes
 		Closed      // locked to current_rate_; ABR off and not watching
 	};
 
 	// The one place that knows the re-init dance: HAL_UART_Init() resets the FIFO
-	// configuration and re-runs MspInit, which drops the interrupt enables main()
-	// set at boot.  Both have to be put back or the console degrades silently.
+	// configuration and cancels any HAL-driven receive, and the ABREN bit needs
+	// writing through the HAL's own advanced-feature path.  All of it has to be put
+	// back or the console degrades silently.
 	void ApplyRate(uint32_t rate, bool rearm_abr);
 	void ArmDetection();
 	// Put the known-good divider back and return to watching.  Every path that
@@ -241,19 +201,22 @@ private:
 	// overwritten BRR by the time the result can be inspected.
 	void AbandonDetection();
 	bool TryTakeMeasurement();
-	// Drains the ISR's error counter and returns true once a dense enough burst has
-	// accumulated to conclude the two ends are at different rates.  Always drains,
-	// including while suppressed, so errors raised during a deliberate rate change
-	// cannot be counted later against a window they did not occur in.
+	// Drains the ISR's error counter into the evidence pool.
 	bool MismatchEvidenceSeen(uint32_t now_ms);
 	void SuppressGateFor(uint32_t ms);
-	// Feeds the byte-rate trigger.  Returns true when the burst is dense enough to
-	// arm; the caller then treats the byte as consumed.
+	// Feeds the byte source into the evidence pool.
 	bool RxBurstEvidenceSeen(uint8_t byte, uint32_t now_ms);
+	// The single windowed accumulator both sources feed.  They were separate
+	// counters and each could starve while the other's evidence went unused.
+	bool NoteEvidence(uint32_t now_ms, uint32_t count);
 	void ResetTriggers();
 	// Anything the console could legitimately be sent: printable ASCII plus the
 	// editing keys.  Bytes failing this are what a rate mismatch delivers, and are
-	// the only ones the burst trigger counts.
+	// the only ones the byte source counts — so pasting text at a matched rate can
+	// never arm anything, however fast it arrives.
+	//
+	// Note this makes the sync byte itself ('U', printable) invisible as evidence
+	// at a MATCHED rate, which is correct: there is nothing to recover there.
 	static bool IsPlausibleConsoleByte(uint8_t byte) {
 		return (byte >= 0x20u && byte <= 0x7Eu) || byte == 13u || byte == 10u || byte == 8u || byte == 27u;
 	}
@@ -263,16 +226,30 @@ private:
 	State state_ = State::Watching;
 	uint32_t current_rate_ = ConsoleBaudRates::kFallbackRate;
 	uint32_t rate_before_detect_ = ConsoleBaudRates::kFallbackRate;
-	uint32_t verify_deadline_ms_ = 0;
+	uint32_t deadline_ms_ = 0;
 	uint32_t committed_rate_ = 0;
-	uint8_t sync_bytes_seen_ = 0;
-	uint32_t mismatch_errors_ = 0;
-	uint32_t mismatch_window_start_ms_ = 0;
-	uint32_t mismatch_last_error_ms_ = 0;
-	uint32_t rx_burst_count_ = 0;
-	uint32_t rx_burst_start_ms_ = 0;
-	uint32_t rx_burst_last_ms_ = 0;
+	uint32_t evidence_count_ = 0;
+	uint32_t evidence_start_ms_ = 0;
 	uint32_t gate_suppressed_until_ms_ = 0;
+	uint32_t charset_reset_until_ms_ = 0;
+	uint32_t charset_reset_next_ms_ = 0;
+	uint8_t sync_bytes_seen_ = 0;
 	bool detected_ = false;
 	bool rate_changed_ = false;
 };
+
+// Called from the USART ISR for every framing/noise error — see the note at the
+// top of the class.
+extern "C" void ConsoleBaud_NoteRxError(void);
+
+// Called after every USART re-init, for whoever owns the console's receive.
+//
+// HAL_UART_Init cancels any pending HAL_UART_Receive_IT — RxState goes back to
+// READY and RxISR is cleared — and nothing re-arms it, because the completion
+// callback that normally would is exactly what stops firing.  A build whose
+// console RX runs on HAL_UART_Receive_IT therefore goes deaf on its first rate
+// change, taking the recovery path with it.  A build driving RX from the LL RXNE
+// interrupt is unaffected, since ApplyRate re-enables that directly.
+//
+// Weakly defined as a no-op; the owner of the receive overrides it.
+extern "C" void ConsoleBaud_OnUartReinit(void);

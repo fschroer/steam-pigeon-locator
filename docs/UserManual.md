@@ -1101,7 +1101,7 @@ This gives you everything the locator recorded, at full rate, for analysis in a 
 | Locator Settings / Flight Profiles aren't in the menu | They only appear while the locator is powered, in range, and **disarmed** (§2.1). |
 | Ready-beep never starts after arming | Flight memory full (§3.6) or battery too low. **Don't launch** (§7.4). |
 | Battery gauge reads empty on a battery you know is charged | The gauge cannot tell a flat cell from a broken battery-sense circuit — both read empty. Before you replace the battery, check it over USB-C: press `v` at the console (disarmed). If the readings there don't respond at all, the fault is in the locator, not the battery, and it needs service (Appendix D). |
-| USB-C console shows nothing, or a screen of random characters | Baud mismatch — not a fault, and nothing is lost. Set your terminal to the rate you want and **hold Shift+U** for a second; the device will match you and say so (Appendix D). |
+| USB-C console shows nothing, or a screen of random characters | Baud mismatch — not a fault, and nothing is lost. Set your terminal to the rate you want and **hold Shift+U** for a second; the device will match you and say so. If nothing happens, the device is set *slower* than your terminal — step through the eight rates instead (Appendix D). |
 | Console text is garbled but **pastes correctly**, digits and CAPITALS readable | Not a baud problem at all. A stray control code has put your terminal into its line-drawing character set. **Reset the terminal.** Changing baud rate or power-cycling the device will not fix it (Appendix D). |
 | Can't disarm | Not while it's flying. This is intentional (§7.5). |
 | Telemetry drops out mid-flight | Normal at range and altitude. The rocket is unaffected (§8.4). |
@@ -1276,7 +1276,7 @@ The cost of a slower rate is the CSV export (§10.4), which is the one thing on 
 
 The second case is easy to mistake for the first. Its tell is that **digits and CAPITAL letters look fine while lowercase letters turn into line-drawing symbols** — a terminal that has been switched into its line-drawing character set by a stray control code, which the random bytes of a real baud mismatch can produce by chance. Once you have reset the terminal it will not come back on its own.
 
-**The fix for a genuine mismatch — hold down `U`.** Set your terminal to the rate **you** want, 8-N-1, then hold Shift+U for a second or two. The device recognises the stream, measures your rate from it, and matches you, replying:
+**The fix — hold down `U`.** Set your terminal to the rate **you** want, 8-N-1, then hold Shift+U for a second or two. The device recognises the stream, measures your rate from it, and matches you, replying:
 
 ```
 DIAG|BAUD: detected 115200 - saved
@@ -1286,9 +1286,11 @@ That line arriving legibly *is* the confirmation — it is sent at the newly mat
 
 Hold the key rather than counting presses: the leading characters are what tell the device the two ends disagree, and the rest are the measurement and its confirmation.
 
-⏱️ **If you have just changed the rate yourself, wait about 10 seconds before holding `U`.** The device deliberately ignores mismatch signals for a few seconds after a deliberate change, so that switching your terminal over does not look like a cry for help.
+⏱️ **If you have just changed the rate yourself, wait about five seconds before holding `U`.** The device deliberately ignores mismatch signals for a few seconds after a deliberate change — otherwise switching your terminal over would look like a cry for help, and it would helpfully undo the change you just made.
 
-**If that does not work — find the rate by hand.** The device is always at one of eight rates, so this takes under a minute and cannot fail: set your terminal to **9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600** in turn, and at each one press Enter and type `config`. When the menu appears, that is the device's rate. Then press `b` and set the rate you actually want.
+⚠️ **This brings the device's rate DOWN to meet your terminal. It cannot bring it up.** So it works when the device is set *faster* than your terminal — which is the case you actually get stuck in, because a device set faster than your adapter can manage cannot be reached at any rate you are able to produce. If the device is set *slower* than your terminal, holding `U` will do nothing; use the method below instead, which works in that direction and is quick, because a slow device is one your terminal can always reach.
+
+**If holding `U` does nothing — find the rate by hand.** The device is always at one of eight rates, so this takes under a minute and cannot fail: set your terminal to **9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600** in turn, and at each one press Enter and type `config`. When the menu appears, that is the device's rate. Then press `b` and set the rate you actually want.
 
 Nothing is lost and nothing is broken while you are hunting; a device at the wrong rate is simply not being understood, and it recovers completely the moment the two ends agree.
 

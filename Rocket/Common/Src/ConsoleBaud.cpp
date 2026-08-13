@@ -4,7 +4,7 @@
 // Bumped from the USART ISR; drained in MismatchEvidenceSeen.  A plain counter
 // rather than a flag so a burst can be told from a single transient.  The
 // read-and-subtract below can race an ISR increment and lose at most one count,
-// which is immaterial against a threshold of eight.
+// which is immaterial against the arming threshold.
 namespace {
 volatile uint32_t g_rx_error_count = 0;
 }
@@ -58,13 +58,6 @@ void ConsoleBaud::ApplyRate(uint32_t rate, bool rearm_abr) {
 	if (rearm_abr) {
 		// Paired with ConsoleBaud::kSyncByte — change both together or the hardware
 		// will be measuring for a frame shape the operator is not sending.
-		//
-		// 0x55 mode failed once before (ADR-0024) and is back only because the
-		// defect behind that failure has since been fixed: the mismatch gate used to
-		// fire on the operator's own rate change, and 0x55 adopts garbage where 0x7F
-		// rejects it.  With kPostChangeSuppressMs in place the detector no longer
-		// arms during a deliberate change at all.  If this regresses again, revert
-		// this line and kSyncByte together — 0x7F is the fallback of record.
 		uart_.AdvancedInit.AutoBaudRateMode = UART_ADVFEATURE_AUTOBAUDRATE_ON0X55FRAME;
 	}
 
@@ -75,16 +68,20 @@ void ConsoleBaud::ApplyRate(uint32_t rate, bool rearm_abr) {
 	HAL_UARTEx_SetTxFifoThreshold(&uart_, UART_TXFIFO_THRESHOLD_1_8);
 	HAL_UARTEx_SetRxFifoThreshold(&uart_, UART_RXFIFO_THRESHOLD_1_8);
 	HAL_UARTEx_EnableFifoMode(&uart_);
-	// Init re-runs MspInit, which drops the interrupt enables main() sets once at
-	// boot and would otherwise never set again.
 	LL_USART_EnableIT_RXNE(uart_.Instance);
 	LL_USART_EnableIT_ERROR(uart_.Instance);
 	// Re-arm a HAL-driven receive if this build has one; HAL_UART_Init just
 	// cancelled it and nothing else will put it back.
 	ConsoleBaud_OnUartReinit();
 
-	if (rate != current_rate_)
+	if (rate != current_rate_) {
 		rate_changed_ = true;
+		// Start re-asserting the ASCII charset: from here until the operator
+		// switches their terminal they are seeing garbage, and garbage can contain
+		// the escape that puts a terminal into line-drawing mode.
+		charset_reset_until_ms_ = HAL_GetTick() + kCharsetResetWindowMs;
+		charset_reset_next_ms_ = HAL_GetTick();
+	}
 	current_rate_ = rate;
 
 	if (rearm_abr)
@@ -96,76 +93,72 @@ void ConsoleBaud::SuppressGateFor(uint32_t ms) {
 	ResetTriggers();
 }
 
+bool ConsoleBaud::NoteEvidence(uint32_t now_ms, uint32_t count) {
+	if (count == 0u)
+		return false;
+	// Suppressed: nothing accumulates.  The caller has already consumed its source
+	// so the evidence cannot be counted later against a window it did not fall in.
+	if (static_cast<int32_t>(now_ms - gate_suppressed_until_ms_) < 0) {
+		evidence_count_ = 0;
+		return false;
+	}
+	// A window that has run its course restarts rather than extending, so evidence
+	// scattered over minutes never accumulates its way to the threshold.
+	if (evidence_count_ == 0u
+			|| static_cast<int32_t>(now_ms - evidence_start_ms_) > static_cast<int32_t>(kEvidenceWindowMs)) {
+		evidence_start_ms_ = now_ms;
+		evidence_count_ = count;
+	} else {
+		evidence_count_ += count;
+	}
+	return evidence_count_ >= kEvidenceToArm;
+}
+
 bool ConsoleBaud::MismatchEvidenceSeen(uint32_t now_ms) {
 	// Drain whatever the ISR has counted since the last look.  Always drained,
 	// including while suppressed, so errors raised during a deliberate rate change
 	// cannot be counted later against a window they did not occur in.
 	const uint32_t errors = g_rx_error_count;
 	g_rx_error_count -= errors;
-
-	if (static_cast<int32_t>(now_ms - gate_suppressed_until_ms_) < 0) {
-		mismatch_errors_ = 0;
-		return false;
-	}
-	if (errors == 0u)
-		return false;
-
-	// A gap ends the burst: unrelated errors far apart never accumulate their way
-	// to the threshold, however long the console is left connected.
-	if (mismatch_errors_ == 0u
-			|| static_cast<int32_t>(now_ms - mismatch_last_error_ms_) > static_cast<int32_t>(kMismatchIdleResetMs)) {
-		mismatch_window_start_ms_ = now_ms;
-		mismatch_errors_ = errors;
-		mismatch_last_error_ms_ = now_ms;
-		return false;
-	}
-	mismatch_errors_ += errors;
-	mismatch_last_error_ms_ = now_ms;
-
-	// Count AND duration.  The count alone would fire on a short flurry; the
-	// duration alone would fire on a slow trickle.  A held key satisfies both.
-	return (mismatch_errors_ >= kMismatchErrorsToArm)
-			&& (static_cast<int32_t>(now_ms - mismatch_window_start_ms_) >= static_cast<int32_t>(kMismatchSustainMs));
+	return NoteEvidence(now_ms, errors);
 }
 
 bool ConsoleBaud::RxBurstEvidenceSeen(uint8_t byte, uint32_t now_ms) {
-	// Text a person could have sent never counts, so pasting into the terminal at a
-	// matched rate cannot arm the detector however fast it arrives.
-	if (IsPlausibleConsoleByte(byte)) {
-		rx_burst_count_ = 0;
+	// Text a person could have sent is not counted.  It does NOT reset the count,
+	// which an earlier version did: at an 8:1 ratio a held sync key decodes into a
+	// repeating pattern of eight byte values and some of those land in printable
+	// ASCII, so every one of them zeroed the counter and it never climbed past the
+	// few junk bytes in between.
+	if (IsPlausibleConsoleByte(byte))
 		return false;
-	}
-	// Sliding window: a gap, or an expired window, restarts the count.  What is
-	// being tested is a RATE, not a total.
-	if (rx_burst_count_ == 0u || static_cast<int32_t>(now_ms - rx_burst_last_ms_) > static_cast<int32_t>(kRxBurstIdleResetMs)
-			|| static_cast<int32_t>(now_ms - rx_burst_start_ms_) > static_cast<int32_t>(kRxBurstWindowMs)) {
-		rx_burst_start_ms_ = now_ms;
-		rx_burst_count_ = 1u;
-	} else {
-		rx_burst_count_++;
-	}
-	rx_burst_last_ms_ = now_ms;
+	return NoteEvidence(now_ms, 1u);
+}
 
-	if (static_cast<int32_t>(now_ms - gate_suppressed_until_ms_) < 0)
+bool ConsoleBaud::DueForCharsetReset(uint32_t now_ms) {
+	if (static_cast<int32_t>(now_ms - charset_reset_until_ms_) >= 0)
 		return false;
-	return rx_burst_count_ >= kRxBurstBytesToArm;
+	if (static_cast<int32_t>(now_ms - charset_reset_next_ms_) < 0)
+		return false;
+	charset_reset_next_ms_ = now_ms + kCharsetResetIntervalMs;
+	return true;
 }
 
 void ConsoleBaud::ResetTriggers() {
-	mismatch_errors_ = 0;
-	rx_burst_count_ = 0;
+	evidence_count_ = 0;
 }
 
 void ConsoleBaud::ArmDetection() {
+	// Latched before anything else, so an abandoned attempt restores the rate we
+	// came in on.
+	rate_before_detect_ = current_rate_;
 	// Re-apply the current rate with ABR enabled.  Going through ApplyRate rather
 	// than just setting ABRRQ means the divider is known-good at the moment the
 	// hardware is allowed to start overwriting it.
 	ApplyRate(current_rate_, true);
-	rate_before_detect_ = current_rate_;
 	sync_bytes_seen_ = 0;
 	ResetTriggers();
 	state_ = State::Armed;
-	verify_deadline_ms_ = HAL_GetTick() + kArmTimeoutMs;
+	deadline_ms_ = HAL_GetTick() + kArmTimeoutMs;
 }
 
 void ConsoleBaud::AbandonDetection() {
@@ -195,13 +188,12 @@ bool ConsoleBaud::TryTakeMeasurement() {
 		return false;
 	}
 	// Re-init at the table entry rather than the measured value, so the divider is
-	// exact instead of merely within tolerance.  rate_before_detect_ was latched by
-	// ArmDetection and is what AbandonDetection will restore if this falls through.
+	// exact instead of merely within tolerance.
 	ApplyRate(snapped, false);
 	state_ = State::Verifying;
 	// The byte the hardware measured counts as the first of the run.
 	sync_bytes_seen_ = 1;
-	verify_deadline_ms_ = HAL_GetTick() + kVerifyTimeoutMs;
+	deadline_ms_ = HAL_GetTick() + kVerifyTimeoutMs;
 	return true;
 }
 
@@ -212,9 +204,9 @@ void ConsoleBaud::Begin() {
 	detected_ = false;
 	sync_bytes_seen_ = 0;
 	ResetTriggers();
-	// ABR OFF.  The detector is armed only once a trigger says the rates actually
-	// differ; arming it up front would hand the hardware a licence to rewrite BRR
-	// from the first character the operator types.
+	// ABR OFF.  The detector arms only once the evidence pool says the rates
+	// actually differ; arming it up front would hand the hardware a licence to
+	// rewrite BRR from the first character the operator types.
 	ApplyRate(ConsoleBaudRates::kFallbackRate, false);
 	state_ = State::Watching;
 	SuppressGateFor(kStartupSuppressMs);
@@ -231,8 +223,6 @@ void ConsoleBaud::ApplyStoredRate(uint32_t stored_rate) {
 		return;
 	ApplyRate(rate, false);
 	rate_before_detect_ = rate;
-	// Switching rate invalidates whatever framing errors were counted against the
-	// old one, and the operator may still be on the old rate at the far end.
 	SuppressGateFor(kPostChangeSuppressMs);
 }
 
@@ -243,15 +233,13 @@ bool ConsoleBaud::SetRate(uint32_t rate) {
 	rate_before_detect_ = rate;
 	sync_bytes_seen_ = 0;
 	// A deliberate rate change is the most likely moment for the operator to get it
-	// wrong, so the window stays open (Watching) rather than closing — that is
-	// precisely when the recovery path earns its keep.  Only arming closes it.
+	// wrong, so the window stays open rather than closing — that is precisely when
+	// the recovery path earns its keep.  Only arming closes it.
 	if (state_ != State::Closed)
 		state_ = State::Watching;
-	// But NOT immediately: from here until the operator switches their terminal the
-	// two ends legitimately disagree, and every byte that arrives is a framing
-	// error.  Counting those would fire the detector on the operator's own rate
-	// change and set it measuring garbage — the failure the 0x55 experiment hit,
-	// and the one mode 0x7F was masking rather than avoiding.
+	// But not immediately: from here until the operator switches their terminal the
+	// two ends legitimately disagree, and counting that would fire the detector on
+	// the operator's own rate change and revert it.
 	SuppressGateFor(kPostChangeSuppressMs);
 	return true;
 }
@@ -282,8 +270,7 @@ bool ConsoleBaud::OnByte(uint8_t byte) {
 
 	case State::Watching:
 		// ABR is off, so this byte was received at the current rate and belongs to
-		// the console — unless it is part of a burst too dense to be typed, which is
-		// what a rate mismatch looks like from the faster end.
+		// the console — unless it is evidence of a mismatch, which arms the detector.
 		if (RxBurstEvidenceSeen(byte, HAL_GetTick())) {
 			ArmDetection();
 			return true;
@@ -291,7 +278,12 @@ bool ConsoleBaud::OnByte(uint8_t byte) {
 		return false;
 
 	case State::Armed:
-		return TryTakeMeasurement();
+		TryTakeMeasurement();
+		// Junk arriving while armed is garbage off a mismatched link by definition,
+		// so it is swallowed rather than allowed to drive menus.  Anything that
+		// still looks like real input is passed through, so a spurious arm does not
+		// eat the operator's typing.
+		return !IsPlausibleConsoleByte(byte);
 
 	case State::Verifying:
 		if (byte != kSyncByte) {
@@ -323,18 +315,18 @@ void ConsoleBaud::Poll(uint32_t now_ms) {
 		return;
 
 	case State::Armed:
-		if (TryTakeMeasurement())
+		if (TryTakeMeasurement() || state_ != State::Armed)
 			return;
 		// Armed but nothing measurable arrived.  Do not sit here with the hardware
 		// free to rewrite the divider.
-		if (state_ == State::Armed && static_cast<int32_t>(now_ms - verify_deadline_ms_) >= 0)
+		if (static_cast<int32_t>(now_ms - deadline_ms_) >= 0)
 			AbandonDetection();
 		return;
 
 	case State::Verifying:
 		// The run stopped short.  Put the old rate back, because a half-verified
 		// measurement leaves exactly the unreadable console this path exists to fix.
-		if (static_cast<int32_t>(now_ms - verify_deadline_ms_) >= 0)
+		if (static_cast<int32_t>(now_ms - deadline_ms_) >= 0)
 			AbandonDetection();
 		return;
 
