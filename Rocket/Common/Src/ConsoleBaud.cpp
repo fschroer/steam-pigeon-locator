@@ -13,6 +13,11 @@ extern "C" void ConsoleBaud_NoteRxError(void) {
 	g_rx_error_count++;
 }
 
+// Default: nothing to do.  Overridden by whichever translation unit owns a
+// HAL_UART_Receive_IT on the console UART — see the declaration for why.
+extern "C" __attribute__((weak)) void ConsoleBaud_OnUartReinit(void) {
+}
+
 uint32_t ConsoleBaud::MeasuredRateFromBrr() const {
 	const uint32_t brr = uart_.Instance->BRR & 0xFFFFu;
 	// Below the oversampling-16 floor the divider cannot represent the rate at
@@ -74,6 +79,9 @@ void ConsoleBaud::ApplyRate(uint32_t rate, bool rearm_abr) {
 	// boot and would otherwise never set again.
 	LL_USART_EnableIT_RXNE(uart_.Instance);
 	LL_USART_EnableIT_ERROR(uart_.Instance);
+	// Re-arm a HAL-driven receive if this build has one; HAL_UART_Init just
+	// cancelled it and nothing else will put it back.
+	ConsoleBaud_OnUartReinit();
 
 	if (rate != current_rate_)
 		rate_changed_ = true;

@@ -175,7 +175,23 @@ void UserInteraction::ProcessChar(uint8_t uart_char, DeviceState &device_state) 
 		case 'b': // b = Edit console baud (stored locally; never sent over the air)
 		case 'B':
 			user_interaction_state_ = UserInteractionState::EditConsoleBaud;
-			uart_line_len = MakeLine(uart_line_, console_baud_edit_text_, num_edit_guidance_text_);
+			// Sent as its own transmit rather than folded into one MakeLine with the
+			// guidance: together they are 322 characters against a 320-byte
+			// uart_line_, and MakeLine truncates SILENTLY.  That cost the guidance
+			// its trailing CRLF, so the cursor stayed on the guidance line and the
+			// rate display below (which starts with a bare CR) overwrote the help
+			// text instead of landing under it.
+			HAL_UART_Transmit(&huart2_, (uint8_t*) console_baud_edit_text_, strlen(console_baud_edit_text_),
+					uart_timeout);
+			uart_line_len = MakeLine(uart_line_, num_edit_guidance_text_);
+			HAL_UART_Transmit(&huart2_, (uint8_t*) uart_line_, uart_line_len, uart_timeout);
+			// Current rate on its own line, so the [ / ] display has somewhere to
+			// land and the operator can see what they are changing from.
+			{
+				StaticStringWriter<32> baud_now(&huart2_);
+				baud_now.WriteMany(ConsoleBaudRates::kStandardRates[console_baud_index_]);
+			}
+			uart_line_len = 0;
 			break;
 		}
 		HAL_UART_Transmit(&huart2_, (uint8_t*) uart_line_, uart_line_len, uart_timeout);

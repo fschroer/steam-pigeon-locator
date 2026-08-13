@@ -58,6 +58,19 @@
 // resets it on every console write, so it is not dependable either.
 extern "C" void ConsoleBaud_NoteRxError(void);
 
+// Called after every USART re-init, for whoever owns the console's receive.
+//
+// HAL_UART_Init cancels any pending HAL_UART_Receive_IT — RxState goes back to
+// READY and RxISR is cleared — and nothing re-arms it, because the completion
+// callback that normally would is exactly what stops firing.  A build whose
+// console RX runs on HAL_UART_Receive_IT therefore goes deaf on its first rate
+// change, taking the sync-byte recovery with it (it has nothing left to listen
+// to).  A build driving RX from the LL RXNE interrupt is unaffected, since
+// ApplyRate re-enables that directly.
+//
+// Weakly defined as a no-op; the owner of the receive overrides it.
+extern "C" void ConsoleBaud_OnUartReinit(void);
+
 class ConsoleBaud {
 public:
 	// ── Arming, and why it is gated at all ────────────────────────────────────
