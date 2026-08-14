@@ -42,8 +42,8 @@ size_t PackSamples(const FlightArchive::FlightSample* samples,
     hdr.base_altitude_m   = samples[0].raw_baro_altitude_agl;
     hdr.base_accel_mps2   = samples[0].accel;
     hdr.base_gyro_dps     = samples[0].gyro;
-    hdr.base_lat_rad      = samples[0].lat_rad;
-    hdr.base_lon_rad      = samples[0].lon_rad;
+    hdr.base_lat_rad      = FlightArchive::Deg1e7ToRad(samples[0].lat_1e7);
+    hdr.base_lon_rad      = FlightArchive::Deg1e7ToRad(samples[0].lon_1e7);
 
     std::memcpy(p, &hdr, sizeof(hdr));
     p += sizeof(hdr);
@@ -71,8 +71,8 @@ size_t PackSamples(const FlightArchive::FlightSample* samples,
 
         // Lat/lon: delta from the packet's absolute base, NOT from prev.
         // This keeps accumulated floating-point error out of the decode path.
-        d.d_lat_scaled = int32_t(std::round((s.lat_rad - hdr.base_lat_rad) * LATLON_SCALE));
-        d.d_lon_scaled = int32_t(std::round((s.lon_rad - hdr.base_lon_rad) * LATLON_SCALE));
+        d.d_lat_scaled = int32_t(std::round((FlightArchive::Deg1e7ToRad(s.lat_1e7) - hdr.base_lat_rad) * LATLON_SCALE));
+        d.d_lon_scaled = int32_t(std::round((FlightArchive::Deg1e7ToRad(s.lon_1e7) - hdr.base_lon_rad) * LATLON_SCALE));
 
         std::memcpy(p, &d, sizeof(d));
         p += sizeof(d);
@@ -107,8 +107,8 @@ size_t UnpackSamples(const uint8_t* payload,
     prev.raw_baro_altitude_agl = hdr.base_altitude_m;
     prev.accel        = hdr.base_accel_mps2;
     prev.gyro         = hdr.base_gyro_dps;
-    prev.lat_rad      = hdr.base_lat_rad;
-    prev.lon_rad      = hdr.base_lon_rad;
+    prev.lat_1e7      = FlightArchive::RadToDeg1e7(hdr.base_lat_rad);
+    prev.lon_1e7      = FlightArchive::RadToDeg1e7(hdr.base_lon_rad);
 
     size_t written = 0;
     out_samples[written++] = prev;
@@ -131,8 +131,8 @@ size_t UnpackSamples(const uint8_t* payload,
         s.gyro.z       = prev.gyro.z       + d.d_gyro_z_0p1dps   / 10.0f;
 
         // Lat/lon: apply delta from the packet's absolute base (matches encode)
-        s.lat_rad = hdr.base_lat_rad + d.d_lat_scaled / LATLON_SCALE;
-        s.lon_rad = hdr.base_lon_rad + d.d_lon_scaled / LATLON_SCALE;
+        s.lat_1e7 = FlightArchive::RadToDeg1e7(hdr.base_lat_rad + d.d_lat_scaled / LATLON_SCALE);
+        s.lon_1e7 = FlightArchive::RadToDeg1e7(hdr.base_lon_rad + d.d_lon_scaled / LATLON_SCALE);
 
         out_samples[written++] = s;
         prev = s;

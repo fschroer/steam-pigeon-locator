@@ -40,20 +40,52 @@ public:
     bool isInitialized()         const { return m_initialized; }
     float getPadAltitudeMsl()    const { return m_pad_altitude_msl_m; }
 
-    // Numerical-health counters (cumulative since power-on).  Watch these in a
-    // debugger / Live Expressions: steady zeros mean the filter is well
-    // conditioned.  Rising baro_nonfinite_drops points at a flaky MS5611 read;
-    // rising nonfinite_dx_drops means a measurement produced a non-finite
-    // correction (the safety net fired) — a signal that the covariance update
-    // needs the sturdier Joseph form.  baro_gate_rejects rising in flight means
-    // legitimate baro innovations are being thrown away (altitude mistracking).
-    struct EkfDiag {
-        uint32_t nonfinite_dx_drops   = 0;
-        uint32_t baro_nonfinite_drops = 0;
-        uint32_t baro_gate_rejects    = 0;
-        uint32_t vel_divergence_resets = 0;   // velocity guard fired (#12)
-    };
+    // Defined in Types.hpp so FlightManager and the FlightReplay mock can name
+    // these without including the estimator.  See there for what each counter means.
+    using EkfDiag = ::EkfDiag;
     EkfDiag getDiag() const { return m_diag; }
+
+    // ── Per-cycle health flags (#38) ────────────────────────────────────────────
+    // The cumulative counters above are only readable on a bench debugger, so a
+    // divergence in flight left no trace at all: the archive showed a frozen
+    // fused altitude and an exactly-0.0 vertical speed, which is what a healthy
+    // filter also writes while the rocket sits on the pad.  Six flights across
+    // two campaigns died that way before anyone noticed.
+    //
+    // These flags say what fired THIS cycle, so the archive can carry them per
+    // sample and the failure becomes visible at the moment it happens rather than
+    // being inferred afterwards.  Navigation clears them each Update() before
+    // driving the filter, and reads them after.
+    // Defined in Types.hpp so the archive layer can record it without depending
+    // on this header.
+    using Health = EkfHealth;
+    Health getHealth()   const { return m_health; }
+    void   clearHealth()       { m_health = Health{}; }
+    // Set by Navigation, which owns the raw-baro comparison the check needs.  The
+    // filter cannot see its own freeze: every internal guard it has already passed.
+    void   flagFusedFrozen()   { m_health.fused_frozen = true; }
+
+    // Consecutive-reset threshold before the filter asks to be re-seeded in flight.
+    // 20 cycles = 1 s at the 20 Hz loop rate — long enough that a genuine transient
+    // (a baro spike, a single bad IMU read) is ruled out.
+    static constexpr uint32_t kMaxConsecutiveVelResets = 20u;
+
+    // True once the velocity guard has fired kMaxConsecutiveVelResets cycles in a
+    // row.  Navigation polls this after predict() and calls reinitializeFrom() with
+    // the strapdown attitude; the filter cannot do it alone because recovering
+    // attitude needs a reference it does not own.
+    bool needsReinit() const { return m_needs_reinit; }
+
+    // Rebuild the filter around a known-good attitude, discarding the poisoned
+    // covariance and the runaway bias estimates while KEEPING position and the pad
+    // altitude reference.
+    //
+    // Keeping the pad reference is deliberate: re-zeroing it would rebase fused AGL
+    // mid-flight, and a plausible-looking rebased altitude is worse for analysis
+    // than an obviously frozen one.  Position is kept because it was never the
+    // channel that diverged — on CH9-F2 the horizontal solution stayed healthy
+    // throughout while the vertical channel was dead.
+    void reinitializeFrom(const Quaternionf& q_bn, const ImuSample& imu);
 
     // Set dynamic-pressure correction factor applied to baro altitude during flight.
     // See NavConfig::pitot_correction_k for tuning guidance.
@@ -68,6 +100,12 @@ private:
     bool m_initialized = false;
 
     EkfDiag m_diag{};
+    Health  m_health{};
+
+    // Consecutive cycles the velocity divergence guard has fired.  Reset to 0 on
+    // any clean cycle, so a lone transient never trips the re-init.
+    uint32_t m_consecutive_vel_resets = 0;
+    bool     m_needs_reinit           = false;
 
     float P[15*15]{};
     float Q[15*15]{};

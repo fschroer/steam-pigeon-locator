@@ -7,7 +7,15 @@
 namespace FlightArchive
 {
     static constexpr uint32_t ARCHIVE_MAGIC      = 0x46524152u; // FRAR
-    static constexpr uint16_t ARCHIVE_VERSION    = 0x0005u; // v5: + int16 strapdown tilt & quaternion (NFR-9)
+    // v6 (#38): the four per-cycle timing fields were REPURPOSED as raw GPS velocity
+    // + horizontal accuracy, and EKF health moved into the spare flight_state bits.
+    // Unlike the gps_fix_sv change (which only claimed a byte that already read back
+    // as 0), v6 changes the meaning of bytes that hold real data, so old records
+    // would decode timing microseconds as GPS velocity — e.g. oc_start_us 55648
+    // reads as -98 m/s north.  Bumping is therefore mandatory, and it orphans every
+    // record already on a device: ValidateHeaderForConfig rejects them and the data
+    // menu will not list them.  Download anything you still want BEFORE flashing.
+    static constexpr uint16_t ARCHIVE_VERSION    = 0x0006u; // v6: + GPS velocity/h_acc, EKF health bits (#38)
     static constexpr uint16_t INVALID_RECORD_ID  = 0xFFFFu;
 
     static constexpr uint16_t SAMPLES_PER_SEC    = 20u;

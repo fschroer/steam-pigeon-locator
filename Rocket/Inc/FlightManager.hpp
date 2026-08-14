@@ -17,10 +17,17 @@ public:
     void Init();
     void UpdateFlightState();
 
-    // Supply timing diagnostics captured by Factory_C_Interface before each
-    // ProcessRocketEvents call.  The values are written into the next archived
-    // FlightSample via archive_.WriteData().
-    void SetTimingDiag(const TimingDiag &t) { m_timing_diag_ = t; }
+    // GPS-PPS discipline state for the sample about to be archived (#31).  Pushed
+    // in from Factory each cycle because the PPS counters live behind the C
+    // interface in main.c, which FlightManager does not include.
+    void SetPpsStatus(uint8_t bits) { m_pps_status_ = bits; }
+
+    // Write the EKF health counters into the record (#38).  Called twice: at
+    // launch, and again as the record closes.  Non-zero at launch means the
+    // filter had already failed on the pad, BEFORE the samples begin — the one
+    // question five lost flights could not answer.
+    void WriteEkfDiagSnapshot(FlightArchive::Statistic slot);
+
     // Arm state, stamped into every recorded sample (ADR-0021 Decision 4, #36).
     // Pushed in from Factory each cycle rather than read here: FlightManager has
     // no view of DeviceState, and now that it runs disarmed too (#36) it cannot
@@ -128,8 +135,8 @@ private:
     uint32_t m_record_origin_ms_  = 0;
     bool     m_record_origin_set_ = false;
 
-    TimingDiag   m_timing_diag_         { };
     bool         m_armed_               = false;
+    uint8_t      m_pps_status_          = 0;   // FlightArchive::PpsStatus bits (#31)
     FlightStates flight_state_          = FlightStates::WaitingLaunch;
     uint32_t     flight_time_ms         = 0;
     uint8_t      deployment_ch1_stats_  = 0;

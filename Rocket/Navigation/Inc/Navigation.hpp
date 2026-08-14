@@ -162,6 +162,13 @@ public:
         return Quaternionf{ q.w, -q.x, q.y, -q.z };
     }
     float       getTiltFromVerticalRad()  const { return m_attitude.tiltFromVerticalRad(); }
+
+    // Fused-solution health for the cycle just completed (#38).  Archived per
+    // sample so a divergence is visible in the record at the moment it happens —
+    // a frozen fused altitude with an exactly-0.0 vertical speed is otherwise
+    // indistinguishable from a healthy filter sitting on the pad.
+    InsEkf15::Health getEkfHealth() const { return m_ekf.getHealth(); }
+    EkfDiag getEkfDiag()  const { return m_ekf.getDiag(); }
     bool        attitudeReady()           const { return m_attitude.initialized(); }
     uint32_t    attitudeLastUpdateMs()    const { return m_attitude.lastUpdateMs(); }
 
@@ -189,9 +196,11 @@ public:
         return m_gps.raw();
     }
 
-    // Packed fix-quality / satellite-count / stream-classification byte archived
-    // with every flight sample; see gps_fix_sv in ArchiveTypes.hpp.
-    uint8_t getGpsArchiveFixSvByte() const { return m_gps.archiveFixSvByte(); }
+    // Fix quality archived with every flight sample, with staleness folded in
+    // (>= 6 means lat/lon are latched, not live); see gps_fix_type in
+    // ArchiveTypes.hpp.  Satellite count has its own field as of
+    // ARCHIVE_VERSION 6 and no longer shares this byte.
+    uint8_t getGpsArchiveFixType() const { return m_gps.archiveFixType(); }
 
     // Arm/disarm the GPS stale-fix watchdog.  Driven by setPhase() on every state
     // transition, and indirectly by FlightManager::ResetFlight() — which returns
@@ -279,22 +288,19 @@ private:
     // free-fall (<0.5 g) while tolerating normal pad vibration and settling.
     static constexpr float   kMountingCalMaxDeviationG = 0.5f;
 
-    // ── Descent tilt correction ──────────────────────────────────────────────
-    // Counts consecutive IMU samples where gyro magnitude is below the stable
-    // threshold.  Once the count reaches kDescentStableSamples, tilt correction
-    // from the accelerometer (gravity vector) is re-enabled, recovering roll and
-    // pitch accuracy degraded by gyro temperature drift during powered ascent.
-    // The counter is reset whenever rotation exceeds the threshold (pendulum
-    // peak) so correction only runs during genuinely quiet hanging phases.
-    uint8_t m_descent_stable_count = 0;
-
-    // Gyro-rate threshold below which the rocket is considered stable under
-    // canopy.  20 deg/s (~0.35 rad/s) admits slow pendulum swings while
-    // rejecting active tumbling or spin.
-    static constexpr float   kDescentStableGyroRps    = 0.349f; // 20 deg/s
-    // Number of consecutive stable samples required before tilt correction
-    // is applied.  40 × 50 ms = 2 s of uninterrupted stability.
-    static constexpr uint8_t kDescentStableSamples    = 40;
+    // ── Frozen-fused detection (#38) ─────────────────────────────────────────
+    // A frozen vertical channel is the observable that five lost flights shared.
+    // Requires the barometer to have moved kFusedFrozenRawMoveM between samples
+    // while the fused altitude moved less than kFusedFrozenTolM, sustained for
+    // kFusedFrozenSamples cycles — long enough that a quiet apogee or a canopy
+    // plateau cannot trip it, short enough to catch the freeze in the same flight.
+    // 20 samples = 1 s at 20 Hz.
+    static constexpr float   kFusedFrozenRawMoveM = 1.0f;
+    static constexpr float   kFusedFrozenTolM     = 0.05f;
+    static constexpr uint8_t kFusedFrozenSamples  = 20;
+    float   m_last_fused_agl_m_ = 0.0f;
+    float   m_last_raw_agl_m_   = 0.0f;
+    uint8_t m_fused_static_count_ = 0;
 
     ISM6HG256X m_imu;
     MS5611     m_baro;

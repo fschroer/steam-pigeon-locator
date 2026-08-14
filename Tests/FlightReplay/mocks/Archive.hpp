@@ -39,35 +39,64 @@ public:
         return true;
     }
 
+    // The EKF health snapshots (#38) are a struct, not a scalar, so they have no
+    // meaningful double form.  Record that the slot was written and keep the
+    // payload for assertions rather than forcing it through ev_to_double.
+    bool WriteEvent(FlightArchive::Statistic stat_id, const FlightArchive::EkfDiagSnapshot& snap) {
+        ekf_diag_snapshots[static_cast<uint16_t>(stat_id)] = snap;
+        event_written[static_cast<uint16_t>(stat_id)] = true;
+        return true;
+    }
+
     uint16_t SamplesUntilChunkCommit() { return 100u; }
     bool     WriteBuiltSample(const FlightArchive::FlightSample& /*s*/) { return true; }
 
-    static FlightArchive::FlightSample BuildSample(
-            uint32_t flight_time_ms, const NavSolution& nav,
-            const float raw_agl, const float raw_vel,
-            FlightStates state, const TimingDiag& /*t*/,
-            float /*tilt_rad*/, const Quaternionf& /*quat*/,
-            bool armed) {
-        // Mirror the fields the real BuildSample fills that the harness relies on —
-        // notably body accel, so the #7 launch-onset ring scan sees real thrust.
+    // Mirrors the real Archive::SampleInputs so FlightManager compiles unchanged
+    // against this mock.  Only the fields this harness relies on are filled —
+    // notably body accel, so the #7 launch-onset ring scan sees real thrust, and
+    // ekf_health, which AnchorRecordToLaunchOnset now inspects (#38).
+    struct SampleInputs {
+        uint32_t          flight_time_ms   = 0;
+        const NavSolution *nav             = nullptr;
+        float             raw_baro_agl_m   = 0.0f;
+        float             raw_baro_vel_mps = 0.0f;
+        FlightStates      flight_state     = FlightStates::WaitingLaunch;
+        const GpsSample   *gps             = nullptr;
+        const ImuSample   *imu             = nullptr;
+        EkfHealth         health           {};
+        float             tilt_rad         = 0.0f;
+        Quaternionf       strapdown_quat   {};
+        bool              armed            = false;
+        uint8_t           pps_status       = 0;
+    };
+
+    static FlightArchive::FlightSample BuildSample(const SampleInputs& in) {
         FlightArchive::FlightSample s{};
-        s.timestamp_ms          = flight_time_ms;
-        s.raw_baro_altitude_agl = raw_agl;
-        s.raw_baro_velocity     = raw_vel;
-        s.accel                 = nav.body_accel_mps2;
-        s.gyro                  = nav.body_rates_rps;
-        s.lat_rad               = nav.pos.lat_rad;
-        s.lon_rad               = nav.pos.lon_rad;
-        // State in bits 0-6, arm state in bit 7 (ADR-0021 Decision 4, #36) —
-        // mirrors the real BuildSample so the harness sees the same byte.
-        s.flight_state          = static_cast<uint8_t>(state)
-                                | (armed ? FlightArchive::FlightSample::kArmedBit : 0u);
+        s.timestamp_ms          = in.flight_time_ms;
+        s.raw_baro_altitude_agl = in.raw_baro_agl_m;
+        s.raw_baro_velocity     = in.raw_baro_vel_mps;
+        if (in.nav) {
+            s.accel   = in.nav->body_accel_mps2;
+            s.gyro    = in.nav->body_rates_rps;
+            s.lat_1e7 = FlightArchive::RadToDeg1e7(in.nav->pos.lat_rad);
+            s.lon_1e7 = FlightArchive::RadToDeg1e7(in.nav->pos.lon_rad);
+        }
+        // One field per fact (ARCHIVE_VERSION 6) — no bit masks to mirror.
+        s.flight_state = static_cast<uint8_t>(in.flight_state);
+        s.armed        = in.armed ? 1u : 0u;
+        s.ekf_health   = static_cast<uint8_t>(
+                  (in.health.vel_divergence_reset ? FlightArchive::kEkfVelDivergenceReset : 0u)
+                | (in.health.correction_dropped   ? FlightArchive::kEkfCorrectionDropped  : 0u)
+                | (in.health.baro_update_rejected ? FlightArchive::kEkfBaroRejected       : 0u)
+                | (in.health.fused_frozen         ? FlightArchive::kEkfFusedFrozen        : 0u));
+        s.pps_status   = in.pps_status;
         return s;
     }
 
     // ---- Harness introspection --------------------------------------------
     RocketPersistentSettings locator_settings_{};
-    std::map<uint16_t, double> events;             // Statistic -> last value
+    std::map<uint16_t, double> events;
+    std::map<uint16_t, FlightArchive::EkfDiagSnapshot> ekf_diag_snapshots;             // Statistic -> last value
     std::map<uint16_t, bool>   event_written;      // Statistic -> present?
 
     bool HasEvent(FlightArchive::Statistic s) const {

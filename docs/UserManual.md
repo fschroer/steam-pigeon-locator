@@ -71,7 +71,7 @@ Everything else — live telemetry, the map, the spoken callouts, the orientatio
 - Intended for **mid- and high-power rocketry**.
 - Deployment channels are designed for **e-matches with an all-fire current of 1 A or less**, such as MJG Firewire. **Test any other brand of igniter on the bench before you fly it.**
 - Usable altitude ceiling of the barometric sensor is roughly **98,000 ft**.
-- A recorded flight is capped at **8 minutes**; the locator stores **10 flights** before you need to clear space.
+- A recorded flight is capped at **8 minutes**; the locator stores **9 flights** before you need to clear space.
 - The app is **Android only**. There is no iOS app.
 - The locator has **four** deployment channels.
 
@@ -530,7 +530,7 @@ This confirms two things: that each channel actually fires, and that your ignite
 
 ## 3.6 Make room in flight memory
 
-The locator holds **10 flights**. When it's full, you can't record a new one.
+The locator holds **9 flights**. When it's full, you can't record a new one.
 
 1. **Export anything you want to keep** first (§10.4). Once erased, it's gone.
 2. Connect USB-C, open the console, type `data`.
@@ -538,6 +538,10 @@ The locator holds **10 flights**. When it's full, you can't record a new one.
 4. `e` — **erase ALL flight memory**. Asks for `Y` to confirm. This deletes every recorded flight.
 
 ⚡ **If you update the locator's firmware and the flight-record format changed, you must erase all flight memory.** Old records become unreadable and will confuse the app. **Export first, then erase.** The release notes for a firmware update will tell you if this applies.
+
+> **This applies to the current update.** The record format changed and the locator now stores **9 flights instead of 10** — see §10.4. Export anything you want to keep, then erase.
+
+> ⚠️ **Update the phone app at the same time.** The list of stored flights is sent over the radio in a message whose size depends on how many flights the locator holds. A locator on the new firmware talking to an older app will show an **empty flight list** — not an error, just nothing. Updating both together avoids it.
 
 ## 3.7 Download offline maps for the launch site
 
@@ -1253,16 +1257,27 @@ This gives you everything the locator recorded, at full rate, for analysis in a 
 | `lat_deg`, `lon_deg` | GPS position. |
 | `flight_state` | Which state the flight state machine was in. |
 | `armed` | Whether the locator was armed for this sample — 1 or 0. Because a disarmed locator now records a full flight (§7.1), this is the column that tells you whether the charges were ever going to fire. |
-| `oc_*`, `process_*` | Internal timing diagnostics. Ignore unless you're debugging the firmware. |
+| `ekf_health` | **0 means the combined solution was working on that sample.** Anything else means `fused_agl_m` and `fused_vspeed_mps` on that row cannot be trusted — see the note below. |
+| `gps_vel_n_mps`, `gps_vel_e_mps`, `gps_vel_d_mps` | GPS velocity north / east / down. **Blank** when that fix carried no velocity — blank is not zero. |
+| `gps_h_acc_m` | How accurate the GPS thought its own position was, in metres. |
 | `tilt_deg` | Angle off vertical. |
 | `q_w`, `q_x`, `q_y`, `q_z` | Orientation, as a quaternion. |
 | `fix_type`, `num_sv` | GPS fix quality and satellite count at that sample — what the position readings in the same row are worth. |
+| `accel_alt_x_g`, `accel_alt_y_g`, `accel_alt_z_g` | The *other* accelerometer. The locator carries a sensitive one and a high-range one and uses whichever suits the moment; this is the one it wasn't using, so the two can be compared. **Blank** if that sensor had nothing valid to report. |
+| `accel_source` | Which accelerometer the `accel_*_g` columns came from: 0 = low-g, 1 = high-g. |
+| `pps_status` | Whether the GPS one-pulse-per-second timing reference was healthy: 1 = locked, 2 = a pulse was missed, 4 = a bad interval was rejected. These add together. 1 on its own is the good case. |
 
 They are exported in that order.
 
+> **Reading `ekf_health`.** The combined ("fused") solution can fail in flight, and when it does it fails quietly: the altitude stops changing and the vertical speed reads exactly `0.0`. That looks identical to a rocket sitting still on the pad, which is why six flights were analysed before anyone noticed. `ekf_health` is the column that tells them apart — sort or filter on it before you trust anything in `fused_agl_m` or `fused_vspeed_mps`. The value is a set of flags: 1 = the velocity estimate had to be reset, 2 = a sensor correction was rejected, 4 = a barometer update was rejected, and they add together. **`raw_baro_agl_m` is unaffected** — deployment decisions never used the fused columns.
+
+> ⚡ **The timing columns are gone**, and the column order changed. `oc_start_us`, `oc_end_us`, `process_start_us` and `process_dur_us` were replaced by the GPS velocity and accuracy columns above. If you have a spreadsheet that reads columns by position rather than by name, it will need updating. Per-cycle timing is still available live from the data menu's `t` breakdown.
+
+> ⚡ **This firmware update erases your stored flights, and the locator now holds 9 instead of 10.** The record format changed enough that older records cannot be read back at all — the data menu will not list them. **Export everything you want to keep before you flash.** The flight is 8 minutes either way; only the number of stored flights changed, to make room for the extra data in each one.
+
 ## 10.5 Flight memory housekeeping
 
-- **10 flights** stored. Export what you want to keep before you clear anything.
+- **9 flights** stored (was 10 before the record format changed). Export what you want to keep before you clear anything.
 - `c` in the data menu reclaims empty slots; `e` erases everything (§3.6).
 - ⚡ Export before any firmware update that changes the record format.
 
@@ -1671,7 +1686,7 @@ Puts the device into firmware-update mode. It will not work again until it is re
 | Barometric altimeter | MS5611-01BA — usable to roughly 98,000 ft; temperature compensated |
 | IMU | ISM6HG256X — dual-range accelerometer (low-g and high-g, selected automatically) plus gyroscope |
 | GPS | SAM-M10Q (u-blox M10). Concurrent GPS, GLONASS, Galileo and BeiDou |
-| Flight memory | 64 Mbit external flash — 10 flights |
+| Flight memory | 64 Mbit external flash — 9 flights |
 | Deployment | 4 independent channels, for e-matches with an all-fire current of 1 A or less |
 | Power switch | Magnetic (Hall sensor + latch); no mechanical switch |
 | Battery charging | Up to 1 A, over USB-C |

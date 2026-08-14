@@ -352,7 +352,11 @@ static_assert(sizeof(VersionInfoMessage)             ==  70, "VersionInfoMessage
 static_assert(sizeof(PreLaunchData)                  == 118, "PreLaunchData size changed (app payload 112 = 101 + nose_axis 1 + armed 1 + pad_alert 1 + locator_id 4 + auth_tag 4)");
 static_assert(sizeof(TelemetryData)                  ==  77, "TelemetryData size changed (app payload 71 = 62 + armed 1 + locator_id 4 + auth_tag 4; + rssi 2 = 73)");
 static_assert(sizeof(FlightMetadataRecord)           ==  10, "FlightMetadataRecord size changed");
-static_assert(sizeof(FlightMetadata)                 == 106, "FlightMetadata size changed (app payload 100)");
+// 96, was 106: FlightMetadata carries one FlightMetadataRecord per archive slot,
+// and record_count went 10 -> 9 when FlightSample grew for ARCHIVE_VERSION 6
+// (#38).  This is an APP-VISIBLE wire change — the flight list will misparse
+// until Protocol.* and WireLayoutTest.kt are updated to match.
+static_assert(sizeof(FlightMetadata)                 ==  96, "FlightMetadata size changed (app payload 90 = 9 records x 10)");
 static_assert(kFlightEventCount                      ==  11, "FlightEvent count changed — sync app FlightEventIndex");
 static_assert(sizeof(FlightEventsMessage)            ==  66, "FlightEventsMessage size changed (app payload 60)");
 static_assert(sizeof(FlightDataPacket)               == 255, "FlightDataPacket size changed (max LoRa frame 255)");

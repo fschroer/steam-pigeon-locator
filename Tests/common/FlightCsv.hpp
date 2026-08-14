@@ -62,6 +62,21 @@ struct Table {
         return std::isnan(v) ? dflt : v;
     }
 
+    /**
+     * True when the cell holds a real parsed number.
+     *
+     * Distinguishes an EMPTY cell from a cell holding 0.  The v6 export leaves
+     * gps_vel_* empty when the fix carried no velocity, and reading that as 0
+     * would feed updateGpsVelocity a fabricated zero — which it applies as a
+     * ZUPT, i.e. an assertion that the rocket is stationary (#38).
+     */
+    bool hasCell(size_t row, int c) const {
+        if (c < 0 || row >= rows.size()) return false;
+        const std::vector<double>& r = rows[row];
+        if (c >= static_cast<int>(r.size())) return false;
+        return !std::isnan(r[c]);
+    }
+
     size_t size() const { return rows.size(); }
 };
 

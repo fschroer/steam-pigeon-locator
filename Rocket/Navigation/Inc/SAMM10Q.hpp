@@ -79,9 +79,10 @@ public:
     void setDynamicModel(DynModel model);
     DynModel dynamicModel() const { return m_dyn_model; }
 
-    // Packed per-sample diagnostic byte for the flight archive; see the
-    // gps_fix_sv field in ArchiveTypes.hpp for the bit layout.
-    uint8_t archiveFixSvByte() const;
+    // Per-sample fix-quality byte for the flight archive: 0-5 = live u-blox
+    // fixType, 6/7 = stale (see the implementation).  Satellite count is reported
+    // separately via the raw sample as of ARCHIVE_VERSION 6.
+    uint8_t archiveFixType() const;
 
 private:
     bool waitForBoot(uint32_t timeout_ms);

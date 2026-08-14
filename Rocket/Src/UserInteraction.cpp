@@ -806,6 +806,28 @@ void UserInteraction::ExportData(uint16_t archive_position) {
 		    if (!archive_.ReadFlightDataRange(archive_position, start, sample_buffer, 64u, got)) {break;}
 		    if (got == 0u) {break;}
 		    for (uint32_t i = 0u; i < got; ++i) {
+				// WriteMany() clears and flushes in one call, so a field that is
+				// sometimes empty cannot be expressed inline — the ternary would need
+				// one type for the float and another for "".  Build the three velocity
+				// fields first, trailing commas included.
+				StaticString<48> gps_vel_fields;
+				for (int axis = 0; axis < 3; ++axis) {
+					const int16_t cms = (axis == 0) ? sample_buffer[i].gps_vel_n_cms
+							    : (axis == 1) ? sample_buffer[i].gps_vel_e_cms
+							                  : sample_buffer[i].gps_vel_d_cms;
+					if (FlightArchive::GpsVelValid(cms))
+						gps_vel_fields.Append(Fmt(cms / 100.0f, 0, 2));
+					gps_vel_fields.Append(',');
+				}
+				// Same treatment for the non-selected accel channel: empty, not 0, when
+				// that channel had no valid reading — 0 g is a real value it can report.
+				StaticString<48> accel_alt_fields;
+				for (int axis = 0; axis < 3; ++axis) {
+					const int16_t cg = sample_buffer[i].accel_alt_cg[axis];
+					if (FlightArchive::AccelAltValid(cg))
+						accel_alt_fields.Append(Fmt(cg / 100.0f, 0, 2));
+					accel_alt_fields.Append(',');
+				}
 				export_line.WriteMany(sample_buffer[i].timestamp_ms, ",",
 						Fmt(sample_buffer[i].raw_baro_altitude_agl, 0, 1), ",",
 						Fmt(sample_buffer[i].fused_altitude_agl, 0, 1), ",",
@@ -817,29 +839,32 @@ void UserInteraction::ExportData(uint16_t archive_position) {
 						Fmt(sample_buffer[i].gyro.x * RAD2DEG, 0, 1), ",",
 						Fmt(sample_buffer[i].gyro.y * RAD2DEG, 0, 1), ",",
 						Fmt(sample_buffer[i].gyro.z * RAD2DEG, 0, 1), ",",
-						Fmt(sample_buffer[i].lat_rad * RAD2DEG, 0, 7), ",",
-						Fmt(sample_buffer[i].lon_rad * RAD2DEG, 0, 7), ",",
-						// Split the packed byte back out (ADR-0021 Decision 4, #36):
-						// flight_state stays a plain enum so existing analysis is
-						// unaffected, and armed becomes its own column.  Without
-						// the mask a disarmed sample would export as state 128+.
-						static_cast<uint32_t>(sample_buffer[i].flight_state
-								& ~FlightArchive::FlightSample::kArmedBit), ",",
-						static_cast<uint32_t>((sample_buffer[i].flight_state
-								& FlightArchive::FlightSample::kArmedBit) ? 1u : 0u), ",",
-						static_cast<uint32_t>(sample_buffer[i].oc_start_us), ",",
-						static_cast<uint32_t>(sample_buffer[i].oc_end_us), ",",
-						static_cast<uint32_t>(sample_buffer[i].process_start_us), ",",
-						static_cast<uint32_t>(sample_buffer[i].process_dur_us), ",",
+						// Stored as degrees x 1e-7 (the receiver's own units); 7 decimals is
+						// exactly that resolution, so this round-trips without loss.
+						Fmt(sample_buffer[i].lat_1e7 / 1.0e7, 0, 7), ",",
+						Fmt(sample_buffer[i].lon_1e7 / 1.0e7, 0, 7), ",",
+						// One field per fact now — no unpacking (ARCHIVE_VERSION 6).
+						static_cast<uint32_t>(sample_buffer[i].flight_state), ",",
+						static_cast<uint32_t>(sample_buffer[i].armed), ",",
+						// 0 = the fused pair on this row is trustworthy.  See the header note.
+						static_cast<uint32_t>(sample_buffer[i].ekf_health), ",",
+						// Raw GPS velocity in m/s, pre-formatted above: an absent fix emits an
+						// EMPTY field rather than 0, so a replay cannot read "no velocity" as a
+						// real zero and apply it as a spurious ZUPT.
+						gps_vel_fields.CStr(),
+						Fmt(sample_buffer[i].gps_h_acc_cm / 100.0f, 0, 2), ",",
 						// NFR-9 strapdown attitude — decode packed int16 back to units.
 						Fmt(sample_buffer[i].tilt_cdeg / 100.0f, 0, 2), ",",       // tilt-from-vertical, deg
 						Fmt(sample_buffer[i].quat_q15[0] / 32767.0f, 0, 4), ",",   // q_w
 						Fmt(sample_buffer[i].quat_q15[1] / 32767.0f, 0, 4), ",",   // q_x
 						Fmt(sample_buffer[i].quat_q15[2] / 32767.0f, 0, 4), ",",   // q_y
 						Fmt(sample_buffer[i].quat_q15[3] / 32767.0f, 0, 4), ",",   // q_z
-						// GPS fix quality / satellite count — see export_header_text_.
-						static_cast<uint32_t>(FlightArchive::GpsFixTypeOf(sample_buffer[i].gps_fix_sv)), ",",
-						static_cast<uint32_t>(FlightArchive::GpsNumSvOf(sample_buffer[i].gps_fix_sv)), crlf_);
+						static_cast<uint32_t>(sample_buffer[i].gps_fix_type), ",",
+						static_cast<uint32_t>(sample_buffer[i].gps_num_sv), ",",
+						// The accel channel that was NOT selected, pre-formatted above.
+						accel_alt_fields.CStr(),
+						static_cast<uint32_t>(sample_buffer[i].accel_source), ",",
+						static_cast<uint32_t>(sample_buffer[i].pps_status), crlf_);
 		    }
 		    start += got;
 		}

@@ -52,7 +52,6 @@ void Navigation::triggerMountingCalibration() {
     m_mounting_cal_count   = 0;
     m_mounting_accel_accum = {};
     m_bias_frozen          = false;
-    m_descent_stable_count = 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -500,7 +499,17 @@ bool Navigation::Update() {
 
     if (imu_new) {
         const uint16_t t_ekf = Diag::Now();
+        // Health flags are per-cycle (#38): clear before driving the filter so what
+        // the archive records for this sample is what fired on this sample.
+        m_ekf.clearHealth();
         m_ekf.predict(imu, dt_s);
+
+        // Sustained divergence — re-seed from the strapdown, which ADR-0005 makes
+        // the attitude authority and which is bounded by its own pad seeding rather
+        // than by the EKF's covariance.  Done before the correctors run so they act
+        // on the rebuilt state rather than the poisoned one.
+        if (m_ekf.needsReinit() && m_attitude.initialized())
+            m_ekf.reinitializeFrom(m_attitude.quaternion(), imu);
 
         if (m_cfg.use_baro && baro_new && baro.valid)
             m_ekf.updateBaro(baro);
@@ -531,6 +540,32 @@ bool Navigation::Update() {
         m_solution = m_ekf.getSolution();
         m_solution.body_rates_rps  = imu.gyro_rps;
         m_solution.body_accel_mps2 = imu.accel_selected_mps2;
+
+        // ── Frozen-fused detection (#38) ──────────────────────────────────────
+        // Detect the SYMPTOM, not a mechanism: fused altitude standing still while
+        // the barometer says the rocket is moving.  The EKF's own guards each
+        // catch one known failure path and all of them stay silent on a low
+        // flight — the baro gate needs a 150 m innovation before it fires, so a
+        // channel frozen at the pad reads healthy until the rocket is 150 m up.
+        // Three of the five flights that lost fused data apogeed below that.
+        //
+        // Deliberately compared against RAW baro rather than against the previous
+        // fused value alone: a genuinely stationary rocket also has a static fused
+        // altitude, and flagging that would make the column noise on every pad.
+        {
+            const float d_fused = std::fabs(m_solution.altitude_agl_m - m_last_fused_agl_m_);
+            const float d_raw   = std::fabs(baro.altitude_m_agl - m_last_raw_agl_m_);
+            if (baro_new && baro.valid && d_raw > kFusedFrozenRawMoveM
+                                       && d_fused < kFusedFrozenTolM) {
+                if (m_fused_static_count_ < kFusedFrozenSamples) ++m_fused_static_count_;
+            } else if (d_fused >= kFusedFrozenTolM) {
+                m_fused_static_count_ = 0;
+            }
+            if (baro_new && baro.valid) m_last_raw_agl_m_ = baro.altitude_m_agl;
+            m_last_fused_agl_m_ = m_solution.altitude_agl_m;
+            if (m_fused_static_count_ >= kFusedFrozenSamples)
+                m_ekf.flagFusedFrozen();
+        }
         Diag::mark(Diag::Seg::Ekf, t_ekf);   // predict + baro/GPS updates + ZUPT
 
         const uint16_t t_sd = Diag::Now();
@@ -701,43 +736,6 @@ void Navigation::CalibrateOnPadAndZeroAglUntilLaunch(FlightStates flight_state) 
             }
         }
 
-    } else if (flight_state >= FlightStates::DroguePrimaryEvent &&
-               flight_state <  FlightStates::Landed) {
-        // ── Descent tilt correction ──────────────────────────────────────────
-        // During parachute descent the gyro bias may have drifted from its
-        // pad-calibrated value due to motor and aerodynamic heating.  Once the
-        // rocket is stable under the canopy, gravity provides a reliable
-        // reference for roll and pitch, exactly as it does on the pad.
-        //
-        // Stability gate: require kDescentStableSamples consecutive samples
-        // with gyro magnitude below kDescentStableGyroRps.  This admits the
-        // quiet hanging phases between pendulum swings while rejecting active
-        // tumbling and spin-up transients just after deployment.
-        //
-        // correctTiltFromAccel() has its own internal quasi-static accel gate
-        // (|a| within 30 % of 1g) so it self-suppresses during pendulum peaks
-        // that slip through the gyro check.  Yaw remains unobservable from
-        // gravity and is untouched, as on the pad.  GPS velocity fusion
-        // (already active in all post-launch states) provides complementary
-        // bias observability through the EKF cross-covariance terms.
-        //
-        // ZUPT and baro/AGL zeroing are intentionally omitted: the rocket is
-        // descending at significant speed and the pad altitude reference must
-        // not be disturbed.
-        const float gyro_norm_rps = Math::norm(imu.gyro_rps);
-
-        if (gyro_norm_rps < kDescentStableGyroRps) {
-            if (m_descent_stable_count < kDescentStableSamples)
-                ++m_descent_stable_count;
-        } else {
-            // Rotation exceeded threshold — reset the window.
-            // The next stable phase must build from scratch so that a single
-            // quiet sample between two turbulent ones cannot trigger correction.
-            m_descent_stable_count = 0;
-        }
-
-        if (m_descent_stable_count >= kDescentStableSamples)
-            m_ekf.correctTiltFromAccel(imu.accel_selected_mps2);
     }
 }
 

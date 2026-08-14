@@ -4,6 +4,7 @@ extern "C" {
 //#include "stm32wlxx_ll_usart.h"
 //#include "stm32wlxx_ll_gpio.h"
 #include "spi.h"
+#include "main.h"   // Pps_Get* — GPS-PPS discipline counters (#31)
 }
 
 #include <Factory.hpp>
@@ -378,7 +379,19 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 				BuzzerStop();
 		}
 
-		flight_.SetTimingDiag(m_timing_diag_);
+		// GPS-PPS discipline state for this cycle (#31).  Counters are cumulative,
+		// so a change since last cycle is what "an edge was missed" means here.
+		{
+			static uint32_t s_last_missed = 0, s_last_rejected = 0;
+			const uint32_t missed   = Pps_GetMissedEdgeCount();
+			const uint32_t rejected = Pps_GetRejectedIntervalCount();
+			uint8_t pps = 0;
+			if (Pps_GetTim2TicksPerSec() != 0u) pps |= FlightArchive::kPpsLocked;
+			if (missed   != s_last_missed)      pps |= FlightArchive::kPpsEdgeMissed;
+			if (rejected != s_last_rejected)    pps |= FlightArchive::kPpsIntervalRejected;
+			s_last_missed = missed; s_last_rejected = rejected;
+			flight_.SetPpsStatus(pps);
+		}
 		flight_.SetArmed(device_state_ == DeviceState::Armed);
 		Diag::begin(Diag::Seg::FlightState);
 		flight_.UpdateFlightState();
@@ -394,8 +407,13 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			// Hold the record open until the ~2 s post-landing sample tail has been
 			// captured and drained (RecordComplete()); on a kMaxFlightMs force-close
 			// the tail is never armed, so this is true immediately as before.
-			if (flight_.RecordComplete() && archive_.IsActiveOpen())
+			if (flight_.RecordComplete() && archive_.IsActiveOpen()) {
+				// Final health counters BEFORE the record closes (#38).  Compared
+				// against the launch snapshot, this says whether the fused solution
+				// failed on the pad or in the air.
+				flight_.WriteEkfDiagSnapshot(FlightArchive::Statistic::EkfDiagAtClose);
 				archive_.CloseCurrentFlight();
+			}
 			BuzzerSequence(Landed);
 		}
 		switch (rocket_service_count) {

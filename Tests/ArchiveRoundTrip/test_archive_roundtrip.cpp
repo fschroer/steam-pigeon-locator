@@ -76,7 +76,12 @@ static bool vec3Eq(const Vec3f& a, const Vec3f& b)
 static constexpr uint32_t kFlashSize           = 8u * 1024u * 1024u;
 static constexpr uint32_t kPersistentRegionSize = 32u * 1024u;
 static constexpr uint32_t kRuntimeRegionSize    = 32u * 1024u;
-static constexpr uint16_t kRecordCount          = 10u;
+// MUST track `record_count` in Rocket/Archive/Inc/Archive.hpp.  9 since
+// ARCHIVE_VERSION 6 (#38): an 88 B FlightSample packs 5 per chunk, and ten
+// records no longer fit the archive region.  A mismatch here does not fail
+// loudly on its own — Archive::Init() simply returns false and every
+// subsequent assertion fails — so CheckConfigFits() below reports it plainly.
+static constexpr uint16_t kRecordCount          = 9u;
 static constexpr uint16_t kMinutesPerRecord     = 8u;
 static constexpr uint16_t kStatSlotCount =
     static_cast<uint16_t>(FlightArchive::Statistic::Count);
@@ -98,6 +103,24 @@ static RocketArchive::Config MakeConfig()
     cfg.minutesPerRecord   = kMinutesPerRecord;
     cfg.statSlotCount      = kStatSlotCount;
     return cfg;
+}
+
+// Fail fast, and legibly, when the record count and sample size are inconsistent.
+// Without this the symptom is ~380 unrelated assertion failures starting at
+// archive.Init(), which says nothing about the cause.
+static bool CheckConfigFits()
+{
+    RamFlashDriver probe(kFlashSize);
+    RocketArchive  a(probe, MakeConfig());
+    if (a.Init())
+        return true;
+    std::printf("\n  CONFIG DOES NOT FIT: %u records x %u B samples exceeds the archive\n"
+                "  region.  Reconcile kRecordCount here with record_count in\n"
+                "  Rocket/Archive/Inc/Archive.hpp, and see the capacity table in\n"
+                "  Rocket/Archive/Inc/ArchiveTypes.hpp.\n\n",
+                static_cast<unsigned>(kRecordCount),
+                static_cast<unsigned>(sizeof(FlightArchive::FlightSample)));
+    return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -128,8 +151,8 @@ static FlightArchive::FlightSample MakeSample(uint32_t i)
                -0.01f * static_cast<float>(i),
                 0.005f * static_cast<float>(i) };
 
-    s.lat_rad = 0.6981317 + static_cast<double>(i) * 1e-7;  // ~40° N
-    s.lon_rad = -1.2566371 + static_cast<double>(i) * 1e-7; // ~-72° (Connecticut)
+    s.lat_1e7 = 400000000 + static_cast<int32_t>(i);   // ~40° N, degrees x 1e-7
+    s.lon_1e7 = -720000000 + static_cast<int32_t>(i);  // ~-72° (Connecticut)
 
     // Flight state follows a realistic progression:
     //   samples   0– 99 : Launched
@@ -162,8 +185,8 @@ static void CheckSampleMatch(const FlightArchive::FlightSample& got,
            && floatEq(got.fused_vertical_speed_mps, expected.fused_vertical_speed_mps)
            && vec3Eq(got.accel,                     expected.accel)
            && vec3Eq(got.gyro,                      expected.gyro)
-           && doubleEq(got.lat_rad,                 expected.lat_rad)
-           && doubleEq(got.lon_rad,                 expected.lon_rad)
+           && (got.lat_1e7                     == expected.lat_1e7)
+           && (got.lon_1e7                     == expected.lon_1e7)
            && (got.flight_state                == expected.flight_state)
            && (got.tilt_cdeg                   == expected.tilt_cdeg)
            && (got.quat_q15[0] == expected.quat_q15[0])
@@ -579,6 +602,8 @@ static void TestPreLaunchDrainThrottle()
 
 int main()
 {
+    if (!CheckConfigFits()) return 1;
+
     printf("==========================================================\n");
     printf(" FlightArchive round-trip test\n");
     printf(" FlightSample layout: %zu bytes  (page: %u bytes)\n",

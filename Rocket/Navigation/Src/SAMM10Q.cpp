@@ -286,34 +286,26 @@ void SAMM10Q::serviceStaleRecovery(uint32_t now) {
 }
 
 // ----------------------------------------------------------------------------
-// archiveFixSvByte — pack fix quality and satellite count into one byte.
+// archiveFixType — the fix quality byte, with staleness folded in.
 //
-//   bits 0-2  gps_code : 0-5 = live u-blox fixType (a NAV-PVT parsed recently)
-//                        6   = fix stale, NMEA seen on the wire (receiver reset
-//                              to defaults — its configuration was lost)
-//                        7   = fix stale, anything else (receiver silent, or
-//                              UBX present but yielding no NAV-PVT)
-//   bits 3-7  num_sv   : satellites used, saturated at 31
+//   0-5 = live u-blox fixType (a NAV-PVT parsed recently)
+//   6   = fix stale, NMEA seen on the wire (receiver reset to defaults — its
+//         configuration was lost)
+//   7   = fix stale, anything else (receiver silent, or UBX present but
+//         yielding no NAV-PVT)
 //
 // u-blox only defines fixType 0-5, so 6 and 7 are free to carry the stale
-// classification without displacing any real value.  One byte is the entire
-// budget available: FlightSample is size-locked at 80 B and growing it to 84 B
-// would add ~375 KB of chunk stride across the 10-record region, against ~200 KB
-// of headroom.
+// classification without displacing a real value.  Anything >= 6 means the
+// lat/lon on that sample are latched, not live.
+//
+// Satellite count used to share this byte (bits 3-7, saturated at 31).  It has
+// its own field as of ARCHIVE_VERSION 6 and is no longer squeezed in here.
 // ----------------------------------------------------------------------------
-uint8_t SAMM10Q::archiveFixSvByte() const {
-	uint8_t code;
-	if (!isFixStale()) {
-		code = static_cast<uint8_t>(m_last.fix_type);
-		if (code > 5u) code = 5u;
-	} else {
-		code = m_stale_nmea_seen ? 6u : 7u;
-	}
-
-	uint8_t sv = m_last.num_sv;
-	if (sv > 31u) sv = 31u;
-
-	return static_cast<uint8_t>(code | static_cast<uint8_t>(sv << 3));
+uint8_t SAMM10Q::archiveFixType() const {
+	if (isFixStale())
+		return m_stale_nmea_seen ? 6u : 7u;
+	uint8_t code = static_cast<uint8_t>(m_last.fix_type);
+	return (code > 5u) ? 5u : code;
 }
 
 bool SAMM10Q::powerUp() {

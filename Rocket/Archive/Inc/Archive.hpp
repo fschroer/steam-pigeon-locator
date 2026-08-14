@@ -8,7 +8,13 @@
 #include "SystemFlashLayout.hpp"
 #include "PasswordKdf.hpp"
 
-constexpr uint8_t record_count = 10;
+// 9, not 10: FlightSample grew 80 -> 88 B for ARCHIVE_VERSION 6 (#38), which
+// drops chunk packing from 6 to 5 samples and the record from 811,008 to
+// 892,928 B.  Ten of those need 8,929,280 B against an 8,323,072 B archive
+// region; nine need 8,036,352 B.  Archive::Init() would simply return false
+// and disable recording if this were left at 10 — see the capacity table in
+// ArchiveTypes.hpp before changing either number.
+constexpr uint8_t record_count = 9;
 
 using RocketArchive = FlightArchive::Archive<
 FlightArchive::FlightSample,
@@ -26,15 +32,29 @@ public:
 	bool IsInitialized();
 	template<typename TValue>
 	bool WriteEvent(FlightArchive::Statistic stat_id, const TValue &value);
-	bool WriteData(uint32_t flight_time_ms, const NavSolution &nav_solution, const float raw_baro_altitude_agl,
-			const float raw_baro_velocity, FlightStates flight_state, const TimingDiag &timing,
-			float tilt_rad, const Quaternionf &strapdown_quat, bool armed);
-	// Pack a FlightSample from the per-cycle inputs WITHOUT writing it.  Shared by
-	// WriteData() and the FlightManager pre-launch ring producer so the on-flash
-	// layout is defined in exactly one place.
-	static FlightArchive::FlightSample BuildSample(uint32_t flight_time_ms, const NavSolution &nav_solution,
-			const float raw_baro_altitude_agl, const float raw_baro_velocity, FlightStates flight_state,
-			const TimingDiag &timing, float tilt_rad, const Quaternionf &strapdown_quat, bool armed);
+	// Everything one archived sample needs, gathered rather than passed as a
+	// growing argument list.  ARCHIVE_VERSION 6 (#38) added enough per-sample
+	// inputs (raw GPS velocity, both accel channels, EKF health, PPS state) that
+	// positional arguments had become easy to transpose silently.
+	struct SampleInputs {
+		uint32_t          flight_time_ms   = 0;
+		const NavSolution *nav             = nullptr;  // fused solution (observational, ADR-0005)
+		float             raw_baro_agl_m   = 0.0f;
+		float             raw_baro_vel_mps = 0.0f;
+		FlightStates      flight_state     = FlightStates::WaitingLaunch;
+		const GpsSample   *gps             = nullptr;  // RAW GPS (#13), position + velocity + accuracy
+		const ImuSample   *imu             = nullptr;  // RAW IMU — supplies the NON-selected accel channel
+		EkfHealth         health           {};
+		float             tilt_rad         = 0.0f;
+		Quaternionf       strapdown_quat   {};
+		bool              armed            = false;
+		uint8_t           pps_status       = 0;        // FlightArchive::PpsStatus bits (#31)
+	};
+	bool WriteData(const SampleInputs &in);
+	// Pack a FlightSample WITHOUT writing it.  Shared by WriteData() and the
+	// FlightManager pre-launch ring producer so the on-flash layout is defined in
+	// exactly one place.
+	static FlightArchive::FlightSample BuildSample(const SampleInputs &in);
 	// Write an already-built sample (e.g. drained from the pre-launch ring).
 	bool WriteBuiltSample(const FlightArchive::FlightSample &sample) {
 		return archive_.WriteFlightDataSample(record_id_, sample);

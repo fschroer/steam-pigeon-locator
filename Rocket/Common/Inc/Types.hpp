@@ -182,6 +182,54 @@ struct GpsSample {
 	bool time_valid = false;
 };
 
+// Per-cycle health of the fused solution (#38).  Lives here rather than inside
+// InsEkf15 so the archive layer can record it without taking a dependency on the
+// filter — Archive knows what a sample contains, not how the estimate is made.
+//
+// Each flag is what fired on ONE cycle, not a cumulative count.  Any flag set
+// means the fused_* pair for that sample is not trustworthy: a diverged filter
+// writes a frozen altitude and an exactly-0.0 vertical speed, which is precisely
+// what a healthy filter writes while the rocket is stationary on the pad.
+struct EkfHealth {
+    bool vel_divergence_reset = false;  // velocity divergence guard fired
+    bool correction_dropped   = false;  // injectErrorState() rejected a non-finite dx
+    bool baro_update_rejected = false;  // updateBaro() bailed (non-finite or gated)
+    // Fused altitude static while raw baro moved — the SYMPTOM, caught directly
+    // rather than inferred from a mechanism.
+    //
+    // The other three flags each detect one known failure path, and on a low
+    // flight none of them fires: baro_update_rejected needs the innovation to
+    // exceed the 150 m gate, so a channel frozen at the pad stays silent until
+    // the rocket is 150 m up.  Three of the five flights that lost fused data
+    // apogeed below that (30 m, 92 m, 104 m) and would have exported a clean
+    // ekf_health for the whole flight — the exact ambiguity the column exists to
+    // remove.  This flag keys on the observable instead, so it does not care
+    // which mechanism caused the freeze.
+    bool fused_frozen         = false;
+
+    bool any() const {
+        return vel_divergence_reset || correction_dropped || baro_update_rejected || fused_frozen;
+    }
+};
+
+// Cumulative numerical-health counters for the fused solution.  Here rather than
+// inside InsEkf15 for the same reason as EkfHealth: FlightManager snapshots these
+// into the record and the FlightReplay harness mocks the filter away entirely, so
+// neither should have to include the estimator to name its diagnostics.
+//
+// Steady zeros mean the filter is well conditioned.  Rising baro_nonfinite_drops
+// points at a flaky MS5611 read; rising nonfinite_dx_drops means a measurement
+// produced a non-finite correction (the safety net fired) — a signal that the
+// covariance update needs the sturdier Joseph form.  baro_gate_rejects rising in
+// flight means legitimate baro innovations are being thrown away.
+struct EkfDiag {
+    uint32_t nonfinite_dx_drops    = 0;
+    uint32_t baro_nonfinite_drops  = 0;
+    uint32_t baro_gate_rejects     = 0;
+    uint32_t vel_divergence_resets = 0;   // velocity guard fired (#12)
+    uint32_t inflight_reinits      = 0;   // filter re-seeded after a sustained divergence (#38)
+};
+
 struct SensorStatus {
     SensorHealth health = SensorHealth::Off;
     bool initialized = false;
@@ -249,27 +297,3 @@ struct NavConfig {
     bool use_baro = true;
 };
 
-// ---------------------------------------------------------------------------
-// Timing diagnostics captured each 50 ms cycle.
-//
-// TIM2 runs at 1 MHz (1 µs / tick) as a free-running 32-bit counter.  We
-// store only the lower 16 bits of each capture, which wraps every 65.535 ms —
-// more than one full 50 ms period, so all timing relationships are unambiguous
-// within a cycle.
-//
-//   oc_start_us     — TIM2->CNT at entry to the first OCCallback call
-//                     (the call that starts the D2 conversion, ~28 ms into the cycle)
-//   oc_end_us       — TIM2->CNT at exit of the second OCCallback call
-//                     (the call that reads D2 and starts D1, ~39 ms into the cycle)
-//   process_start_us— TIM2->CNT at entry to ProcessRocketEvents (main-loop call)
-//   process_dur_us  — duration of the PREVIOUS ProcessRocketEvents call in µs
-//                     (the current call's end time is not available when WriteData
-//                     executes inside UpdateFlightState, so the previous cycle's
-//                     duration is stored and reported one cycle later)
-// ---------------------------------------------------------------------------
-struct TimingDiag {
-    uint16_t oc_start_us      = 0;
-    uint16_t oc_end_us        = 0;
-    uint16_t process_start_us = 0;
-    uint16_t process_dur_us   = 0;
-};

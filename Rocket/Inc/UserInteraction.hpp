@@ -20,7 +20,15 @@ extern "C" {
 // headroom over the widest line.  The binding case is the CSV export header —
 // clear_screen_ + export_header_text_ + crlf_ in one call — which is guarded by
 // a static_assert below; data rows run ~180 characters.
-#define UART_LINE_MAX_LENGTH 320
+// Raised 320 -> 416 for the ARCHIVE_VERSION 6 export header (#38), which grew
+// to 338 characters when the bit-packed fields became named columns and the
+// second accel channel / PPS state were added.  With clear_screen_ (9) and
+// crlf_ (2) that needs 349 against 319 usable, so the static_assert below
+// would have failed the build — which is exactly what it is for; the 2026-08-02
+// export lost num_sv and its line ending to a silent truncation before it
+// existed.  Buffers are stack-local StaticStringWriter instances plus one
+// heap line, so the cost is ~96 B per live buffer, not per column.
+#define UART_LINE_MAX_LENGTH 416
 #define USER_INPUT_MAX_LENGTH 15
 #define DATE_STRING_LENGTH 23
 #define ALTIMETER_STRING_LENGTH 7
@@ -171,13 +179,27 @@ private:
   // lat_deg/lon_deg on that row are latched, not live.  New columns are appended
   // rather than inserted so existing analysis spreadsheets keep working.
   //
+  // ekf_health (ARCHIVE_VERSION 6, #38): 0 = the filter was healthy on that cycle;
+  // bit 0 = velocity divergence guard fired, bit 1 = a non-finite correction was
+  // dropped, bit 2 = the baro update was rejected.  Any non-zero value means the
+  // fused_* pair on that row is not trustworthy.  This column exists because a
+  // frozen fused altitude with an exactly-0.0 vertical speed is indistinguishable
+  // from a healthy filter sitting on the pad — six flights across two campaigns
+  // died that way before anyone noticed.
+  //
+  // gps_vel_{n,e,d}_mps / gps_h_acc_m REPLACE the four per-cycle timing columns
+  // (the bytes were reused; FlightSample is capacity-locked at 80 B).  Velocity
+  // fields are EMPTY, not 0, when the fix carried no velocity, so an offline
+  // replay cannot mistake an absent fix for a stationary one.  Cycle timing is
+  // still available live through the 't' per-cycle breakdown.
+  //
   // Declared as an array rather than a pointer so its length is a compile-time
   // constant the static_assert below can check.  Adding fix_type,num_sv pushed
   // this to 255 characters, and with clear_screen_ (5) and crlf_ (2) the single
   // WriteMany() that emits it needed 262 against 254 usable — the 2026-08-02
   // export stopped at "fix_type," and lost both num_sv and its line ending, so
   // the first data row ran onto the header line.
-  static constexpr char export_header_text_[] = "time_ms,raw_baro_agl_m,fused_agl_m,raw_baro_vel_mps,fused_vspeed_mps,accel_x_g,accel_y_g,accel_z_g,gyro_x_dps,gyro_y_dps,gyro_z_dps,lat_deg,lon_deg,flight_state,armed,oc_start_us,oc_end_us,process_start_us,process_dur_us,tilt_deg,q_w,q_x,q_y,q_z,fix_type,num_sv";
+  static constexpr char export_header_text_[] = "time_ms,raw_baro_agl_m,fused_agl_m,raw_baro_vel_mps,fused_vspeed_mps,accel_x_g,accel_y_g,accel_z_g,gyro_x_dps,gyro_y_dps,gyro_z_dps,lat_deg,lon_deg,flight_state,armed,ekf_health,gps_vel_n_mps,gps_vel_e_mps,gps_vel_d_mps,gps_h_acc_m,tilt_deg,q_w,q_x,q_y,q_z,fix_type,num_sv,accel_alt_x_g,accel_alt_y_g,accel_alt_z_g,accel_source,pps_status";
 
   // clear_screen_ ("\x1b[2J" + "\x1b(B" + SI + "\r" = 9) + crlf_ ("\r\n" = 2)
   // share the header's line buffer.

@@ -41,8 +41,23 @@ public:
     // are no-ops here: the harness drives FlightManager directly and has no GPS
     // receiver to configure, but without them this suite does not compile —
     // which is how it came to be silently unbuildable (see README).
-    uint8_t getGpsArchiveFixSvByte() const { return 0u; }
+    uint8_t getGpsArchiveFixType() const { return 0u; }
     void    resetGpsForPad() {}
+    // Raw IMU — the real Navigation supplies both accel channels so the archive can
+    // record the non-selected one (ADR-0004 vetting gap).  Nothing here exercises
+    // that, so an empty sample is enough to satisfy the call.
+    const ImuSample& getRawImu() const { return m_raw_imu; }
+    // Cumulative EKF counters, snapshotted into the record at launch and close
+    // (#38).  The filter is mocked away, so these stay zero — which is the correct
+    // answer for a harness that never runs one.
+    EkfDiag getEkfDiag() const { return {}; }
+    // ARCHIVE_VERSION 6 (#38): FlightManager stamps per-cycle fused-solution
+    // health into every sample.  This harness mocks the filter away entirely, so
+    // it reports healthy — the deployment ladder under test does not consume the
+    // fused pair (ADR-0005 raw-primary), so a health flag cannot change its
+    // decisions.  Settable in case a future test wants to assert the passthrough.
+    EkfHealth getEkfHealth() const { return m_ekf_health; }
+    void SetEkfHealth(const EkfHealth& h) { m_ekf_health = h; }
     bool  attitudeReady()           const { return m_attitude_ready; }
     uint32_t attitudeLastUpdateMs() const { return m_solution.timestamp_ms; }
 
@@ -55,6 +70,8 @@ private:
     float       m_tilt_rad           = 0.0f;
     bool        m_baro_ref_ready     = true;
     bool        m_attitude_ready     = true;
+    EkfHealth   m_ekf_health     {};
+    ImuSample   m_raw_imu        {};
 };
 
 } // namespace RocketNav

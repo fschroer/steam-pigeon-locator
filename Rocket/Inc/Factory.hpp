@@ -38,7 +38,6 @@ public:
 			TIM_HandleTypeDef &htim17);
 	void Init(const Radio_s *radio);
 	void ProcessRocketEvents(uint8_t rocket_service_count);
-	void SetTimingDiag(const TimingDiag &t) { m_timing_diag_ = t; }
 	// GPS-PPS-disciplined monotonic millisecond clock, forwarded to FlightManager
 	// each cycle so archived timestamps reflect true elapsed time (see
 	// Factory_C_Interface.cpp AdvanceMonotonicMs).
@@ -195,5 +194,4 @@ private:
 	bool       nav_test_requested_ = false;
 	// Archive slot the bench replay reads from ('0'..'9' console keys, #35/#36).
 	uint8_t    bench_replay_record_ = 0;
-	TimingDiag m_timing_diag_ { };
 };

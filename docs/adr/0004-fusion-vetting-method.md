@@ -58,3 +58,19 @@ This satisfies Decision 3 (*"the comparison must be regenerable from archived da
 - The archive logs a single accel triple (the *selected* channel), not both low-g and high-g, so a channel scale mismatch is invisible in every flight already recorded.
 
 **Bearing on the vetting gate:** unchanged. Decision 2's bar (fused must beat raw against an *independent* reference) still requires the smoother plus GPS/second-altimeter triangulation. The harness makes iteration cheap; it does not lower the bar.
+
+## Amendment (2026-08-14) — two of the three gaps moved, and one turned out to be a format problem
+
+Prompted by [#38](https://github.com/fschroer/steam-pigeon-locator/issues/38): six flights across two campaigns recorded a dead fused solution without anyone noticing, which made the gaps above concrete rather than theoretical.
+
+**Gap 3 (single accel channel) — CLOSED.** `ARCHIVE_VERSION` 6 archives the **non-selected** channel per sample (`accel_alt_cg[3]`, 0.01 g/LSB) alongside `accel_source`. A scale mismatch between the low-g and high-g channels biases every accel-driven state in the filter, so under Decision 2 it had to become measurable before any fused quantity could be promoted. It is now measurable prospectively — not retroactively; every flight recorded before v6 still cannot answer it.
+
+**Gap 1 (no `Navigation` orchestration) — PARTIALLY closed, and the remainder is not a harness problem.** `Tests/EkfReplay` can now drive ZUPT, pad AGL zeroing, `applyPadGyroRecalibration` and `correctTiltFromAccel` at the real cadences (ZUPT every cycle; pad calibration once per second, matching `rocket_service_count == 2`), and `updateGpsVelocity` with real `h_acc` now that v6 archives GPS velocity and accuracy. It is **opt-in (`--orchestrate`), not the default**, and that default is a finding:
+
+> ZUPT asserts "the rocket is stationary", so every ZUPT correction is resolved through the filter's attitude. The replayed EKF attitude carries **42–69° of mean error** against the archived strapdown on every flight measured — it always has; it simply did not matter while the harness only ran `predict`/`updateBaro`. With ZUPT in the loop that error is injected into the accel-bias state on every stationary sample, and the bias ran away to ~4×10¹⁷ g on flights whose real bias never left 0.05 g.
+
+The attitude cannot be fixed from the records that exist, for reasons that are **Gap 2**: the pad phase is where the real filter converges and the archive keeps only ~2 s of it (mostly already under thrust), and the strapdown integrates the FIFO at ~480 Hz against one archived gyro triple per 20 Hz cycle. Seeding the replay from the archived strapdown at t=0 helps the first samples and does not survive the flight.
+
+So the remaining orchestration gap is **a record-format limitation, not a harness limitation**: closing it needs a higher-rate attitude reference *in the archive*. Until then a replay's absolute bias and attitude figures are not evidence, and the harness says so by leaving the orchestration off.
+
+**Bearing on the vetting gate:** still unchanged. None of this substitutes for the non-causal smoother of Decision 1. What it changes is that a *diverged* flight can now be identified and excluded before it is averaged into any comparison — see the `ekf_health` column and the `EkfDiagAtLaunch`/`EkfDiagAtClose` snapshots ([ADR-0026](0026-archive-capacity-for-fusion-diagnosability.md)).

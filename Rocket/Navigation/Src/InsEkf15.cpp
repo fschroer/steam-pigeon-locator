@@ -220,6 +220,58 @@ bool InsEkf15::initialize(const ImuSample& imu, const BaroSample* baro, const Gp
 }
 
 // ---------------------------------------------------------------------------
+// reinitializeFrom — recover from a sustained divergence (#38)
+//
+// Called by Navigation when needsReinit() goes true, with the NFR-9 strapdown
+// attitude as the reference.  What is discarded and what is kept both matter:
+//
+//   discarded — the covariance (rebuilt from the power-on diagonal) and the
+//               gyro/accel bias states.  On CH9-F2 the accel bias reached
+//               9.5e6 g; a bias that large makes every subsequent prediction
+//               garbage, and the covariance that produced it cannot be trusted
+//               to correct it.
+//   kept      — position, the pad altitude reference, and altitude_msl.  The
+//               horizontal channel never diverged on any observed flight, and
+//               re-zeroing the pad reference would rebase fused AGL mid-flight,
+//               producing a plausible-looking wrong altitude instead of an
+//               obviously frozen one.
+//
+// Velocity is zeroed rather than kept: it is the state that diverged, there is
+// no better estimate available, and ZUPT/GPS/baro can pull it back once the
+// covariance is finite again.
+// ---------------------------------------------------------------------------
+void InsEkf15::reinitializeFrom(const Quaternionf& q_bn, const ImuSample& imu) {
+    m_sol.q_bn  = Math::quatNormalize(q_bn);
+    m_sol.euler = Math::quatToEuler(m_sol.q_bn);
+
+    m_sol.vel_ned_mps     = {0.0f, 0.0f, 0.0f};
+    m_sol.speed_mps       = 0.0f;
+    m_sol.vertical_speed_mps = 0.0f;
+    m_sol.gyro_bias_rps   = {0.0f, 0.0f, 0.0f};
+    m_sol.accel_bias_mps2 = {0.0f, 0.0f, 0.0f};
+    m_sol.nav_accel_mps2  = {0.0f, 0.0f, 0.0f};
+    m_sol.body_rates_rps  = imu.gyro_rps;
+    m_sol.body_accel_mps2 = imu.accel_selected_mps2;
+    m_sol.attitude_valid  = true;
+
+    // If altitude was itself non-finite, the pad reference cannot repair it —
+    // fall back to the pad so AGL reads 0 rather than NaN, which the CSV
+    // formatter would render as a plausible "0.0".
+    if (!std::isfinite(static_cast<float>(m_sol.pos.alt_m))) {
+        m_sol.pos.alt_m      = static_cast<double>(m_pad_altitude_msl_m);
+        m_sol.altitude_msl_m = m_pad_altitude_msl_m;
+    }
+    m_sol.altitude_agl_m = m_sol.altitude_msl_m - m_pad_altitude_msl_m
+                           + m_pad_altitude_agl_zero_m;
+
+    initializePDiagonal();
+    m_geo_cache_dirty        = true;
+    m_consecutive_vel_resets = 0;
+    m_needs_reinit           = false;
+    ++m_diag.inflight_reinits;
+}
+
+// ---------------------------------------------------------------------------
 // predict
 // ---------------------------------------------------------------------------
 void InsEkf15::predict(const ImuSample& imu, float dt_s) {
@@ -289,6 +341,23 @@ void InsEkf15::predict(const ImuSample& imu, float dt_s) {
         if (!std::isfinite(vmag2) || vmag2 > kVelDivergenceMps * kVelDivergenceMps) {
             m_sol.vel_ned_mps = {0.0f, 0.0f, 0.0f};
             ++m_diag.vel_divergence_resets;
+            m_health.vel_divergence_reset = true;
+
+            // A guard that fires every cycle is not bounding a transient — it is
+            // holding a dead filter at zero, which freezes fused altitude (alt_dot
+            // = -vel.z = 0 below) and pins fused vertical speed at exactly 0.0 for
+            // the rest of the flight.  Rebuild once the run is long enough that a
+            // real transient is ruled out (#38).
+            // Flag it rather than acting here: recovering attitude needs the NFR-9
+            // strapdown, which Navigation owns and which ADR-0005 already makes the
+            // attitude authority.  Re-seeding from accel the way initialize() does
+            // would be wrong in flight — specific force is not gravity under thrust
+            // or under canopy — and keeping the diverged attitude would simply
+            // re-diverge on the next cycle.
+            if (++m_consecutive_vel_resets >= kMaxConsecutiveVelResets)
+                m_needs_reinit = true;
+        } else {
+            m_consecutive_vel_resets = 0;
         }
     }
 
@@ -451,7 +520,7 @@ void InsEkf15::updateBaro(const BaroSample& baro) {
     // pass the innovation gate below — fabs(NaN) > 150 is false — and inject
     // NaN into pos.alt_m, corrupting AGL and (via the position cross-covariance)
     // lat/lon as well.
-    if (!std::isfinite(z)) { ++m_diag.baro_nonfinite_drops; return; }
+    if (!std::isfinite(z)) { ++m_diag.baro_nonfinite_drops; m_health.baro_update_rejected = true; return; }
 
     // Dynamic-pressure (pitot) correction: during fast ascent the sensor port
     // sees ram pressure and reads lower than true static altitude.  Add back
@@ -496,8 +565,8 @@ void InsEkf15::updateBaro(const BaroSample& baro) {
     // in the Launched phase, K_baro is now larger and fused altitude tracks
     // raw more closely.  The wider gate ensures baro remains active even if
     // an initial EKF altitude error exceeds 40 m at launch.
-    if (!std::isfinite(y)) { ++m_diag.baro_nonfinite_drops; return; }
-    if (std::fabs(y) > 150.0f) { ++m_diag.baro_gate_rejects; return; }
+    if (!std::isfinite(y)) { ++m_diag.baro_nonfinite_drops; m_health.baro_update_rejected = true; return; }
+    if (std::fabs(y) > 150.0f) { ++m_diag.baro_gate_rejects; m_health.baro_update_rejected = true; return; }
 
     const float S_inv = 1.0f / S;
     float K[n];
@@ -798,7 +867,7 @@ void InsEkf15::injectErrorState(const float dx[15]) {
     // the entire state (and, through the covariance couplings, spread across
     // position/velocity/attitude on subsequent steps).  Drop the whole update.
     for (int i = 0; i < 15; ++i)
-        if (!std::isfinite(dx[i])) { ++m_diag.nonfinite_dx_drops; return; }
+        if (!std::isfinite(dx[i])) { ++m_diag.nonfinite_dx_drops; m_health.correction_dropped = true; return; }
 
     const double RM = WGS84::meridianRadius(m_sol.pos.lat_rad);
     const double RN = WGS84::primeVerticalRadius(m_sol.pos.lat_rad);

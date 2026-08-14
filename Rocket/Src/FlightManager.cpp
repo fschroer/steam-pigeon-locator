@@ -332,6 +332,8 @@ void FlightManager::UpdateFlightState() {
             m_record_origin_set_ = true;
             flight_time_ms = m_flight_clock_ms_ - m_record_origin_ms_;
             archive_.WriteEvent(FlightArchive::Statistic::LaunchTimestampMs, flight_time_ms);
+            // Pad-phase health, before any in-flight sample exists (#38).
+            WriteEkfDiagSnapshot(FlightArchive::Statistic::EkfDiagAtLaunch);
             deployment_ch1_stats_ = static_cast<uint8_t>(locator_settings.deployment_ch1_mode);
             deployment_ch2_stats_ = static_cast<uint8_t>(locator_settings.deployment_ch2_mode);
             deployment_ch3_stats_ = static_cast<uint8_t>(locator_settings.deployment_ch3_mode);
@@ -664,26 +666,31 @@ void FlightManager::UpdateFlightState() {
                                    && m_landed_tail_remaining_ > 0;
     if (producer_in_flight || producer_landed_tail) {
         const BaroSample baro_raw = nav_.getRawBaro();
-        FlightArchive::FlightSample s = Archive::BuildSample(
-            m_flight_clock_ms_, nav_solution, baro_raw.altitude_m_agl, baro_raw.velocity,
-            flight_state_, m_timing_diag_, nav_.getTiltFromVerticalRad(), nav_.getStrapdownQuat(),
-            m_armed_);
-        // #13: archive RAW GPS position (ADR-0005 raw-primary), not the retired EKF's
+        // #13: archive RAW GPS (ADR-0005 raw-primary), not the retired EKF's
         // nav_solution.pos — that stayed frozen at the pad in the record even though
-        // the live telemetry path (raw GPS) showed the real moving track.
+        // the live telemetry path (raw GPS) showed the real moving track.  The same
+        // raw sample also supplies velocity, accuracy, fix type and satellite count.
+        Archive::SampleInputs in{};
+        in.flight_time_ms   = m_flight_clock_ms_;
+        in.nav              = &nav_solution;
+        in.raw_baro_agl_m   = baro_raw.altitude_m_agl;
+        in.raw_baro_vel_mps = baro_raw.velocity;
+        in.flight_state     = flight_state_;
         const GpsSample gps_raw = nav_.getRawGps();
-        s.lat_rad = gps_raw.lat_rad;
-        s.lon_rad = gps_raw.lon_rad;
-        // Fix quality, satellite count, and — once the fix goes stale — what the
-        // receiver is actually emitting.  lat/lon above latch at their last parsed
-        // value, so without this a frozen position is indistinguishable in the
-        // record from a stationary rocket.
-        s.gps_fix_sv = nav_.getGpsArchiveFixSvByte();
-        // fused_altitude_agl / fused_vertical_speed_mps are left as BuildSample set
-        // them — the EKF's fused solution (nav_solution.altitude_agl_m /
-        // vertical_speed_mps).  The EKF is retired from the real-time authority
-        // (ADR-0005) but still runs every cycle; these columns are how its output is
-        // observed offline (ADR-0004) and are deliberately NOT overwritten here.
+        in.gps              = &gps_raw;
+        const ImuSample imu_raw = nav_.getRawImu();
+        in.imu              = &imu_raw;
+        in.health           = nav_.getEkfHealth();
+        in.tilt_rad         = nav_.getTiltFromVerticalRad();
+        in.strapdown_quat   = nav_.getStrapdownQuat();
+        in.armed            = m_armed_;
+        in.pps_status       = m_pps_status_;
+        FlightArchive::FlightSample s = Archive::BuildSample(in);
+        // A stale fix latches lat/lon at the last parsed value, so without the fix
+        // type a frozen position is indistinguishable in the record from a
+        // stationary rocket.  getRawGps() reports the receiver's own fixType;
+        // getGpsArchiveFixType() overlays the 6/7 stale classification on top.
+        s.gps_fix_type = nav_.getGpsArchiveFixType();
         PushPreLaunchSample(s, flight_state_ == FlightStates::WaitingLaunch);
         if (producer_landed_tail)
             --m_landed_tail_remaining_;
@@ -837,6 +844,32 @@ void FlightManager::AdvanceFlightState(FlightStates s) {
 }
 
 // ---------------------------------------------------------------------------
+// WriteEkfDiagSnapshot (#38)
+// Saturating copy of the filter's cumulative health counters into one stat slot.
+//
+// Written at launch and again at close.  The pair is what separates the two
+// failure classes without a replay:
+//   launch != 0                  -> the filter was already broken on the pad,
+//                                   before the record starts
+//   launch == 0, close != 0      -> it broke in flight; the per-sample
+//                                   ekf_health column says on which cycle
+//   both 0, fused still flat     -> neither known mechanism fired, which is
+//                                   itself a finding worth having
+// ---------------------------------------------------------------------------
+void FlightManager::WriteEkfDiagSnapshot(FlightArchive::Statistic slot) {
+    const auto d = nav_.getEkfDiag();
+    auto sat = [](uint32_t v) -> uint16_t {
+        return (v > 65535u) ? static_cast<uint16_t>(65535u) : static_cast<uint16_t>(v);
+    };
+    FlightArchive::EkfDiagSnapshot snap{};
+    snap.nonfinite_dx_drops    = sat(d.nonfinite_dx_drops);
+    snap.baro_nonfinite_drops  = sat(d.baro_nonfinite_drops);
+    snap.baro_gate_rejects     = sat(d.baro_gate_rejects);
+    snap.vel_divergence_resets = sat(d.vel_divergence_resets);
+    archive_.WriteEvent(slot, snap);
+}
+
+// ---------------------------------------------------------------------------
 // AnchorRecordToLaunchOnset (#7)
 // Scan the retained pre-launch ring oldest-first for thrust onset — the first
 // sample whose body-accel magnitude rises out of the 1 g pad band — and drop the
@@ -858,6 +891,30 @@ uint32_t FlightManager::AnchorRecordToLaunchOnset() {
         }
         idx = static_cast<uint16_t>((idx + 1) % kPreLaunchRingSamples);
     }
+    // Keep the pad samples when the fused solution was ALREADY unhealthy (#38).
+    //
+    // Normally the pre-onset pad data is dropped so t=0 is the launch instant.
+    // But five flights lost their fused solution before the record even began,
+    // and this discard is what erased the evidence: the archive opened with the
+    // channel already dead and no transition anywhere in it.  When any retained
+    // pad sample carries a health flag, the freeze happened HERE, and these are
+    // the only samples that will ever show it — so the epoch stays at the oldest
+    // retained sample instead and the pad phase is archived.
+    //
+    // The cost is that t=0 is then pad rather than onset for that flight, which
+    // is why it is conditional: a healthy flight keeps the launch-anchored epoch
+    // every downstream consumer expects.  A flight that trips this has a bigger
+    // problem than a shifted epoch, and the launch timestamp is still written as
+    // a Statistic either way.
+    bool health_flagged = false;
+    uint16_t scan = m_ring_head_;
+    for (uint16_t i = 0; i < m_ring_count_; ++i) {
+        if (m_ring_[scan].ekf_health != 0u) { health_flagged = true; break; }
+        scan = static_cast<uint16_t>((scan + 1) % kPreLaunchRingSamples);
+    }
+    if (health_flagged)
+        return m_ring_[m_ring_head_].timestamp_ms;
+
     // Discard the pre-onset pad samples so the remaining ring starts at onset.
     m_ring_head_  = static_cast<uint16_t>((m_ring_head_ + onset_off) % kPreLaunchRingSamples);
     m_ring_count_ = static_cast<uint16_t>(m_ring_count_ - onset_off);

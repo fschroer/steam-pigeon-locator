@@ -49,6 +49,16 @@ Per the flight-2026-07-12 request (issue #7 in that analysis; GitHub #25), the r
 
 Trade-off, deliberately accepted: the ~2 s of pre-onset pad data this ADR added is **no longer retained**. Timestamps are `uint32_t` (unsigned), so pre-onset data cannot carry negative time relative to a launch-zero epoch; keeping *both* launch-at-0 and the pre-launch lead-in would require a **signed** timestamp field, which is a coordinated firmware+app wire/parser change (deferred). Any archive consumer that assumed the ADR-0007 "launch ~2000 ms, record leads by 2 s" behavior must be updated: **the record now starts at launch onset (~0 ms).** `FlightSample` layout is unchanged → `ARCHIVE_VERSION` stays 5 (only `timestamp_ms` *semantics* changed again).
 
+## Amendment (2026-08-14) — pad data is retained again, but only when the fused solution was already broken
+
+The 2026-07-15 amendment above discards the pre-onset pad samples unconditionally. That is what erased the evidence in [#38](https://github.com/fschroer/steam-pigeon-locator/issues/38): five flights lost their fused solution **before the record began**, so every archive opened with the channel already dead and no transition anywhere in it. The pad phase was both the only place the failure was visible and the part deliberately thrown away.
+
+`AnchorRecordToLaunchOnset()` now scans the retained ring for a set `ekf_health` byte. When any pad sample carries one, the epoch stays at the **oldest retained sample** (the original ADR-0007 behavior) and the pad phase is archived; otherwise the launch-onset epoch of the 2026-07-15 amendment applies unchanged.
+
+Deliberately conditional. A healthy flight keeps the launch-anchored epoch every downstream consumer expects, and only a flight that already has a bigger problem pays the shifted epoch — for which the launch instant is still written as the `LaunchTimestampMs` statistic either way. The signed-timestamp change that would give both unconditionally remains deferred.
+
+**`ARCHIVE_VERSION` is now 6**, superseding the "stays 5" statements above: `FlightSample` grew 80 → 88 B and the archive dropped from 10 records to 9. See [ADR-0026](0026-archive-capacity-for-fusion-diagnosability.md).
+
 ## Amendment (2026-07-15) — record now includes a ~2 s post-landing tail
 
 Decision 2 above said "at landing the near-empty remainder is flushed in full so `CloseCurrentFlight` writes a complete record." That closed the record **at** the landing instant — but the sample producer's guard was `flight_state_ < Landed`, and `DetectLanded` flips the state to `Landed` *earlier in the same cycle* than the producer runs, so the landing cycle's sample (and every later one) was never captured. The record therefore ended one cycle **before** landing and contained **zero** samples tagged `Landed`.
