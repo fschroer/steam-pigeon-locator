@@ -44,8 +44,22 @@ struct RocketPersistentSettings
 
     // Which raw sensor axis points toward the nose (ADR-0021 Decision 6, #36).
     // Appended AFTER device_name so every existing field keeps its offset; only
-    // the struct size changes.  Default Auto = pre-#36 behavior.
-    NoseAxis nose_axis = NoseAxis::Auto;
+    // the struct size changes.
+    //
+    // Defaults to X because that is the standard installation — the board's X
+    // axis runs along the tube — so X is a statement of fact about the hardware,
+    // not a placeholder.  Auto was the original default only to preserve pre-#36
+    // behavior, and it costs the not-armed pad alert and off-pad calibration
+    // outright (both gate on a stated axis), so an unconfigured locator shipped
+    // with two safety features silently disabled.  A build mounted Y- or
+    // Z-along-the-tube must still say so: a WRONG axis is worse than Auto, since
+    // it reads an upright rocket as lying down.  See ADR-0021's 2026-08-13
+    // amendment for that trade in full.
+    //
+    // Reaches a device ONLY through Archive::default_settings_, i.e. when the
+    // settings journal has no valid entry.  A locator that has ever saved its
+    // settings keeps whatever it stored; changing this line does not migrate it.
+    NoseAxis nose_axis = NoseAxis::X;
 };
 
 // Layout-sensitive: this is the payload of the RuntimeMetadataJournal, whose

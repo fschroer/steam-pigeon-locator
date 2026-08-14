@@ -194,14 +194,18 @@ Locator and receiver battery levels appear in the app on the flight map while th
 
 There is one setting to go with it, and it is worth the two minutes it takes:
 
-> **Locator Settings → *Sensor Axis Along Rocket*** — which of the locator's own three axes (X, Y or Z) runs **along the length of the rocket**. Not which way up the board is bolted: the locator measures that for itself. Just the axis. The default is **Auto**.
+> **Locator Settings → *Sensor Axis Along Rocket*** — which of the locator's own three axes (X, Y or Z) runs **along the length of the rocket**. Not which way up the board is bolted: the locator measures that for itself. Just the axis. The default is **X**, which is the standard installation: the board's X axis running along the tube.
 
-⚡ **Auto is not "it figures it out". It is "it does not know until you arm."** With Auto the locator identifies the airframe axis by looking at which way gravity points at the moment you arm — which is correct only because you happen to arm with the rocket standing on the rail. It cannot tell a rocket standing up from one lying on the prep table, because gravity lies along a cardinal axis in both. Two things you get *only* once the axis is stated:
+⚡ **Check that the default matches your installation.** If you mounted the locator so that Y or Z runs along the tube, the default is *wrong for your rocket*, and a wrong axis is worse than no axis: the locator will believe the rocket is standing up when it is lying on the bench and vice versa, so the not-armed pad alert sounds at the wrong times and the automatic pad calibration re-runs at the wrong moments. **Confirm it with the console's `m` key** (Appendix D) — with the rocket stood on its tail, body accel should read `x = +1.00 g`. That is the only way to see the mounting frame directly, short of flying.
+
+**The third option is Auto, and it is not "it figures it out". It is "it does not know until you arm."** With Auto the locator identifies the airframe axis by looking at which way gravity points at the moment you arm — which is correct only because you happen to arm with the rocket standing on the rail. It cannot tell a rocket standing up from one lying on the prep table, because gravity lies along a cardinal axis in both. Two things you lose if you choose it:
 
 - **The not-armed pad alert** (§1.3, §6.6). Under Auto it never sounds, because the locator has no way to know the rocket is standing up.
-- **Calibration without arming** — the locator re-runs its pad calibration on its own once the rocket has stood upright and still for about 10 seconds, so a flight you forget to arm is still recorded through the right frame (§7.1).
+- **Calibration without arming** — the locator re-runs its pad calibration on its own once the rocket has stood upright and still for about 10 seconds, so a flight you forget to arm is still recorded through the right frame (§7.1). Auto disables this too.
 
-💡 **Set it once per installation and forget it.** It is a fact about how the board is mounted in *this* rocket, not a per-flight setting. Set it in the app (§3.4) or over USB-C (`config`, key `n`), then confirm it took with the console's `m` key (Appendix D) — that is the only way to see the mounting frame directly, short of flying.
+Auto is there for an installation whose axis genuinely is not known. If you know it — and you do, because you mounted it — state it.
+
+💡 **Set it once per installation and forget it.** It is a fact about how the board is mounted in *this* rocket, not a per-flight setting. Set it in the app (§3.4) or over USB-C (`config`, key `n`).
 
 **Barometer:** the altimeter needs static air. Follow normal altimeter-bay practice for vent holes.
 
@@ -315,7 +319,7 @@ Note how the redundant pairs are separated: the backup drogue fires 2 seconds af
 | **Main Backup Deploy Altitude** | 0 m up to just below the primary altitude | 100 m | Same, for the backup charge. Must be lower than the primary. |
 | **Launch Detect Altitude** | 10–100 m | 30 m | How far the rocket must climb before the locator will call it a launch. Raise it if you fly from a windy, bumpy pad; lower it for very short flights. |
 | **Deploy Signal Duration** | 0.5–10.0 s | 1.0 s | How long each channel stays energized when it fires. 1.0 s is plenty for an e-match. |
-| **Sensor Axis Along Rocket** | Auto / X / Y / Z | Auto | Which of the locator's own axes runs along the length of the airframe. A property of how you mounted it, not of the flight. Leave it on Auto and the not-armed pad alert can never sound (§1.7). |
+| **Sensor Axis Along Rocket** | Auto / X / Y / Z | X | Which of the locator's own axes runs along the length of the airframe. A property of how you mounted it, not of the flight. The default assumes the standard installation; if yours runs along Y or Z, change it. Auto disables the not-armed pad alert entirely (§1.7). |
 
 The app enforces the primary/backup relationships for you — it won't let you set a backup drogue delay shorter than the primary, or a backup main altitude higher than the primary.
 
@@ -439,7 +443,7 @@ The prompt names the locator it is asking about — *Enter the password to conne
 - [ ] Firmware versions checked (§3.3)
 - [ ] Deployment channel modes set for **this** flight (§3.4)
 - [ ] Delays and altitudes set for **this** flight (§3.4)
-- [ ] **Sensor axis along rocket** set for this installation, not left on Auto (§1.7, §3.4)
+- [ ] **Sensor axis along rocket** matches this installation — the default X is right only if X runs along the tube (§1.7, §3.4)
 - [ ] LoRa channel chosen (§3.4)
 - [ ] Bench deployment test passed on every channel you will use (§3.5)
 - [ ] Flight memory has room (§3.6)
@@ -475,7 +479,7 @@ Set, in this order:
 1. **Each channel's mode** — including `Unused` for channels you aren't wiring (§2.2).
 2. **The delay or altitude** for each channel that has a role. The field appears underneath the channel once you pick its mode.
 3. **Launch detect altitude** if you're changing it from the default.
-4. **Sensor Axis Along Rocket** — the axis running along the airframe (§1.7). It sits between launch detect altitude and deploy signal duration. Only needs changing when you move the locator into a different rocket, but it is the one setting whose default costs you a safety feature, so check it.
+4. **Sensor Axis Along Rocket** — the axis running along the airframe (§1.7). It sits between launch detect altitude and deploy signal duration. Only needs changing when you move the locator into a different rocket, but it is the one setting whose default is an assumption about *your* hardware rather than a preference, so check it.
 5. **Deploy signal duration** if you're changing it from the default.
 6. **LoRa channel** (§2.5).
 7. **Locator name**.
@@ -840,7 +844,7 @@ All four of these have to be true at once:
 
 It fires about **10 seconds** after the rocket has been standing, and escalates to the loud pattern after about **60 seconds** of being ignored. Lay the rocket down and it goes quiet about **a second** later.
 
-⚠️ **It cannot sound at all while *Sensor Axis Along Rocket* is set to Auto.** The locator has no way of knowing which end is up until you tell it which axis the airframe runs along. If this feature matters to you — and it should — §1.7 is where you set it. **A silent locator on Auto is telling you nothing.**
+⚠️ **It depends entirely on *Sensor Axis Along Rocket* (§1.7) being right for your build.** The locator has no way of knowing which end is up except by that setting. It defaults to **X**, so the alert works out of the box on a standard installation — but if your locator is mounted with Y or Z running along the tube and the setting still says X, the alert reads an upright rocket as lying down and **stays silent when it matters most**. Set to **Auto**, it cannot sound at all. **A silent locator is not the same as a safe one:** if you have never checked this setting, check it before you trust the alert, and confirm it with the console's `m` key.
 
 💡 **Wind does not silence it.** A rocket bobbing on a rod in 20 mph is still a rocket standing on a rod. Brief flicks past the tilt limit cost nothing; only sustained non-vertical clears it.
 
@@ -1300,7 +1304,7 @@ They are exported in that order.
 | Locator Settings / Flight Profiles aren't in the menu | They only appear while the locator is powered, in range, and **disarmed** (§2.1). |
 | Ready-beep never starts after arming | Flight memory full (§3.6) or battery too low. Longest when re-arming after a completed flight. **Don't launch** (§7.4). |
 | Locator is playing a repeating *descending* double-beep | It is not armed and it thinks it's on the pad (§6.6). Arm it, lay the rocket down, or snooze the alert. Do not tape over the buzzer. |
-| That alert won't sound even though the rocket is standing there disarmed | Most likely *Sensor Axis Along Rocket* is on **Auto**, which disables it entirely (§1.7). Otherwise: no channel shows continuity, or the rocket is more than ~35° off vertical (§6.6). |
+| That alert won't sound even though the rocket is standing there disarmed | Most likely *Sensor Axis Along Rocket* names the wrong axis for this build — the default X is right only if X runs along the tube, and a wrong axis makes an upright rocket read as lying down (§1.7). Check it with the console's `m` key. **Auto** disables the alert entirely. Otherwise: no channel shows continuity, or the rocket is more than ~35° off vertical (§6.6). |
 | Snooze button isn't there | It only appears while the alert is actually sounding, and only in the expanded top status panel — which closes itself after a few seconds, so expand and press in one motion. Greyed out means you're at the 15-minute ceiling (§6.6). |
 | Alert came back before the snooze looked expired | Powering the locator off clears the snooze — it deliberately fails toward the alert (§6.6). |
 | A flight recorded but nothing deployed | Check the `armed` column in the CSV (§10.4) or the arm state on the profile. A disarmed locator records and beacons in full and fires nothing (§7.1). |
@@ -1331,7 +1335,7 @@ They are exported in that order.
 □ Note firmware versions
 □ Set channel modes (Unused for spares!)
 □ Set delays / altitudes
-□ Set SENSOR AXIS ALONG ROCKET (not Auto)
+□ Check SENSOR AXIS ALONG ROCKET matches this build (default X)
 □ Set LoRa channel
 □ BENCH DEPLOYMENT TEST — e-matches only, no BP
 □ Export + clear flight memory if needed
@@ -1425,7 +1429,7 @@ AT THE FLIGHT LINE
 
 **Ready-beep and landed beacon are the same notes.** Volume tells them apart: quiet on the pad, loud on the ground.
 
-**The not-armed alert is the only pattern that falls rather than rises.** That is the whole design: it should sound wrong to someone who is not listening for it. And it only exists once *Sensor Axis Along Rocket* has been set — on Auto it can never sound (§1.7).
+**The not-armed alert is the only pattern that falls rather than rises.** That is the whole design: it should sound wrong to someone who is not listening for it. And it only works while *Sensor Axis Along Rocket* names the axis that really runs along your airframe — it defaults to X, and on Auto it can never sound (§1.7).
 
 ## Locator lights
 
@@ -1459,7 +1463,7 @@ AT THE FLIGHT LINE
 | Main Backup Deploy Altitude | App, USB-C | 0 m → just below primary | 100 m | AGL, must be below the primary |
 | Launch Detect Altitude | App | 10–100 m | 30 m | Climb required to declare launch |
 | Deploy Signal Duration | App | 0.5–10.0 s | 1.0 s | How long a channel stays energized |
-| Sensor Axis Along Rocket | App, USB-C | Auto / X / Y / Z | Auto | Which locator axis runs along the airframe. Auto disables the not-armed alert and off-pad calibration (§1.7) |
+| Sensor Axis Along Rocket | App, USB-C | Auto / X / Y / Z | X | Which locator axis runs along the airframe. The default assumes the standard installation. Auto disables the not-armed alert and off-pad calibration (§1.7) |
 | LoRa Channel | App, USB-C | 0–63 | 0 | See §2.5 for which control to use |
 | Locator Name | App, USB-C | 20 characters | blank | |
 | Receiver Name | App, USB-C | 20 characters | blank | Requires Bluetooth "Forget" to refresh (§2.7) |
@@ -1646,7 +1650,7 @@ Puts the device into firmware-update mode. It will not work again until it is re
 | **E-match** | Electric match — the igniter that sets off a black powder charge. |
 | **Armed / Disarmed** | Whether the deployment outputs are electrically live. Disarmed on power-up. |
 | **Ready-beep** | The quiet repeating three-note tone that means armed, calibrated and recording. Your permission to launch. |
-| **Not-armed alert** | The repeating *descending* double-beep a prepped rocket makes while it stands upright and disarmed. Requires a configured sensor axis (§1.7, §6.6). |
+| **Not-armed alert** | The repeating *descending* double-beep a prepped rocket makes while it stands upright and disarmed. Depends on the sensor axis being correct for the installation; disabled entirely by Auto (§1.7, §6.6). |
 | **Sensor axis along rocket** | Which of the locator's own three axes runs along the length of the airframe. A property of the installation, stated once; the locator measures which way up it is for itself. |
 | **LoRa** | The long-range radio link between the locator and the receiver. |
 | **LoRa channel** | Which frequency the link uses, 0–63. Both ends must match. |

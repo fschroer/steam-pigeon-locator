@@ -92,11 +92,25 @@ Two triggers, doing different jobs:
 - **Config change** applies the frame immediately — no arm, no pad event.
 - **Pad settle** (vertical and still for ~10 s, latched, re-armed on movement) retriggers full calibration, which is what re-seeds the strapdown at the *pad* orientation rather than wherever the locator lay at power-on.
 
-`NoseAxis::Auto` is the default and preserves the pre-#36 behavior exactly: `isVerticalAndStationary()` is always false without a stated axis, so the pad trigger never fires and calibration stays arm-only. Settable from the app and the USB-C console, per the FR-L2 precedent.
+`NoseAxis::Auto` ~~is the default and~~ preserves the pre-#36 behavior exactly: `isVerticalAndStationary()` is always false without a stated axis, so the pad trigger never fires and calibration stays arm-only. Settable from the app and the USB-C console, per the FR-L2 precedent. **Amended 2026-08-13 — Auto is no longer the default; see below.**
 
 **This also closed a latent bug that predates the ADR.** The detect path trusts whatever axis gravity lies along at arm time, so arming *before* standing the rocket up recorded the entire flight through the wrong body frame — silently, with no indication in the record.
 
 **Cost:** `RocketPersistentSettings` grew by one byte, which changes `CompactConfigJournal`'s entry stride and payload CRC32, so **stored settings fail validation and revert to defaults on the first boot after flashing** — including the LoRa channel, which leaves the receiver deaf until it is reconfigured. Accepted as a one-time migration cost; a versioned config journal would avoid a repeat.
+
+### Amendment (2026-08-13): the default is X, not Auto
+
+Auto was chosen as the default for compatibility — a locator whose mounting had not been configured would behave exactly as it did before #36. The unstated price was that the two capabilities this decision added, the not-armed pad alert (Decision 5) and off-pad calibration (Decision 6), were **both off by default**, and a locator that had never been configured gave no sign that it was missing them. A safety feature that ships disabled is one most operators will never have.
+
+The mounting is not actually unknown: the board's X axis runs along the tube in the standard installation. `RocketPersistentSettings::nose_axis` therefore defaults to `NoseAxis::X`, which is a statement of fact about the hardware rather than a preference.
+
+**This is a real trade, not a free win.** Auto is honest about not knowing; X is a claim, and a *wrong* claim is worse than Auto in exactly the way the paragraph above this one describes. A locator mounted with Y or Z along the tube, left on the default, will read an upright rocket as lying down: the pad alert stays silent when it should sound and sounds when it should not, and the pad-settle trigger re-seeds the strapdown at a non-pad orientation. That is the same silent-wrong-frame failure mode as the latent bug noted above, reached by a different route. The mounting *frame* is unaffected — `MountingFrameForNoseAxis` maps X-positive to identity, the same numbers Auto leaves in place — so what changes is which gates go live, not the transform.
+
+Two things contain it: the `m` console key makes the claim checkable in the field without flying (`body accel x ≈ +1.00 g` with the rocket on its tail), and the manual's §1.7 and pre-flight checklist now ask the operator to confirm the default matches their build rather than to move off Auto.
+
+**Scope: fresh flash only.** `default_settings_` is consulted only when the settings journal holds no valid entry, so a locator that has ever saved its settings keeps what it stored. No migration was written: rewriting a stored `Auto` to `X` would flip devices whose axis is genuinely Y or Z, silently, which is the failure this amendment is trying to bound rather than spread. Note that any future change to the `RocketPersistentSettings` layout re-defaults the journal — and would then also adopt X.
+
+Auto remains available and is unchanged. It is now an explicit choice for an installation whose axis really is not known.
 
 ## Consequences
 

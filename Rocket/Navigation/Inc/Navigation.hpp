@@ -241,6 +241,11 @@ private:
     // Shared tail of a commit (EKF re-init, strapdown re-seed, FIFO flush).
     void FinishMountingCommit();
 
+    // Stays Auto regardless of what RocketPersistentSettings defaults to: this is
+    // the "Factory has not pushed yet" sentinel, and setNoseAxis above returns
+    // early on equality.  Seeding it with the settings default would make the very
+    // first push a no-op, so commitMountingFrame would never run at boot and the
+    // frame would stay identity until the axis was changed by hand.
     NoseAxis       m_nose_axis_           = NoseAxis::Auto;
     MountingFrame  m_mounting             = {{0,1,2},{1,1,1}}; // identity (standard)
     bool           m_mounting_cal_active  = false;
