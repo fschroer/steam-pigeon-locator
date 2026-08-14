@@ -6,9 +6,11 @@ Locator · Receiver · *Wherezit?* app
 
 ---
 
-> **Document status:** Draft, 2026-08-08. Written against locator/receiver firmware and *Wherezit?* Android app as of this date. Two features are explicitly incomplete and are marked **WORK IN PROGRESS** where they appear: offline satellite maps (§3.7, §9.2) and flight-path export (§10.3). Air starts are **not** an available feature — see §7.6.
+> **Document status:** Draft, 2026-08-13. Written against locator/receiver firmware and *Wherezit?* Android app as of this date. Two features are explicitly incomplete and are marked **WORK IN PROGRESS** where they appear: offline satellite maps (§3.7, §9.2) and flight-path export (§10.3). Air starts are **not** an available feature — see §7.6.
 >
-> Placeholders marked 📷 and 📱 indicate images still to be captured. Every 📱 placeholder needs a powered-on locator; the screenshots already present were captured with the receiver connected and the locator off.
+> Placeholders marked 📷 and 📱 indicate images still to be captured.
+>
+> **Screenshot status.** Every app screenshot in this manual was captured on 2026-08-13, against a live locator and the current build. The three remaining 📱 placeholders all need an actual flight — the heads-up view, the live flight map, and a profile chart with real samples in it.
 
 ---
 
@@ -87,7 +89,7 @@ If you read nothing else in this manual, read these.
 1. **E-matches only until you've confirmed no-fire.** Connect igniters, power the locator on once with no black powder anywhere, confirm nothing fires — *then* power off and install charges. (§4.4)
 2. **Deployment outputs are dead while the locator is Disarmed.** They become live only when you arm. Treat them as live anyway.
 3. **Arm only when the rocket is on the rail in its final flight orientation, and still.** Arming re-runs the locator's calibration. Arming and then re-orienting the rocket invalidates it. (§7.2)
-4. **Launch on the repeating ready-beep, not on the arming chirp.** The ready-beep is the locator telling you the flight record is open. (§7.4)
+4. **Launch on the repeating ready-beep, not on the arming chirp.** The ready-beep is the locator telling you the flight record is open. And if what you hear instead is a *descending* double-beep, the rocket is standing on the pad **not armed** — nothing will deploy. (§7.4, §6.6)
 5. **Download the launch site's map before you leave home.** Recovery happens where there is no cell signal. (§3.7)
 
 ---
@@ -121,7 +123,10 @@ The locator has **no mechanical power switch**. It is turned on and off by holdi
 
 ## 1.3 Locator sounds — the full vocabulary
 
-The buzzer is the locator's primary way of talking to you, and it's the only channel that works when your phone is in your pocket. There are five patterns. **Learn the difference between the quiet ready-beep and the loud landed beacon** — they are the same three rising notes at very different volumes.
+The buzzer is the locator's primary way of talking to you, and it's the only channel that works when your phone is in your pocket. There are seven patterns. Two things are worth learning by ear before you ever need them:
+
+- **The quiet ready-beep and the loud landed beacon** are the same three rising notes at very different volumes.
+- **Everything that means "good" rises. The one thing that means "wrong" descends.** Ready and Landed both climb; the not-armed alert falls, and doubles. You do not have to be listening for it to notice that it is the odd one out.
 
 | Pattern | Sounds like | Volume | When | What it means |
 |---|---|---|---|---|
@@ -129,9 +134,13 @@ The buzzer is the locator's primary way of talking to you, and it's the only cha
 | **Arming** | Two quick rising notes, then silence | Quiet | Once, right after you press **Arm** | Your arm command was received. **This is not yet permission to launch.** |
 | **Ready** | Three rising notes, repeating about every 2 seconds | Quiet | Continuously, while armed and waiting for launch | Armed, calibrated, flight record open. **This is your permission to launch.** |
 | **Disarming** | Two quick rising notes, twice | Quiet | Once, right after you press **Disarm** | Your disarm command was received; deployment outputs are off again. |
+| **Not armed** | Two *descending* notes, a pause, the same two again — then about 3 seconds of silence | Medium | Repeating, while a prepped rocket stands upright and disarmed | ⚠️ **The rocket is ready to fly and nothing will deploy.** Arm it. (§6.6) |
+| **Not armed, urgent** | The same descending double-pair, louder and about every 1.2 seconds | **Loud** | After the alert above has gone unanswered for about a minute | The same message, more insistently. Nothing has changed except how long you have ignored it. |
 | **Landed beacon** | Three rising notes, repeating about every 2 seconds | **Loud** | Continuously, after landing is detected | Flight over, record closed. Walk toward this sound. |
 
 **The locator is deliberately silent during the flight itself** — from launch detection until landing detection there is no sound at all. Silence after a launch is normal and expected.
+
+⚡ **Silence on the pad is not.** Before this alert existed, "armed" and "not armed" were told apart by a quiet beep versus nothing at all — and nothing at all is also what a flat battery, a dead buzzer and a locator nobody switched on sound like. That is how a rocket reached the pad disarmed. The alert exists so the failure has a voice of its own; §6.6 covers when it sounds and how to silence it legitimately.
 
 ## 1.4 Locator status lights
 
@@ -179,7 +188,18 @@ Locator and receiver battery levels appear in the app on the flight map while th
 
 > 📷 **Photo needed — `images/hw-05-locator-installed.jpg`:** locator mounted on a sled inside an airframe, showing wiring dressed to the deployment terminals, battery secured, and the GPS antenna oriented outward/upward.
 
-**Orientation:** any orientation works. The locator detects which of its axes is pointing along the airframe each time you arm it. What matters is that the orientation **doesn't change between arming and launch**.
+**Orientation:** any orientation works, and either way up. What matters is that the orientation **doesn't change between arming and launch**.
+
+There is one setting to go with it, and it is worth the two minutes it takes:
+
+> **Locator Settings → *Sensor Axis Along Rocket*** — which of the locator's own three axes (X, Y or Z) runs **along the length of the rocket**. Not which way up the board is bolted: the locator measures that for itself. Just the axis. The default is **Auto**.
+
+⚡ **Auto is not "it figures it out". It is "it does not know until you arm."** With Auto the locator identifies the airframe axis by looking at which way gravity points at the moment you arm — which is correct only because you happen to arm with the rocket standing on the rail. It cannot tell a rocket standing up from one lying on the prep table, because gravity lies along a cardinal axis in both. Two things you get *only* once the axis is stated:
+
+- **The not-armed pad alert** (§1.3, §6.6). Under Auto it never sounds, because the locator has no way to know the rocket is standing up.
+- **Calibration without arming** — the locator re-runs its pad calibration on its own once the rocket has stood upright and still for about 10 seconds, so a flight you forget to arm is still recorded through the right frame (§7.1).
+
+💡 **Set it once per installation and forget it.** It is a fact about how the board is mounted in *this* rocket, not a per-flight setting. Set it in the app (§3.4) or over USB-C (`config`, key `n`), then confirm it took with the console's `m` key (Appendix D) — that is the only way to see the mounting frame directly, short of flying.
 
 **Barometer:** the altimeter needs static air. Follow normal altimeter-bay practice for vent holes.
 
@@ -205,6 +225,7 @@ Locator and receiver battery levels appear in the app on the flight map while th
 | Deploy delays and altitudes | ✅ | ✅ |
 | Launch detect altitude | ✅ | — |
 | Deploy signal duration | ✅ | — |
+| Sensor axis along rocket | ✅ | ✅ |
 | LoRa channel | ✅ | ✅ |
 | Locator name | ✅ | ✅ |
 | **Connection password** | — | ✅ **only** |
@@ -215,6 +236,10 @@ Locator and receiver battery levels appear in the app on the flight map while th
 Everything in the app lives behind the menu button at the top left of the flight map:
 
 ![The app menu](images/app-02-menu-drawer.png)
+
+Arming swaps the menu over — **Locator Settings** and **Flight Profiles** go away, **Deployment Test** appears:
+
+![The menu while armed](images/app-02b-menu-armed.png)
 
 ⚡ **The menu changes depending on what's connected.** This is deliberate, not a bug:
 
@@ -227,7 +252,7 @@ Everything in the app lives behind the menu button at the top left of the flight
 | Deployment Test | The locator is powered, in range, and **armed** |
 | Download maps | Always (last in the menu) |
 
-So if a screen you want isn't in the menu, the reason is almost always the locator's arm state or the fact that it isn't transmitting. The screenshot above was taken with the receiver connected and the locator switched off — which is why only three items appear.
+So if a screen you want isn't in the menu, the reason is almost always the locator's arm state or the fact that it isn't transmitting. The screenshot above was taken with a live, disarmed locator — which is why five items appear. With the locator switched off you get three: Application Settings, Receiver Settings and Download maps.
 
 Two rules apply to all configuration:
 
@@ -288,6 +313,7 @@ Note how the redundant pairs are separated: the backup drogue fires 2 seconds af
 | **Main Backup Deploy Altitude** | 0 m up to just below the primary altitude | 100 m | Same, for the backup charge. Must be lower than the primary. |
 | **Launch Detect Altitude** | 10–100 m | 30 m | How far the rocket must climb before the locator will call it a launch. Raise it if you fly from a windy, bumpy pad; lower it for very short flights. |
 | **Deploy Signal Duration** | 0.5–10.0 s | 1.0 s | How long each channel stays energized when it fires. 1.0 s is plenty for an e-match. |
+| **Sensor Axis Along Rocket** | Auto / X / Y / Z | Auto | Which of the locator's own axes runs along the length of the airframe. A property of how you mounted it, not of the flight. Leave it on Auto and the not-armed pad alert can never sound (§1.7). |
 
 The app enforces the primary/backup relationships for you — it won't let you set a backup drogue delay shorter than the primary, or a backup main altitude higher than the primary.
 
@@ -357,13 +383,17 @@ Each locator identifies itself with a permanent hardware ID and, optionally, a p
 
 **How you'll experience it:**
 
-- **First time the app hears your locator**, it prompts for the password. Enter it once; the app remembers that locator.
+- **First time the app hears your locator**, it prompts for the password. Enter it once; the app remembers that locator. The dialog has an eye icon to show what you have typed, and the Enter key submits it the same as **Connect** does. Get it wrong and the dialog keeps both the focus and the keyboard, so the retry is a straight retype.
 - **If another locator is on the air and isn't the one you're watching**, the app warns you: *"Another locator (ID …) is on the air and is not being displayed. Connect to switch to it, or move to an uncontested channel."* Its data is not shown.
 - **To deliberately switch to that other locator**, tap **Connect** on the banner. If you're already authorized for it, the app switches immediately; if not, it asks for its password first.
 - **The connection releases on its own** if your locator goes quiet for about 15 seconds — long enough to ride out a fade, so a moment's dropout never hands the display to a different rocket.
 - **If you set no password**, the locator is open and any *Wherezit?* app will pick it up. Note that "open" means *authorized*, not *connected* — two open locators still can't fight over the display.
 
-> 📱 **Screenshot needed — `images/app-08-password-dialog.png`:** the locator password prompt. Requires a locator with a password set, being heard for the first time.
+![The locator password prompt on first contact](images/app-08-password-dialog.png)
+
+The prompt names the locator it is asking about — *Enter the password to connect to "…"* — so you can tell your own rocket from someone else's before you type anything. **Dismiss** walks away from that locator for this session; **Connect** submits, and so does the Enter key.
+
+⚡ **Until you answer it, the status pill reads No Locator.** An unauthorized locator is transmitting perfectly well and the app is hearing it — it simply will not display or command a locator it cannot vouch for. So "No Locator" plus a password prompt is not a link problem, and reconnecting will not help.
 
 ⚠️ **Set the password over USB-C at home, and write it down somewhere you'll find it.** It cannot be read or changed over the air, only over the cable. Maximum 15 characters; blank clears it.
 
@@ -407,6 +437,7 @@ Each locator identifies itself with a permanent hardware ID and, optionally, a p
 - [ ] Firmware versions checked (§3.3)
 - [ ] Deployment channel modes set for **this** flight (§3.4)
 - [ ] Delays and altitudes set for **this** flight (§3.4)
+- [ ] **Sensor axis along rocket** set for this installation, not left on Auto (§1.7, §3.4)
 - [ ] LoRa channel chosen (§3.4)
 - [ ] Bench deployment test passed on every channel you will use (§3.5)
 - [ ] Flight memory has room (§3.6)
@@ -431,15 +462,23 @@ The app shows the **locator firmware version** at the top of the Locator Setting
 
 Open **Locator Settings** from the app menu. (The locator must be powered on, in range, and disarmed for this screen to appear — §2.1.)
 
-> 📱 **Screenshot needed — `images/app-09-locator-settings.png`:** the Locator Settings screen showing firmware version, the four channel mode dropdowns with their timing/altitude fields, locator name, LoRa channel, launch detect altitude and deploy signal duration. Requires a powered-on locator.
+The screen scrolls; it is shown here in two halves.
+
+![Locator Settings — firmware version and the four deployment channels](images/app-09-locator-settings.png)
+
+![Locator Settings — name, channel, launch detect, sensor axis, deploy duration](images/app-09b-locator-settings-lower.png)
 
 Set, in this order:
 
 1. **Each channel's mode** — including `Unused` for channels you aren't wiring (§2.2).
 2. **The delay or altitude** for each channel that has a role. The field appears underneath the channel once you pick its mode.
-3. **Launch detect altitude** and **deploy signal duration** if you're changing them from the defaults.
-4. **LoRa channel** (§2.5).
-5. **Locator name**.
+3. **Launch detect altitude** if you're changing it from the default.
+4. **Sensor Axis Along Rocket** — the axis running along the airframe (§1.7). It sits between launch detect altitude and deploy signal duration. Only needs changing when you move the locator into a different rocket, but it is the one setting whose default costs you a safety feature, so check it.
+5. **Deploy signal duration** if you're changing it from the default.
+6. **LoRa channel** (§2.5).
+7. **Locator name**.
+
+💡 **Enter finishes a field.** Every box that raises a keyboard now closes it on Enter, and does so by committing the value — the same thing that happens when you tap away from the field, including clamping a number back into its allowed range. The three numeric locator fields used to have no way to do this at all: the numeric keypad carries no Done key, and Enter inserted a line break.
 
 Press **Update**. The app tells you whether the locator acknowledged the change (*Updated*, *Not Received*, or *Send Failed*). ⚡ **If you don't see the acknowledgment, the locator did not take the change.** Try again; don't assume.
 
@@ -460,13 +499,26 @@ This confirms two things: that each channel actually fires, and that your ignite
 1. Connect an e-match to the channel you want to test.
 2. Power the locator on. Confirm the loud rising power-on tone.
 3. **Arm** from the app. You'll hear the arming chirp, then the repeating quiet ready-beep.
-4. Open the menu → **Deployment Test**.
-5. Select the channel. A countdown appears on screen; the locator's status LED blinks red, faster in the last 3 seconds.
-6. The channel fires.
-7. Repeat for each channel you will use.
-8. **Disarm** when you're done.
+4. Open the menu → **Deployment Test**. (While armed, **Locator Settings** and **Flight Profiles** disappear from the menu and this takes their place — §2.1.)
+5. **Pick the channel from the dropdown.** Nothing happens yet; the button below is disabled and reads *Select Deployment Channel* until you do.
 
-> 📱 **Screenshot needed — `images/app-10-deployment-test.png`:** the Deployment Test screen with the countdown running. Requires a powered-on, armed locator.
+   ![Choosing the channel to test](images/app-10b-deployment-test-select.png)
+
+6. **Press the button** — now reading *Deployment Channel n Test* — to start the countdown. The button itself becomes the countdown, and the locator's status LED blinks red, faster in the last 3 seconds.
+
+   ![The countdown running on channel 2](images/app-10-deployment-test.png)
+
+7. The channel fires.
+8. Repeat for each channel you will use.
+9. **Disarm** when you're done.
+
+### Stopping a test you've started
+
+⚠️ **Read this before you start one, not after.**
+
+- **The countdown button is also the cancel button.** Pressing it while the countdown runs aborts the test. But it has shrunk to the width of a single digit, so it is a much smaller target than the button you pressed to start — aim at the number, not at where the button used to be.
+- **Leaving the screen also cancels**, and it is the more reliable of the two: **Return**, or the back arrow, is a large target and the screen cancels the test as it closes. ⚡ **If you need to stop a countdown in a hurry, press Return.**
+- ⚡ **A press that lands just after the countdown has lapsed starts a *new* test**, because the same button means "start" whenever no countdown is running. If you are stabbing at it near zero you can restart the very thing you were trying to stop. Return does not have this failure mode.
 
 **Using the USB-C console:** connect a cable, open a terminal (§Appendix D), type `test`, and select channel 1–4. The channel fires **10 seconds** after you select it. Same safety rules.
 
@@ -490,15 +542,17 @@ The locator holds **10 flights**. When it's full, you can't record a new one.
 
 Recovery happens where there is no cell signal. This screen pre-loads the satellite imagery for your launch site so the map works anyway.
 
-![Download maps — framing the area](images/app-06-download-maps.png)
+![Download maps — an area framed, with its coverage and size estimate](images/app-06-download-maps.png)
 
 **To download a site:**
 
-1. Open the menu → **Download maps**.
+1. Open the menu → **Download maps**. It opens on the whole world; frame down from there.
 2. **Frame the area** in one of three ways:
    - Pan and zoom the map directly.
-   - **Go to preset site…** — pick from the built-in list of known launch sites.
+   - **Go to preset site…** — pick from the built-in list of known launch sites, each with the area it will frame. It also fills in the **Site name** for you.
    - Type a **Lat, Lon** and press **Go** — or the **Go** key on the keyboard, which does the same thing and puts the keyboard away.
+
+   ![The preset site list](images/app-06b-preset-sites.png)
 
    **The Lat, Lon box also reads back where the map is pointed.** Pan or pinch and the numbers follow the center of the map to four decimal places (about 11 m) — that is the app reporting the position, not something you typed being rewritten. The box holds your own text only while you are typing in it, and returns to reporting the center as soon as you leave it. It is the quickest way to write down the coordinates of a site you framed by eye.
 3. Choose the **provider** (Esri or Mapbox).
@@ -507,21 +561,29 @@ Recovery happens where there is no cell signal. This screen pre-loads the satell
 6. Give it a **Site name**.
 7. Press **Download this area for offline**. If the area is too large the button instead reads **"Over 1 GB — tighten the area or lower the zoom"** and cannot be pressed; shrink the area or drop the max zoom until it changes back.
 
-![Download maps — size estimate and downloaded regions](images/app-07-download-maps-detail.png)
+![Download maps — the site name and the download button, below the estimate](images/app-07-download-maps-detail.png)
 
-The example above is a 22 × 22 km area at z10–z17: about 12,580 tiles and 235 MB. That's a realistic figure for one launch site.
+The example above is the **BALLS Black Rock, NV** preset: 22.1 × 22.1 km at z10–z17, about **12,580 tiles and 289 MB**. That's a realistic figure for one launch site.
 
-💡 **Do this on Wi-Fi, the day before.** 235 MB over a marginal cell connection at the field is not a plan.
+💡 **Do this on Wi-Fi, the day before.** 289 MB over a marginal cell connection at the field is not a plan.
 
 **Leaving the screen does not stop the download.** It keeps running in the background and stops only if the app itself closes — so you can go back to the flight map, or start it and put the phone down. While it runs, **Cancel** stops it deliberately; whatever had already downloaded is kept, not discarded.
 
-**Offline regions** are listed at the bottom of the screen, each with a status line and a delete button:
+When it finishes you get a line saying so — *✓ "your site name" downloaded — renders offline on the map* — with a **Dismiss** next to it. That message is the confirmation to look for, not the region simply appearing in the list below (see the warning further down).
+
+💡 **The size shown before you download is an estimate, and it runs a little light.** A 1.4 × 1.4 km area estimated at ~2 MB finished at 3 MB. Budget accordingly on a big site.
+
+**Offline regions** are listed at the bottom of the screen, below the download button, each with a status line and a delete button. ⚡ **The whole section is absent until you have at least one region** — an empty screen there means nothing has been downloaded, not that the list failed to load.
 
 | Status shown | What it means |
 |---|---|
-| `complete · 235 MB` | Fully downloaded. This region will render with no signal. |
+| `complete · 3 MB` | Fully downloaded. This region will render with no signal. |
 | `incomplete — 62% of tiles · 140 MB` | Interrupted. Press **Resume** to finish it — tiles already downloaded are not fetched again. |
 | `status unknown` | The app could not read the region's status. Treat it as incomplete. |
+
+![A completed download and the Offline regions list](images/app-17-offline-regions.png)
+
+Each entry has the site name, its status line, and a **trash icon** to delete it.
 
 ⚠️ **A region appearing in the list is not proof that it downloaded.** The entry is created when the download *starts*, so a region cut short by a dropped connection, a cancel, or the app closing still sits in the list. Check that it says **complete** before you count on it at the field.
 
@@ -585,6 +647,8 @@ Match the wiring to the mapping you configured in §3.4. **Channel 1 in the app 
 
 💡 Say it out loud as you wire: *"Channel one, drogue primary. Channel three, main primary."* Miswiring drogue and main is a well-traveled route to a very short flight.
 
+💡 **If you assemble the rocket standing up, the locator will start its not-armed alert at you** — wired e-matches plus upright plus disarmed is exactly the condition it watches for, and it cannot tell your assembly stand from a launch rail (§6.6). Either lay the rocket down while you work, or use the app's bounded **Snooze** to buy quiet in five-minute steps. Don't tape over the buzzer; that removes the warning for the flight as well as for the prep.
+
 ## 4.4 First power-on: the no-fire confirmation
 
 This is the most important procedure in this manual.
@@ -606,7 +670,7 @@ This is the most important procedure in this manual.
 
 1. Power the locator up **out in the open**, away from buildings, vehicles and trees.
 2. Wait for the **GPS lock LED next to the GPS antenna to start blinking**.
-3. Check the satellite count and accuracy in the app (§4.6).
+3. Check the satellite count in the app, and the size of the accuracy ring around the rocket marker (§4.6).
 4. **Then** install the locator in the airframe.
 
 Acquiring a first fix takes far more signal than holding one. Doing it in this order routinely turns a locator that "won't get GPS in the rocket" into one that works fine.
@@ -615,23 +679,43 @@ Acquiring a first fix takes far more signal than holding one. Doing it in this o
 
 While the locator is powered on, in range, and **disarmed**, the app's flight map shows a readiness summary. This is your pre-flight instrument panel.
 
-> 📱 **Screenshot needed — `images/app-11-readiness.png`:** the flight map with a live, disarmed locator, showing the readiness panel — satellites, accuracy, altitude, battery, sensor health, per-channel continuity, and the deployment configuration read back from the locator. Requires a powered-on locator.
+![The readiness page — receiver and locator connected, nothing wired yet](images/app-11-readiness.png)
+
+It comes in two pieces.
+
+**The status panel at the top**, tapped to expand it, carries the two device names, a battery gauge for each, the locator's satellite count beside the rocket icon, the signal readout (§8.4), and the **Arm** button.
 
 | Indicator | What good looks like |
 |---|---|
-| **Satellites** | More is better. Watch it climb after power-on. |
-| **Accuracy** (horizontal) | A few meters. If it's tens of meters, the antenna's view of the sky is poor (§1.7). |
-| **Altitude (AGL)** | Near zero on the pad. This is the value that gets zeroed when you arm. |
-| **Battery** | Shown as a bar gauge. Don't fly a locator showing one bar. **This is your only chance to read it** — the gauges go away at launch (§1.6). An *empty* gauge on a battery you know is charged is a different problem — see Part 11. |
-| **Sensor health** | Barometer, IMU and GPS each report status. All three should be healthy. |
-| **Continuity, channels 1–4** | **Present on every channel you have wired, absent on every channel you haven't.** |
-| **Deployment configuration** | Modes, delays and altitudes, read back from the locator. Confirm they're what you intended. |
+| **Receiver / locator names** | Both present. **No Locator** means the locator is off, out of range, or on another channel (§3.8). |
+| **Satellites** | The small number beside the rocket icon. More is better; watch it climb after power-on. |
+| **Battery, ×2** | Bar gauges — receiver on top, locator below. Don't fly a locator showing one bar. **This is your only chance to read it**; the gauges go away at launch (§1.6). An *empty* gauge on a battery you know is charged is a different problem — see Part 11. |
+| **dBm / SNR** | How loud and how clean the link is (§8.4). |
+
+**The statistics panel at the bottom right** is where the flight-critical readings are. ⚡ **It has no separate "health" or "continuity" indicators — the readings themselves change color.** A line in the normal text color is a healthy one; **a line in red is the failure**, and which line is red tells you which sensor or channel.
+
+| Line | What good looks like | Red means |
+|---|---|---|
+| **Dist** | A distance, or *Unknown* before the locator has a fix | The GPS is unhealthy or the fix is stale |
+| **AGL** | Near zero on the pad | The barometer is unhealthy |
+| **Accl** | Roughly 1.0 g on one axis and ~0 on the others, matching how the rocket is lying | The IMU is unhealthy |
+| **Gyro** | Near zero on all three while the rocket is still | The IMU is unhealthy |
+| **Ch 1–4** | The mode and setting for each channel, read back **from the locator** — confirm they are what you intended | ⚠️ **No continuity on that channel** |
+| **Coordinates** | The rocket's latitude and longitude, underlined when tappable (§9.2) | — |
+
+💡 **The statistics panel can be dragged** anywhere on the map, and it stays where you put it.
+
+**On accuracy:** there is no numeric accuracy readout. The locator's reported horizontal accuracy is drawn as the **ring around the rocket marker** — a wide ring is a poor fix. If the ring is large, the antenna's view of the sky is poor (§1.7).
 
 **About continuity:** continuity means *there is an intact circuit through the igniter*. It tells you the igniter is good and the terminals are tight. It does **not** mean the channel is armed or live — you'll see continuity on a wired channel whenever the locator is powered, armed or not.
+
+⚡ **On a bench locator with nothing wired, all four channel lines are red.** That is correct and expected. The reading you are checking for at the field is the opposite: **normal color on every channel you have wired, red on every channel you haven't.**
 
 ⚡ **Continuity present on a channel you set to `Unused`** means you've wired a channel you don't intend to fire, or a mode is set wrong. Resolve it before you fly.
 
 ⚡ **Continuity absent on a channel you have wired** means a broken igniter, a loose terminal, or a lead that isn't making contact. Fix it before the black powder goes in.
+
+**The panel switches layout when the rocket flies, not when you arm it.** Arming alone already swaps it: an armed locator waiting on the pad shows `Spd`, `Inc`/`Hdg` and *Waiting For Launch* in place of `Accl`, `Gyro` and the channel list — so **the continuity check above is something you do before you arm, not after.** A rocket that launches *disarmed* gets the flight layout too (§7.1), which is the part that changed: it used to key off the arm state alone, leaving a disarmed flight showing frozen pad readings all the way up.
 
 ## 4.7 If GPS accuracy is poor
 
@@ -667,6 +751,7 @@ Points worth having straight:
 
 - **Boots safe.** Power-on state is Disarmed; outputs off.
 - **Arming is remote and deliberate.** From the app, from the flight line, after the rocket is on the pad.
+- **It tells you if you forgot.** A prepped rocket standing on the rail unarmed sounds an alarm of its own until it is armed (§6.6). Some RSOs will want to know what the beeping is before they hear it on the pad.
 - **One charge at a time.** The computer never energizes two channels simultaneously (§2.4).
 - **Disarm is blocked in flight.** Once it's flying, nothing you or your phone does can turn off the recovery system. The app will refuse: *"Can't disarm while the rocket is in flight. Wait until it has landed."*
 - **Continuity was verified with e-matches only**, before charges were installed.
@@ -702,6 +787,7 @@ All four live on the readiness page and the Locator Settings screen (§4.6, §3.
 - [ ] App shows the locator; readiness page good (§6.3)
 - [ ] Link confirmed from the flight line (§6.4)
 - [ ] Locator left **Disarmed** (§6.5)
+- [ ] Not-armed alert heard as you walk away — and *not* snoozed (§6.6)
 
 ## 6.2 Order of operations at the pad
 
@@ -715,7 +801,7 @@ All four live on the readiness page and the Locator Settings screen (§4.6, §3.
 
 1. Apply the magnet. **Listen for the loud rising power-on tone.** No tone means no power — check the battery.
 2. Check your phone: the locator appears, and the status panel switches from **No Locator** to the locator's name, with its satellite count and battery alongside.
-3. Walk the readiness page (§4.6): satellites, accuracy, battery, sensor health, **continuity on every wired channel**, deployment configuration.
+3. Walk the readiness page (§4.6): satellites, battery, the size of the accuracy ring, and the statistics panel — **no red lines except the channels you deliberately left unwired**, and the deployment configuration reading back what you intended. Do this **before** you arm; arming swaps the panel to the flight layout and the channel list goes with it.
 
 ⚠️ **Do not arm at the pad.** Arm from the flight line (Part 7).
 
@@ -733,6 +819,63 @@ If the link is marginal:
 
 Walk away from the pad with the locator **powered on and Disarmed**. Arming is the last thing you do, and you do it from the flight line.
 
+**Expect the rocket to start complaining about it.** About ten seconds after you leave it standing there, the not-armed alert begins — see §6.6. That is the system working, and you should hear it as you walk back.
+
+## 6.6 The not-armed alert
+
+A rocket on the rail with charges wired and the flight computer disarmed is the one pre-flight fault that used to make no sound whatsoever. The locator now says so out loud, the app says so in your ear, and your phone buzzes in your pocket.
+
+### When it sounds
+
+All four of these have to be true at once:
+
+| Condition | Why it's in the test |
+|---|---|
+| The locator is **Disarmed** | It is the fault being reported. |
+| It is standing **within about 35° of vertical** | A rocket on a rail. The allowance is deliberately wider than any rail angle you'd be permitted to fly, so a legally canted rocket still counts as standing. |
+| **At least one channel shows continuity** | This is what makes it a *prepped* rocket rather than a locator on a bench or in a drawer. |
+| It hasn't launched | Obviously. |
+
+It fires about **10 seconds** after the rocket has been standing, and escalates to the loud pattern after about **60 seconds** of being ignored. Lay the rocket down and it goes quiet about **a second** later.
+
+⚠️ **It cannot sound at all while *Sensor Axis Along Rocket* is set to Auto.** The locator has no way of knowing which end is up until you tell it which axis the airframe runs along. If this feature matters to you — and it should — §1.7 is where you set it. **A silent locator on Auto is telling you nothing.**
+
+💡 **Wind does not silence it.** A rocket bobbing on a rod in 20 mph is still a rocket standing on a rod. Brief flicks past the tilt limit cost nothing; only sustained non-vertical clears it.
+
+### What the app does
+
+- **Voice:** "*Warning. Rocket is on the pad and not armed.*", repeated about every 30 seconds while the condition holds.
+- **Banner:** **ROCKET ON PAD — NOT ARMED** across the middle of the map, in red, pulsing. Its second line — *tap top panel to snooze* — is there because the snooze is behind a tap you would have no reason to try mid-alarm.
+- **Vibration:** two short pulses, a gap, repeating — the same rhythm as the buzzer. This one is **not** turned off by the **Enable Speech** setting, deliberately: someone who has muted the voice is relying on it more, not less. It is also the channel that survives a phone in a pocket on a loud flight line.
+
+![The pad alert sounding — red, across the map](images/app-16-pad-alert.png)
+
+💡 **Notice `Ch 1` in the statistics panel is the only channel in normal color** — that is the wired e-match showing continuity, and it is exactly the condition that makes this a *prepped* rocket rather than a locator someone left standing on a bench (§4.6). With all four channels red the alert would never sound.
+
+### The snooze — for assembly, not for the pad
+
+Assembling a rocket vertically with charges already wired is physically identical to standing on the pad: same tilt, same continuity, same everything the locator can measure. No sensor can tell them apart. An alert that nags through twenty minutes of prep gets the buzzer taped over, which removes the warning entirely — so instead you get an explicit, bounded way to quiet it.
+
+Tap the status panel at the top of the map to expand it; a **Snooze 5 min** button appears between **Rescan** and **Arm**, **only while the alert is actually sounding**. Each tap adds five minutes to whatever is left.
+
+![The expanded panel, with Snooze between Rescan and Arm](images/app-16b-pad-alert-snooze.png)
+
+⚡ **The panel collapses on its own after a few seconds, so expand and press in one go.** Reaching for the snooze and finding the panel already shut is the ordinary experience, not a fault — tap the panel again.
+
+Three things keep this a snooze rather than an off switch, and each of them matters:
+
+- **It is capped at 15 minutes total.** The button greys out at the ceiling rather than disappearing, so "no more" is something you can see. The locator enforces the cap itself — no version of the app can talk it into more.
+- **Powering the locator off clears it.** The snooze lives in RAM only. A power cycle always fails toward the alert.
+- **The clock underneath keeps running.** Only the *sound* stops. When the snooze expires the alert resumes immediately if the rocket is still standing there — you do not get a fresh ten seconds of grace.
+
+While snoozed, the banner reads **NOT ARMED — alert snoozed *n* min** in yellow, and the button itself changes to **Snoozed *n* min — add 5**, so what you have accumulated is readable without doing arithmetic.
+
+![Snoozed — yellow banner, and the button showing what has accumulated](images/app-16c-pad-alert-snoozed.png)
+
+⚡ **That yellow banner is still telling you the rocket is not armed.** A silenced locator that looked identical to a healthy one is the exact failure this whole feature exists to prevent, which is why the snoozed state gets its own color and its own words rather than simply going quiet.
+
+📋 **RSO NOTE:** if an RSO asks what the beeping is, the honest answer is the best one: *"That's the flight computer telling me it isn't armed yet. I arm from the flight line."*
+
 ---
 
 # Part 7 — Arming for launch
@@ -742,10 +885,29 @@ Walk away from the pad with the locator **powered on and Disarmed**. Arming is t
 Arming does three things at once:
 
 1. **Enables the deployment outputs.** Before this, they are electrically dead. After this, they are live.
-2. **Runs the on-pad calibration** — zeroes altitude, measures the gyro's bias, and works out which way the rocket is pointing.
-3. **Opens the flight record**, so the flight will be recorded.
+2. **Re-runs the on-pad calibration** — zeroes altitude, measures the gyro's bias, and commits which way the rocket is pointing.
+3. **Starts a fresh flight record.**
 
 Because of (1), you arm from the flight line, not standing over the rocket.
+
+### What arming does *not* control any more
+
+⚡ **Arming gates the deployment channels, and only the deployment channels.** This changed, and it changed for a good reason: a forgotten arm used to cost the flight its recovery charges *and* its black box *and* its landed beacon, when only the first of those is what arming is for.
+
+A locator that is powered on but disarmed still:
+
+- **runs the flight state machine** and detects launch, apogee, descent and landing;
+- **records the whole flight** at full rate, into a record it opens at power-on rather than at arm;
+- **sounds the loud landed beacon** when it comes down;
+- **transmits live telemetry** once it leaves the pad, marked as disarmed.
+
+**None of that is a substitute for arming.** A disarmed flight fires nothing — no drogue, no main, no backup. It is a ballistic flight that you will be able to analyze afterwards and find, which is strictly better than one you can do neither with, and strictly worse than one that deploys.
+
+⚠️ **Two disarmed flights in a row is the one case that does not work.** After a disarmed flight the locator sits in its Landed state, beacon sounding, and nothing puts it back. Arming or a power cycle resets it. So if you fly disarmed by accident, **power-cycle or arm before the next flight** or the second one will not be recorded.
+
+### Calibration no longer waits for you either
+
+If you have set *Sensor Axis Along Rocket* (§1.7), the locator also re-runs its mounting calibration on its own once the rocket has stood upright and still for about 10 seconds — so even an unarmed flight is recorded through the correct body frame. It re-arms that trigger whenever the rocket is moved or tilted away. On **Auto**, this never happens and calibration is arm-only, exactly as it used to be.
 
 ## 7.2 Arming re-calibrates — what that means for you
 
@@ -761,14 +923,17 @@ Because of (1), you arm from the flight line, not standing over the rocket.
 
 1. From the flight map, press **Arm**.
 2. The app shows **Arming**, then **Armed**, and speaks the change aloud.
-3. The locator plays the **quiet two-note arming chirp**.
-4. Then the **quiet repeating three-note ready-beep** starts, about every 2 seconds.
+3. The not-armed alert, if it was sounding, **stops immediately** (§6.6) — as do the banner and the vibration.
+4. The locator plays the **quiet two-note arming chirp**.
+5. Then the **quiet repeating three-note ready-beep** starts, about every 2 seconds.
 
 ## 7.4 The ready-beep is your launch permission
 
 ⚠️ **Do not launch on the arming chirp. Launch on the repeating ready-beep.**
 
-The locator deliberately withholds the ready-beep until the flight record is fully open and recording. The gap between the two sounds is the locator finishing its preparation. A rocket launched in that gap flies fine — but may record nothing, and you will have no data and no flight profile.
+The locator deliberately withholds the ready-beep until the flight record is fully open and recording. The gap between the two sounds is the locator finishing its preparation — mostly erasing the flash slot the new flight will be written into. A rocket launched in that gap flies fine and deploys fine, but may record nothing, and you will have no data and no flight profile.
+
+The gap is usually brief on a locator that hasn't flown yet, because the record it opened at power-on gets reused as-is. It is longest when you **re-arm after a completed flight**, where a fresh slot really does have to be erased — which is exactly the case where you are in a hurry to get back on the pad. Wait for the beep anyway.
 
 **If the ready-beep never starts:**
 
@@ -809,6 +974,7 @@ With **Enable Speech** on (§2.8), the app announces:
 | Callout | When |
 |---|---|
 | "*Armed*" / "*Disarmed*" | When the arm state changes. |
+| "*Warning. Rocket is on the pad and not armed.*" | A prepped rocket is standing upright and disarmed. Repeats about every 30 s until you arm it, lay it down, or snooze it (§6.6). Accompanied by a phone vibration, which **Enable Speech** does not switch off. |
 | "*[number] meters*" | Altitude, every 100 m as the rocket coasts to apogee. |
 | "*Apogee, [number] meters*" | Apogee detected. |
 | "*Drogue charge*" | The drogue primary charge has been fired. |
@@ -831,6 +997,20 @@ With **Enable Speech** on (§2.8), the app announces:
 ## 8.3 The live screens
 
 **Portrait — the flight map.** Your position, the rocket's position, and its track. Distance and bearing to the rocket. The flight state and altitude readouts. The status pill at the top shows the receiver and locator status.
+
+**The rocket marker's color is a statement about the position, not about the rocket.** It has three states, and it is worth knowing which question each one answers:
+
+| Marker | Meaning |
+|---|---|
+| **Green** | Live. Packets are arriving and the locator reports a healthy GPS fix. The position is current. |
+| **Grey** | The link is fine, but the locator says its **fix** is not — stale or unhealthy. The marker stays where the last good fix put it, and the accuracy ring greys with it rather than claiming a precision the position no longer has. |
+| **Red** | Nothing has been heard for over 2 seconds. The position is as old as the dropout. This is checked first, and for a good reason: with no recent packet the locator's *reported* fix health is itself stale and cannot vouch for anything. |
+
+The distinction that matters is **grey versus green**: a frozen fix with a perfect radio link used to draw exactly like a healthy one — a green marker sitting still, which reads as a stationary rocket rather than as a stalled position. Grey says "this is the last place it told me, and it hasn't told me since."
+
+⚡ **Grey never means the position is gone.** The marker, the track and the last coordinates all stay on screen. Withholding the last known position at the moment it is the only thing left to walk toward would be the wrong trade — see §9.5 for the separate case where the app refuses to quote a *distance*.
+
+**The banner across the middle of the map** carries the rocket's pre-flight state in a few words: **Disarmed** and **No GPS** in white when they are simply true and unremarkable, **ROCKET ON PAD — NOT ARMED** in pulsing red when the pad alert is sounding, and **NOT ARMED — alert snoozed *n* min** in yellow while you have silenced it (§6.6). Only the alert states pulse; a rocket sitting disarmed in the prep area is an ordinary state and does not need an animation.
 
 The **track stops being drawn at the landing** — once the locator reports it is down, the last point on the path is where it says it is lying, and the path does not grow while it sits there. **Dist** reads *Unknown* if the app cannot vouch for the position (§9.5).
 
@@ -989,6 +1169,8 @@ The locator records which channels fired and their continuity before and after, 
 
 Arming after a completed flight resets everything and opens a fresh record automatically.
 
+⚠️ **If the flight you just recovered was flown *disarmed* (§7.1), arming or power-cycling before the next one is not optional.** Nothing else clears the Landed state, and until it clears the beacon keeps sounding and a second flight will not be recorded.
+
 ---
 
 # Part 10 — After the flight: your data
@@ -997,11 +1179,13 @@ Arming after a completed flight resets everything and opens a fresh record autom
 
 Open the menu → **Flight Profiles** (locator powered, in range, disarmed).
 
-You get a list of stored flights with the date, time, apogee and time-to-apogee for each. Pick one; the app downloads it over the radio link and draws the flight profile.
+You get a list of stored flights, each showing its **record number, date, time and apogee**. Pick one; the app downloads it over the radio link and draws the flight profile. (Time-to-apogee is not on this list — it is on the console's `data` listing, §10.4.)
 
-> 📱 **Screenshot needed — `images/app-14-flight-profiles-list.png`:** the Flight Profiles list showing stored flights with date, time, apogee and time to apogee. Requires a powered-on locator with recorded flights.
+![The Flight Profiles list](images/app-14-flight-profiles-list.png)
 
-> 📱 **Screenshot needed — `images/app-15-flight-profile-chart.png`:** a downloaded flight profile chart with event markers. Requires a powered-on locator with recorded flights.
+⚡ **"No flight data for this record"** means the slot has a header but no samples — a record opened and never flown, which is exactly what a stand-down or a bench power-cycle leaves behind. It is not a download failure. `c` at the console's `data` menu reclaims these (§3.6).
+
+> 📱 **Screenshot needed — `images/app-15-flight-profile-chart.png`:** a downloaded flight profile chart with event markers. Requires a locator holding a record with actual flight samples in it; the bench locator used for the other captures had only an unflown record.
 
 💡 The download takes a little while over the radio — it's a lot of data through a long-range, low-bandwidth link. Stay in good range and let it finish.
 
@@ -1011,15 +1195,19 @@ You get a list of stored flights with the date, time, apogee and time-to-apogee 
 
 The profile is marked with the events the locator recorded:
 
-| Event | Meaning |
+| Marker | Meaning |
 |---|---|
-| Launch detect | The locator decided it was flying. |
-| Burnout | Thrust ended. |
-| Noseover / apogee | The top of the flight — and the trigger for the drogue timing. |
-| Drogue primary / backup | Each drogue charge firing. |
-| Main primary / backup | Each main charge firing. |
-| Drogue / main velocity threshold | Where the locator detected the parachute actually taking hold. |
-| Landing | Touchdown. |
+| **Launch** | The locator decided it was flying. |
+| **Burnout** | Thrust ended. |
+| **Apogee** | The highest point the barometer recorded. |
+| **Noseover** | The moment the locator *decided* the rocket had stopped climbing — and the trigger for the drogue timing. |
+| **Drogue Primary** / **Drogue Backup** | Each drogue charge firing. |
+| **Drogue Deploy** | Where the locator detected the drogue actually taking hold — a change in descent rate. |
+| **Main Primary** / **Main Backup** | Each main charge firing. |
+| **Main Deploy** | Same, for the main. |
+| **Landing** | Touchdown. |
+
+💡 **Apogee and Noseover are two markers, not one.** Apogee is where the rocket actually was highest; Noseover is where the locator concluded it. The gap between them is the detection delay the drogue timing is measured from — if you are tuning delays, that gap is the number you want.
 
 And per channel:
 
@@ -1058,9 +1246,13 @@ This gives you everything the locator recorded, at full rate, for analysis in a 
 | `gyro_x_dps`, `gyro_y_dps`, `gyro_z_dps` | Rotation rate in degrees per second. |
 | `lat_deg`, `lon_deg` | GPS position. |
 | `flight_state` | Which state the flight state machine was in. |
+| `armed` | Whether the locator was armed for this sample — 1 or 0. Because a disarmed locator now records a full flight (§7.1), this is the column that tells you whether the charges were ever going to fire. |
+| `oc_*`, `process_*` | Internal timing diagnostics. Ignore unless you're debugging the firmware. |
 | `tilt_deg` | Angle off vertical. |
 | `q_w`, `q_x`, `q_y`, `q_z` | Orientation, as a quaternion. |
-| `oc_*`, `process_*` | Internal timing diagnostics. Ignore unless you're debugging the firmware. |
+| `fix_type`, `num_sv` | GPS fix quality and satellite count at that sample — what the position readings in the same row are worth. |
+
+They are exported in that order.
 
 ## 10.5 Flight memory housekeeping
 
@@ -1084,7 +1276,7 @@ This gives you everything the locator recorded, at full rate, for analysis in a 
 | Locator won't power on / no power-on tone | Battery flat (§1.6). Wrong magnet pole or wrong spot (§1.2). |
 | App never finds the receiver | Receiver powered? Bluetooth on? Phone permissions granted? (§3.8) |
 | Status panel says "No Locator" but the receiver is connected | Normal when the locator is off (§3.8). Otherwise: locator off, out of range, or on a different channel (§2.5). If an interference note appears under it, the channel is occupied and that may be why you are hearing nothing. |
-| App asks for a password | First contact with a locator it doesn't know (§2.6). |
+| App asks for a password | First contact with a locator it doesn't know (§2.6). Also happens to a locator it *used* to know, if you have since set or changed that locator's password — the app's stored key no longer verifies, so it treats it as a stranger and asks again. |
 | App opened while the locator was already armed | Supported: armed telemetry identifies itself, so the app picks up a locator it already knows and shows live data straight away. If it still reads "No Locator", that locator has never been connected on this phone — **disarm it once** so the app can prompt for its password (§2.6). |
 | "Another locator … is not being displayed" | Someone else is on your channel — change **Locator Settings → channel** (§2.5). Or one of your *own* spare locators is powered up near the receiver, in which case the channel is irrelevant: move it away (§2.5). To switch to that locator on purpose, tap **Connect** (§2.6). |
 | App shows a locator that isn't on your channel | A powered locator within a few feet of the receiver gets in regardless of channel (§2.5, Appendix G). Move it away. |
@@ -1096,12 +1288,22 @@ This gives you everything the locator recorded, at full rate, for analysis in a 
 | Channel scan refuses to run | The locator is armed, or a flight data transfer is in progress. Disarm or wait (§2.5). |
 | Receiver's new name won't show up | Bluetooth name cache. "Forget" the receiver in your phone's Bluetooth settings, then reconnect (§2.7). |
 | Bluetooth seems to keep dropping | Silence is not a dropped link (§3.8). If it's genuinely reconnecting, check the receiver's battery. |
-| Few satellites / poor accuracy | Get the fix in the open before installing (§4.5). Antenna view obstructed (§1.7, §4.7). |
+| Few satellites / wide accuracy ring | Get the fix in the open before installing (§4.5). Antenna view obstructed (§1.7, §4.7). There is no numeric accuracy readout — the ring around the marker is it (§4.6). |
+| A reading on the statistics panel has turned red | That is how sensor health and continuity are reported — the line itself changes color. Which line is red names the fault (§4.6). |
 | No continuity on a wired channel | Broken igniter, loose terminal, or a lead not making contact (§4.6). |
 | Continuity on a channel set to `Unused` | Mis-wired, or the mode is wrong (§4.6). |
 | Deployment Test isn't in the menu | It only appears while the locator is **armed** (§3.5). |
+| Can't stop a deployment test countdown | The countdown button is the cancel, but it has shrunk to the width of the digit — aim at the number. **Press Return instead**; leaving the screen cancels and is a far bigger target (§3.5). |
+| The countdown restarted instead of stopping | You pressed the button just after it lapsed, and the same button starts a fresh test whenever no countdown is running (§3.5). |
 | Locator Settings / Flight Profiles aren't in the menu | They only appear while the locator is powered, in range, and **disarmed** (§2.1). |
-| Ready-beep never starts after arming | Flight memory full (§3.6) or battery too low. **Don't launch** (§7.4). |
+| Ready-beep never starts after arming | Flight memory full (§3.6) or battery too low. Longest when re-arming after a completed flight. **Don't launch** (§7.4). |
+| Locator is playing a repeating *descending* double-beep | It is not armed and it thinks it's on the pad (§6.6). Arm it, lay the rocket down, or snooze the alert. Do not tape over the buzzer. |
+| That alert won't sound even though the rocket is standing there disarmed | Most likely *Sensor Axis Along Rocket* is on **Auto**, which disables it entirely (§1.7). Otherwise: no channel shows continuity, or the rocket is more than ~35° off vertical (§6.6). |
+| Snooze button isn't there | It only appears while the alert is actually sounding, and only in the expanded top status panel — which closes itself after a few seconds, so expand and press in one motion. Greyed out means you're at the 15-minute ceiling (§6.6). |
+| Alert came back before the snooze looked expired | Powering the locator off clears the snooze — it deliberately fails toward the alert (§6.6). |
+| A flight recorded but nothing deployed | Check the `armed` column in the CSV (§10.4) or the arm state on the profile. A disarmed locator records and beacons in full and fires nothing (§7.1). |
+| Landed beacon won't stop, and a second flight didn't record | The previous flight was flown disarmed. Arm or power-cycle to clear the Landed state (§7.1, §9.7). |
+| Rocket marker is grey | The link is fine; the locator's GPS fix isn't. The marker is showing the last good position (§8.3). |
 | Battery gauge reads empty on a battery you know is charged | The gauge cannot tell a flat cell from a broken battery-sense circuit — both read empty. Before you replace the battery, check it over USB-C: press `v` at the console (disarmed). If the readings there don't respond at all, the fault is in the locator, not the battery, and it needs service (Appendix D). |
 | USB-C console shows nothing, or a screen of random characters | Baud mismatch — not a fault, and nothing is lost. Set your terminal to the rate you want and **hold Shift+U** for a second; the device will match you and say so. If nothing happens, the device is set *slower* than your terminal — step through the eight rates instead (Appendix D). |
 | Console text is garbled but **pastes correctly**, digits and CAPITALS readable | Not a baud problem at all. A stray control code has put your terminal into its line-drawing character set. **Reset the terminal.** Changing baud rate or power-cycling the device will not fix it (Appendix D). |
@@ -1109,6 +1311,7 @@ This gives you everything the locator recorded, at full rate, for analysis in a 
 | Telemetry drops out mid-flight | Normal at range and altitude. The rocket is unaffected (§8.4). |
 | Altitude looks stepped or jumpy | Sunlight on the barometer, most likely in a clear payload bay (§1.7). |
 | A recorded flight looks empty | Launched before the ready-beep started (§7.4). |
+| "No flight data for this record" when you open a profile | The slot was opened but never flown — a stand-down, or a power cycle on the bench. Not a download failure (§10.1). |
 | Recorded flights "disappeared" after a firmware update | **Power-cycle the locator** — the data is very likely still there. If it reappears, that was it. |
 | A charge didn't fire | Check fired / pre-fire / post-fire continuity in the flight data (§10.2). |
 | Map is blank | No imagery downloaded for the area, or no connectivity and no cached region (§3.7). |
@@ -1126,6 +1329,7 @@ This gives you everything the locator recorded, at full rate, for analysis in a 
 □ Note firmware versions
 □ Set channel modes (Unused for spares!)
 □ Set delays / altitudes
+□ Set SENSOR AXIS ALONG ROCKET (not Auto)
 □ Set LoRa channel
 □ BENCH DEPLOYMENT TEST — e-matches only, no BP
 □ Export + clear flight memory if needed
@@ -1160,16 +1364,25 @@ AT THE PAD
 □ Rocket on rail, buttons seated
 □ Motor igniter per range procedure
 □ Power locator ON — hear the tone
-□ Readiness: satellites / accuracy / battery /
-  sensor health / continuity / deploy config
+□ Readiness: satellites / battery / accuracy ring
+□ Stats panel: NO RED LINES except channels
+  you did not wire.  Red = that sensor or
+  channel is the fault.
+□ Check continuity BEFORE you arm — arming
+  swaps the panel to the flight layout
 □ Leave DISARMED — walk back
+□ Expect the NOT-ARMED alert (descending
+  double-beep) as you walk away. Do NOT snooze it.
 
 AT THE FLIGHT LINE
 □ Confirm telemetry still arriving
 □ Rocket in FINAL orientation and STILL
 □ Press ARM  → arming chirp
+□    the not-armed alert stops
 □ WAIT for the repeating READY-BEEP
 □ Launch on the READY-BEEP, not the chirp
+
+  RISING = ready.  DESCENDING = NOT ARMED.
 ```
 
 ## A4 — Recovery
@@ -1203,10 +1416,14 @@ AT THE FLIGHT LINE
 | Arming | 2 rising notes | Quiet | No | Arm command received |
 | Ready | 3 rising notes, then ~1.7 s silence | Quiet | Yes, ~every 2 s | **Armed and ready to launch** |
 | Disarming | 2 rising notes, twice | Quiet | No | Disarm command received |
+| Not armed | 2 **descending** notes, twice, then ~3 s silence | Medium | Yes, ~every 3.5 s | ⚠️ Prepped rocket standing disarmed — **arm it** (§6.6) |
+| Not armed, urgent | Same pattern, then ~0.7 s silence | **Loud** | Yes, ~every 1.2 s | Same, unanswered for ~60 s |
 | Landed beacon | 3 rising notes, then ~1.7 s silence | **Loud** | Yes, ~every 2 s | Landed — walk toward it |
 | *(silence)* | — | — | — | In flight |
 
 **Ready-beep and landed beacon are the same notes.** Volume tells them apart: quiet on the pad, loud on the ground.
+
+**The not-armed alert is the only pattern that falls rather than rises.** That is the whole design: it should sound wrong to someone who is not listening for it. And it only exists once *Sensor Axis Along Rocket* has been set — on Auto it can never sound (§1.7).
 
 ## Locator lights
 
@@ -1240,6 +1457,7 @@ AT THE FLIGHT LINE
 | Main Backup Deploy Altitude | App, USB-C | 0 m → just below primary | 100 m | AGL, must be below the primary |
 | Launch Detect Altitude | App | 10–100 m | 30 m | Climb required to declare launch |
 | Deploy Signal Duration | App | 0.5–10.0 s | 1.0 s | How long a channel stays energized |
+| Sensor Axis Along Rocket | App, USB-C | Auto / X / Y / Z | Auto | Which locator axis runs along the airframe. Auto disables the not-armed alert and off-pad calibration (§1.7) |
 | LoRa Channel | App, USB-C | 0–63 | 0 | See §2.5 for which control to use |
 | Locator Name | App, USB-C | 20 characters | blank | |
 | Receiver Name | App, USB-C | 20 characters | blank | Requires Bluetooth "Forget" to refresh (§2.7) |
@@ -1344,12 +1562,13 @@ and `dfu`.
 
 ## Service diagnostics (locator)
 
-Type these at the console with **no menu open** and the locator **disarmed**. Both conditions apply to every key in this table. They exist for diagnosing a locator that is behaving oddly; the output is intended for service rather than for pre-flight checks, and you do not need to understand it to use it.
+Type these at the console with **no menu open** and the locator **disarmed**. Both conditions apply to every key in this table. Most of them exist for diagnosing a locator that is behaving oddly, and their output is intended for service rather than for pre-flight checks — you do not need to understand it to use it. **`m` is the exception:** "did my sensor-axis setting take effect?" is an ordinary question to ask while the rocket is still in your hands, and this is the only place it can be answered.
 
 If a key seems to do nothing, you are in a menu — press Esc. If it answers `REFUSED - disarm first`, the locator is armed. These are ground tools; nothing in this table is meant to be reached in flight.
 
 | Key | Action |
 |---|---|
+| `m` | Mounting / nose-axis diagnostic. Prints the configured *Sensor Axis Along Rocket*, the mounting frame the locator is actually using, and the accelerometer reading in both raw and body axes. **This is the only way to confirm a sensor-axis setting took effect without flying** — the app's accelerometer row is unaffected by it. Stand the rocket up and look for `body accel x` near **+1.00 g**; a frame reported as `identity - never committed` means the setting has not landed. Under `Auto` it says so, and the body row is just a copy of the raw one. |
 | `v` | Battery-sense check. Prints how the battery measurement behaves over ~100 ms. **If the numbers don't respond at all, the fault is in the locator's battery-sense circuit rather than the battery** — which is the one case an empty gauge cannot distinguish on its own (Part 11). |
 | `h` | Holds the battery-sense circuit powered for ~10 seconds so it can be measured with a meter. Press again to release early. Releases on its own regardless. |
 | `/` | Prints the last fault the locator recorded, if any — what kind, what reset it, and how long it had been running. Says `DIAG\|NONE` when there is nothing stored, which is the normal, healthy answer. Service will ask for this text if you send a locator in. |
@@ -1383,6 +1602,7 @@ For text fields (name, password), just type; Enter saves, Esc cancels.
 | `7` | Main Backup Deploy Altitude (m) |
 | `8` | LoRa Channel (0–63) |
 | `9` | Device Name |
+| `n` | Sensor Axis Along Rocket — `Auto (detect on arm)`, `X`, `Y` or `Z` (§1.7). Cycle with `[` and `]` |
 | `p` | Password — shows the current password, or `(not set)`; type a new one (it echoes as you type), blank clears it |
 
 ## `data` — Rocket Locator Data Menu
@@ -1424,6 +1644,8 @@ Puts the device into firmware-update mode. It will not work again until it is re
 | **E-match** | Electric match — the igniter that sets off a black powder charge. |
 | **Armed / Disarmed** | Whether the deployment outputs are electrically live. Disarmed on power-up. |
 | **Ready-beep** | The quiet repeating three-note tone that means armed, calibrated and recording. Your permission to launch. |
+| **Not-armed alert** | The repeating *descending* double-beep a prepped rocket makes while it stands upright and disarmed. Requires a configured sensor axis (§1.7, §6.6). |
+| **Sensor axis along rocket** | Which of the locator's own three axes runs along the length of the airframe. A property of the installation, stated once; the locator measures which way up it is for itself. |
 | **LoRa** | The long-range radio link between the locator and the receiver. |
 | **LoRa channel** | Which frequency the link uses, 0–63. Both ends must match. |
 | **RSSI** | Received signal strength — how strong the radio link is. |
