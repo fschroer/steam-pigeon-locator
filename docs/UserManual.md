@@ -11,12 +11,14 @@ Locator · Receiver · *Wherezit?* app
 > Placeholders marked 📷 and 📱 indicate images still to be captured.
 >
 > **Screenshot status.** Every app screenshot in this manual was captured on 2026-08-13, against a live locator and the current build. The three remaining 📱 placeholders all need an actual flight — the heads-up view, the live flight map, and a profile chart with real samples in it.
+>
+> Screenshots are shown at reduced size so a phone-shaped image doesn't run to several screens. **The full-resolution files are in `docs/images/`** — open them there when you need to read the small print in a settings screen.
 
 ---
 
 ## Table of contents
 
-**Front matter** — [What Steam Pigeon is](#fm1-what-steam-pigeon-is) · [What it's for](#fm2-what-it-is-for-in-priority-order) · [Scope and limits](#fm3-scope-and-limits) · [Conventions](#fm4-conventions-used-in-this-manual) · [**Read this first: the five rules**](#fm5-read-this-first--the-five-rules)
+**Before you start** — [What Steam Pigeon is](#01-what-steam-pigeon-is) · [What it's for](#02-what-it-is-for-in-priority-order) · [Scope and limits](#03-scope-and-limits) · [Conventions](#04-conventions-used-in-this-manual) · [**Read this first: the five rules**](#05-read-this-first--the-five-rules)
 
 **Part 1** — [Know your hardware](#part-1--know-your-hardware)
 **Part 2** — [Settings and what they do](#part-2--settings-and-what-they-do)
@@ -34,9 +36,9 @@ Locator · Receiver · *Wherezit?* app
 
 ---
 
-# Front matter
+# Before you start
 
-## FM.1 What Steam Pigeon is
+## 0.1 What Steam Pigeon is
 
 Steam Pigeon is a three-part system:
 
@@ -54,7 +56,7 @@ Locator  ⇄  (LoRa radio)  ⇄  Receiver  ⇄  (Bluetooth)  ⇄  Phone
 
 The locator and the phone never talk to each other directly. Every message goes through the receiver.
 
-## FM.2 What it is for, in priority order
+## 0.2 What it is for, in priority order
 
 The system was built to do three things, in this order:
 
@@ -64,7 +66,7 @@ The system was built to do three things, in this order:
 
 Everything else — live telemetry, the map, the spoken callouts, the orientation views — is secondary to those three. When something has to give, the locator protects deployment and recording first. This is worth knowing because it explains behavior you'll see in the field: for example, the locator keeps flying, deploying and recording perfectly well when the radio link to your phone has dropped out entirely.
 
-## FM.3 Scope and limits
+## 0.3 Scope and limits
 
 - Intended for **mid- and high-power rocketry**.
 - Deployment channels are designed for **e-matches with an all-fire current of 1 A or less**, such as MJG Firewire. **Test any other brand of igniter on the bench before you fly it.**
@@ -73,7 +75,7 @@ Everything else — live telemetry, the map, the spoken callouts, the orientatio
 - The app is **Android only**. There is no iOS app.
 - The locator has **four** deployment channels.
 
-## FM.4 Conventions used in this manual
+## 0.4 Conventions used in this manual
 
 | | Meaning |
 |---|---|
@@ -82,7 +84,7 @@ Everything else — live telemetry, the map, the spoken callouts, the orientatio
 | 📋 **RSO NOTE** | Something a range safety officer will ask about, or that you should be ready to show. |
 | 💡 **TIP** | Makes your day easier. |
 
-## FM.5 Read this first — the five rules
+## 0.5 Read this first — the five rules
 
 If you read nothing else in this manual, read these.
 
@@ -235,11 +237,11 @@ There is one setting to go with it, and it is worth the two minutes it takes:
 
 Everything in the app lives behind the menu button at the top left of the flight map:
 
-![The app menu](images/app-02-menu-drawer.png)
+<img src="images/app-02-menu-drawer.png" alt="The app menu" width="300">
 
 Arming swaps the menu over — **Locator Settings** and **Flight Profiles** go away, **Deployment Test** appears:
 
-![The menu while armed](images/app-02b-menu-armed.png)
+<img src="images/app-02b-menu-armed.png" alt="The menu while armed" width="300">
 
 ⚡ **The menu changes depending on what's connected.** This is deliberate, not a bug:
 
@@ -343,7 +345,7 @@ Channels are numbered **0–63**. Default is 0.
 
 The receiver's copy of the control looks like this:
 
-![Receiver Settings](images/app-05-receiver-settings.png)
+<img src="images/app-05-receiver-settings.png" alt="Receiver Settings" width="300">
 
 ⚠️ **Both screens label this field with the same text — *"Locator Channel to Receive"*.** On the Receiver Settings screen that label is correct. On the **Locator Settings** screen it is misleading: that field sets the channel your locator **transmits on**, not a channel it receives. **Go by which screen you are on, not by the label.**
 
@@ -389,7 +391,7 @@ Each locator identifies itself with a permanent hardware ID and, optionally, a p
 - **The connection releases on its own** if your locator goes quiet for about 15 seconds — long enough to ride out a fade, so a moment's dropout never hands the display to a different rocket.
 - **If you set no password**, the locator is open and any *Wherezit?* app will pick it up. Note that "open" means *authorized*, not *connected* — two open locators still can't fight over the display.
 
-![The locator password prompt on first contact](images/app-08-password-dialog.png)
+<img src="images/app-08-password-dialog.png" alt="The locator password prompt on first contact" width="300">
 
 The prompt names the locator it is asking about — *Enter the password to connect to "…"* — so you can tell your own rocket from someone else's before you type anything. **Dismiss** walks away from that locator for this session; **Connect** submits, and so does the Enter key.
 
@@ -408,7 +410,7 @@ The prompt names the locator it is asking about — *Enter the password to conne
 
 ## 2.8 App settings
 
-![Application Settings](images/app-04-app-settings.png)
+<img src="images/app-04-app-settings.png" alt="Application Settings" width="300">
 
 | Setting | What it does |
 |---|---|
@@ -464,9 +466,9 @@ Open **Locator Settings** from the app menu. (The locator must be powered on, in
 
 The screen scrolls; it is shown here in two halves.
 
-![Locator Settings — firmware version and the four deployment channels](images/app-09-locator-settings.png)
+<img src="images/app-09-locator-settings.png" alt="Locator Settings — firmware version and the four deployment channels" width="300">
 
-![Locator Settings — name, channel, launch detect, sensor axis, deploy duration](images/app-09b-locator-settings-lower.png)
+<img src="images/app-09b-locator-settings-lower.png" alt="Locator Settings — name, channel, launch detect, sensor axis, deploy duration" width="300">
 
 Set, in this order:
 
@@ -502,11 +504,11 @@ This confirms two things: that each channel actually fires, and that your ignite
 4. Open the menu → **Deployment Test**. (While armed, **Locator Settings** and **Flight Profiles** disappear from the menu and this takes their place — §2.1.)
 5. **Pick the channel from the dropdown.** Nothing happens yet; the button below is disabled and reads *Select Deployment Channel* until you do.
 
-   ![Choosing the channel to test](images/app-10b-deployment-test-select.png)
+   <img src="images/app-10b-deployment-test-select.png" alt="Choosing the channel to test" width="300">
 
 6. **Press the button** — now reading *Deployment Channel n Test* — to start the countdown. The button itself becomes the countdown, and the locator's status LED blinks red, faster in the last 3 seconds.
 
-   ![The countdown running on channel 2](images/app-10-deployment-test.png)
+   <img src="images/app-10-deployment-test.png" alt="The countdown running on channel 2" width="300">
 
 7. The channel fires.
 8. Repeat for each channel you will use.
@@ -542,7 +544,7 @@ The locator holds **10 flights**. When it's full, you can't record a new one.
 
 Recovery happens where there is no cell signal. This screen pre-loads the satellite imagery for your launch site so the map works anyway.
 
-![Download maps — an area framed, with its coverage and size estimate](images/app-06-download-maps.png)
+<img src="images/app-06-download-maps.png" alt="Download maps — an area framed, with its coverage and size estimate" width="300">
 
 **To download a site:**
 
@@ -552,7 +554,7 @@ Recovery happens where there is no cell signal. This screen pre-loads the satell
    - **Go to preset site…** — pick from the built-in list of known launch sites, each with the area it will frame. It also fills in the **Site name** for you.
    - Type a **Lat, Lon** and press **Go** — or the **Go** key on the keyboard, which does the same thing and puts the keyboard away.
 
-   ![The preset site list](images/app-06b-preset-sites.png)
+   <img src="images/app-06b-preset-sites.png" alt="The preset site list" width="300">
 
    **The Lat, Lon box also reads back where the map is pointed.** Pan or pinch and the numbers follow the center of the map to four decimal places (about 11 m) — that is the app reporting the position, not something you typed being rewritten. The box holds your own text only while you are typing in it, and returns to reporting the center as soon as you leave it. It is the quickest way to write down the coordinates of a site you framed by eye.
 3. Choose the **provider** (Esri or Mapbox).
@@ -561,7 +563,7 @@ Recovery happens where there is no cell signal. This screen pre-loads the satell
 6. Give it a **Site name**.
 7. Press **Download this area for offline**. If the area is too large the button instead reads **"Over 1 GB — tighten the area or lower the zoom"** and cannot be pressed; shrink the area or drop the max zoom until it changes back.
 
-![Download maps — the site name and the download button, below the estimate](images/app-07-download-maps-detail.png)
+<img src="images/app-07-download-maps-detail.png" alt="Download maps — the site name and the download button, below the estimate" width="300">
 
 The example above is the **BALLS Black Rock, NV** preset: 22.1 × 22.1 km at z10–z17, about **12,580 tiles and 289 MB**. That's a realistic figure for one launch site.
 
@@ -581,7 +583,7 @@ When it finishes you get a line saying so — *✓ "your site name" downloaded �
 | `incomplete — 62% of tiles · 140 MB` | Interrupted. Press **Resume** to finish it — tiles already downloaded are not fetched again. |
 | `status unknown` | The app could not read the region's status. Treat it as incomplete. |
 
-![A completed download and the Offline regions list](images/app-17-offline-regions.png)
+<img src="images/app-17-offline-regions.png" alt="A completed download and the Offline regions list" width="300">
 
 Each entry has the site name, its status line, and a **trash icon** to delete it.
 
@@ -596,11 +598,11 @@ Each entry has the site name, its status line, and a **trash icon** to delete it
 1. Power the receiver on.
 2. Open *Wherezit?*. The status pill at the top of the map shows **Scanning**, then a **Select receiver** dialog appears listing what it found.
 
-![Select receiver](images/app-03-device-picker.png)
+<img src="images/app-03-device-picker.png" alt="Select receiver" width="300">
 
 3. Tap your receiver. The pill changes to the receiver's name.
 
-![Connected, locator off](images/app-01-flight-map.png)
+<img src="images/app-01-flight-map.png" alt="Connected, locator off" width="300">
 
 With the receiver connected but the locator off, the status panel reads **No Locator** where the locator's name would be — on the rocket-icon row, whose satellite count and battery are blank for the same reason. **This is the normal, healthy state before you power up the rocket.** The app is connected to the receiver; there is simply nothing flying yet.
 
@@ -679,7 +681,7 @@ Acquiring a first fix takes far more signal than holding one. Doing it in this o
 
 While the locator is powered on, in range, and **disarmed**, the app's flight map shows a readiness summary. This is your pre-flight instrument panel.
 
-![The readiness page — receiver and locator connected, nothing wired yet](images/app-11-readiness.png)
+<img src="images/app-11-readiness.png" alt="The readiness page — receiver and locator connected, nothing wired yet" width="300">
 
 It comes in two pieces.
 
@@ -848,7 +850,7 @@ It fires about **10 seconds** after the rocket has been standing, and escalates 
 - **Banner:** **ROCKET ON PAD — NOT ARMED** across the middle of the map, in red, pulsing. Its second line — *tap top panel to snooze* — is there because the snooze is behind a tap you would have no reason to try mid-alarm.
 - **Vibration:** two short pulses, a gap, repeating — the same rhythm as the buzzer. This one is **not** turned off by the **Enable Speech** setting, deliberately: someone who has muted the voice is relying on it more, not less. It is also the channel that survives a phone in a pocket on a loud flight line.
 
-![The pad alert sounding — red, across the map](images/app-16-pad-alert.png)
+<img src="images/app-16-pad-alert.png" alt="The pad alert sounding — red, across the map" width="300">
 
 💡 **Notice `Ch 1` in the statistics panel is the only channel in normal color** — that is the wired e-match showing continuity, and it is exactly the condition that makes this a *prepped* rocket rather than a locator someone left standing on a bench (§4.6). With all four channels red the alert would never sound.
 
@@ -858,7 +860,7 @@ Assembling a rocket vertically with charges already wired is physically identica
 
 Tap the status panel at the top of the map to expand it; a **Snooze 5 min** button appears between **Rescan** and **Arm**, **only while the alert is actually sounding**. Each tap adds five minutes to whatever is left.
 
-![The expanded panel, with Snooze between Rescan and Arm](images/app-16b-pad-alert-snooze.png)
+<img src="images/app-16b-pad-alert-snooze.png" alt="The expanded panel, with Snooze between Rescan and Arm" width="300">
 
 ⚡ **The panel collapses on its own after a few seconds, so expand and press in one go.** Reaching for the snooze and finding the panel already shut is the ordinary experience, not a fault — tap the panel again.
 
@@ -870,7 +872,7 @@ Three things keep this a snooze rather than an off switch, and each of them matt
 
 While snoozed, the banner reads **NOT ARMED — alert snoozed *n* min** in yellow, and the button itself changes to **Snoozed *n* min — add 5**, so what you have accumulated is readable without doing arithmetic.
 
-![Snoozed — yellow banner, and the button showing what has accumulated](images/app-16c-pad-alert-snoozed.png)
+<img src="images/app-16c-pad-alert-snoozed.png" alt="Snoozed — yellow banner, and the button showing what has accumulated" width="300">
 
 ⚡ **That yellow banner is still telling you the rocket is not armed.** A silenced locator that looked identical to a healthy one is the exact failure this whole feature exists to prevent, which is why the snoozed state gets its own color and its own words rather than simply going quiet.
 
@@ -1181,7 +1183,7 @@ Open the menu → **Flight Profiles** (locator powered, in range, disarmed).
 
 You get a list of stored flights, each showing its **record number, date, time and apogee**. Pick one; the app downloads it over the radio link and draws the flight profile. (Time-to-apogee is not on this list — it is on the console's `data` listing, §10.4.)
 
-![The Flight Profiles list](images/app-14-flight-profiles-list.png)
+<img src="images/app-14-flight-profiles-list.png" alt="The Flight Profiles list" width="300">
 
 ⚡ **"No flight data for this record"** means the slot has a header but no samples — a record opened and never flown, which is exactly what a stand-down or a bench power-cycle leaves behind. It is not a download failure. `c` at the console's `data` menu reclaims these (§3.6).
 
