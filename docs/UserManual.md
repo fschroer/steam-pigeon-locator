@@ -498,7 +498,9 @@ Recovery happens where there is no cell signal. This screen pre-loads the satell
 2. **Frame the area** in one of three ways:
    - Pan and zoom the map directly.
    - **Go to preset site…** — pick from the built-in list of known launch sites.
-   - Type a **Lat, Lon** and press **Go**.
+   - Type a **Lat, Lon** and press **Go** — or the **Go** key on the keyboard, which does the same thing and puts the keyboard away.
+
+   **The Lat, Lon box also reads back where the map is pointed.** Pan or pinch and the numbers follow the center of the map to four decimal places (about 11 m) — that is the app reporting the position, not something you typed being rewritten. The box holds your own text only while you are typing in it, and returns to reporting the center as soon as you leave it. It is the quickest way to write down the coordinates of a site you framed by eye.
 3. Choose the **provider** (Esri or Mapbox).
 4. Set **Detail (max zoom)** with the slider. The hint under the slider tells you what each level is good for — z17 is described as *"Field features — good for recovery"*, which is the level you want. The thumbnail on the right previews the actual detail you'll get.
 5. Check the estimate. The screen shows the ground coverage, the tile count and the download size.
