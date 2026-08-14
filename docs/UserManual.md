@@ -12,7 +12,7 @@ Locator · Receiver · *Wherezit?* app
 >
 > **Screenshot status.** Every app screenshot in this manual was captured on 2026-08-13, against a live locator and the current build. The three remaining 📱 placeholders all need an actual flight — the heads-up view, the live flight map, and a profile chart with real samples in it.
 >
-> Screenshots are shown at reduced size so a phone-shaped image doesn't run to several screens. **The full-resolution files are in `docs/images/`** — open them there when you need to read the small print in a settings screen.
+> Screenshots are shown at reduced size so a phone-shaped image doesn't run to several screens, and a few are cropped to the part being described rather than showing the whole phone. **The files are in `docs/images/`** — open them there when you need to read the small print in a settings screen.
 
 ---
 
@@ -583,7 +583,7 @@ When it finishes you get a line saying so — *✓ "your site name" downloaded �
 | `incomplete — 62% of tiles · 140 MB` | Interrupted. Press **Resume** to finish it — tiles already downloaded are not fetched again. |
 | `status unknown` | The app could not read the region's status. Treat it as incomplete. |
 
-<img src="images/app-17-offline-regions.png" alt="A completed download and the Offline regions list" width="300">
+<img src="images/app-17-offline-regions.png" alt="A completed download and the Offline regions list" width="520">
 
 Each entry has the site name, its status line, and a **trash icon** to delete it.
 
@@ -850,7 +850,7 @@ It fires about **10 seconds** after the rocket has been standing, and escalates 
 - **Banner:** **ROCKET ON PAD — NOT ARMED** across the middle of the map, in red, pulsing. Its second line — *tap top panel to snooze* — is there because the snooze is behind a tap you would have no reason to try mid-alarm.
 - **Vibration:** two short pulses, a gap, repeating — the same rhythm as the buzzer. This one is **not** turned off by the **Enable Speech** setting, deliberately: someone who has muted the voice is relying on it more, not less. It is also the channel that survives a phone in a pocket on a loud flight line.
 
-<img src="images/app-16-pad-alert.png" alt="The pad alert sounding — red, across the map" width="300">
+<img src="images/app-16-pad-alert.png" alt="The pad alert sounding — red, across the map" width="320">
 
 💡 **Notice `Ch 1` in the statistics panel is the only channel in normal color** — that is the wired e-match showing continuity, and it is exactly the condition that makes this a *prepped* rocket rather than a locator someone left standing on a bench (§4.6). With all four channels red the alert would never sound.
 
@@ -860,7 +860,7 @@ Assembling a rocket vertically with charges already wired is physically identica
 
 Tap the status panel at the top of the map to expand it; a **Snooze 5 min** button appears between **Rescan** and **Arm**, **only while the alert is actually sounding**. Each tap adds five minutes to whatever is left.
 
-<img src="images/app-16b-pad-alert-snooze.png" alt="The expanded panel, with Snooze between Rescan and Arm" width="300">
+<img src="images/app-16b-pad-alert-snooze.png" alt="The expanded panel, with Snooze between Rescan and Arm" width="430">
 
 ⚡ **The panel collapses on its own after a few seconds, so expand and press in one go.** Reaching for the snooze and finding the panel already shut is the ordinary experience, not a fault — tap the panel again.
 
@@ -872,7 +872,7 @@ Three things keep this a snooze rather than an off switch, and each of them matt
 
 While snoozed, the banner reads **NOT ARMED — alert snoozed *n* min** in yellow, and the button itself changes to **Snoozed *n* min — add 5**, so what you have accumulated is readable without doing arithmetic.
 
-<img src="images/app-16c-pad-alert-snoozed.png" alt="Snoozed — yellow banner, and the button showing what has accumulated" width="300">
+<img src="images/app-16c-pad-alert-snoozed.png" alt="Snoozed — yellow banner, and the button showing what has accumulated" width="330">
 
 ⚡ **That yellow banner is still telling you the rocket is not armed.** A silenced locator that looked identical to a healthy one is the exact failure this whole feature exists to prevent, which is why the snoozed state gets its own color and its own words rather than simply going quiet.
 
