@@ -464,6 +464,8 @@ Charge the locator, the receiver and your phone. Do this the night before, not t
 
 The app shows the **locator firmware version** at the top of the Locator Settings screen, and the **receiver firmware version** on the Receiver Settings screen. Each appears once that device has reported it, so give the screen a moment after opening it. Note both down — if you ever need help diagnosing something, these are the first two numbers anyone will ask for.
 
+A version looks like `2026.08.14-c5e7297`: the date it was built and the exact source it was built from. **A version ending in `-dirty` and a time, like `2026.08.14-c5e7297-dirty.231500`, is a development build** — someone's work in progress rather than a released one. That is normal on a board you or a developer has just flashed, and the time is there so two development builds made the same day can be told apart. If you did not expect one, it is worth asking which build you have before flying it.
+
 ## 3.4 Set flight configuration
 
 Open **Locator Settings** from the app menu. (The locator must be powered on, in range, and disarmed for this screen to appear — §2.1.)

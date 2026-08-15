@@ -7,7 +7,28 @@ ROOT="$(dirname "$SCRIPT_DIR")"
 # git describe must run inside the repo, not the caller's working directory
 cd "$ROOT" || exit 1
 
-VERSION="$(date +%Y.%m.%d)-$(git describe --tags --long --dirty --always)"
+DESCRIBE="$(git describe --tags --long --dirty --always)"
+VERSION="$(date +%Y.%m.%d)-${DESCRIBE}"
+
+# A dirty tree describes IDENTICALLY for as long as it stays dirty: --dirty says
+# only THAT something is uncommitted, never what.  So every build made between
+# two commits on the same day carries a byte-identical stamp, and the version a
+# device reports stops distinguishing the firmware actually on it.
+#
+# That is not theoretical.  Three different firmwares all reported
+# 2026.08.14-9c24f54-dirty during one bench session, and "which build is on the
+# board?" became unanswerable from the board -- which cost a debugging round
+# that blamed a locator for what turned out to be a receiver bug.
+#
+# So a dirty build gets the time of day appended and a clean one does not.  A
+# tagged or committed build keeps a stamp that is reproducible and comparable
+# between two people; a development build gets uniqueness instead, which is the
+# only property a development build actually needs.  ~31 characters against the
+# 64-byte version fields in StartupMessage / VersionInfoMessage, so there is
+# room for tags to lengthen it later.
+case "$DESCRIBE" in
+*-dirty) VERSION="${VERSION}.$(date +%H%M%S)" ;;
+esac
 
 OUTFILE="$ROOT/Core/Inc/version.h"
 
@@ -17,6 +38,11 @@ static const char GIT_VERSION[] = \"${VERSION}\";"
 # version.h is a prerequisite of Communication.o, so rewrite it only when the
 # stamp actually changed -- an unconditional write would bump its mtime and
 # force a recompile and relink on every single build.
+#
+# On a CLEAN tree that still holds and nothing is rebuilt.  On a dirty tree the
+# stamp now changes every second, so this guard stops catching and each build
+# recompiles Communication.cpp and relinks -- a few seconds, deliberately spent:
+# a development build you cannot identify is worth less than the time it saves.
 if [ -f "$OUTFILE" ] && [ "$(cat "$OUTFILE")" = "$CONTENT" ]; then
 	exit 0
 fi

@@ -14,6 +14,13 @@
 # GenVersion.sh rewrites version.h only when the stamp actually changes, so the
 # phony prerequisite below re-runs the script every build without forcing a
 # recompile and relink each time.
+#
+# That holds on a CLEAN tree.  On a dirty one the stamp now carries the time of
+# day -- `git describe --dirty` alone repeats for as long as the tree stays
+# dirty, which made three different firmwares report the same version during one
+# bench session -- so it changes every second and every build does recompile
+# Communication.cpp and relink.  Intended: a development build that cannot be
+# told apart from the last one is worth less than the seconds it saves.
 
 BASH ?= "C:/Program Files/Git/bin/bash.exe"
 
