@@ -24,9 +24,11 @@ enum FlightProfileState {
 	kIdle = 0, kMetadataRequested = 1
 };
 
-// DisarmedAlert is a phase of its own rather than something played from Idle,
-// because the once-per-second HAL_TIM_PWM_Stop that silences the transducer is
-// gated on Idle — playing the alert from Idle would chop it every second (#37).
+// DisarmedAlert is a phase of its own rather than something played from Idle so
+// that the sequence to play is named by the phase, like every other one.  (It
+// originally had to be: the transducer was silenced by a once-per-second stop
+// gated on Idle, which chopped anything played from Idle.  That stop is now
+// BuzzerServiceWatchdog, which silences only what nothing is driving.)  #37.
 enum class BuzzerPhase : uint8_t { Idle, PowerOn, Arming, Armed, Disarming, DisarmedAlert };
 
 struct Radio_s;
@@ -88,6 +90,10 @@ private:
 	// readRawADC() cannot report a failed conversion, so an empty gauge alone
 	// says nothing about which link failed.  Blocks ~120 ms, hence disarmed-only.
 	void PrintBatteryDiag();
+	// Sample DARM + the four channel outputs and emit a line if anything moved.
+	// Called every cycle in EVERY device state, because the edges worth catching
+	// happen inside DeviceState::Test.
+	void ServiceDeployTrace();
 	// 'h' console key: how long the load switch stays latched on for metering.
 	// Long enough to find the probe points and read a settled value, short
 	// enough that walking away cannot leave the divider drawing current.
@@ -122,6 +128,23 @@ private:
 
 	DeviceState device_state_ = DeviceState::Disarmed;
 	DeviceState prev_device_state_ = DeviceState::Disarmed;
+	// ── 'p' console key: deployment pin trace ────────────────────────────────
+	// Prints DARM and the four channel outputs whenever any of them changes, so
+	// a test firing can be watched from the outside.  Purely observational — it
+	// reads pins and writes a UART line, and drives nothing.
+	//
+	// Sampled with the last snapshot rather than printed every cycle: at 20 Hz a
+	// continuous dump would be unreadable and would hold the super-loop on the
+	// UART, whereas a real firing is a handful of edges.
+	bool     deploy_trace_ = false;
+	// Commanded state in the high byte, actual pad state in the low, so neither
+	// can mask a change in the other.  0xFFFF cannot occur (only 5 bits per
+	// byte are used) and means nothing has been sampled yet.
+	uint16_t deploy_trace_last_ = 0xFFFFu;
+	// The last state the operator was actually resting in — Disarmed or Armed.
+	// A completing deployment test returns here instead of unconditionally to
+	// Armed; see the comment at the assignment in ProcessRocketEvents.
+	DeviceState resting_device_state_ = DeviceState::Disarmed;
 	BuzzerPhase buzzer_phase_ = BuzzerPhase::PowerOn;
 	int peripheral_interrupt_count_ = 0;
 	int battery_level_ = 0;

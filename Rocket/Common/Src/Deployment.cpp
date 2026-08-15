@@ -9,6 +9,14 @@ void DisableDeployment() {
 	HAL_GPIO_WritePin(DARM_GPIO_Port, DARM_Pin, GPIO_PIN_RESET); // Power off current limited load switch
 }
 
+bool IsDeploymentBusEnabled() {
+	return HAL_GPIO_ReadPin(DARM_GPIO_Port, DARM_Pin) == GPIO_PIN_SET;
+}
+
+bool IsDeploymentBusCommanded() {
+	return (DARM_GPIO_Port->ODR & DARM_Pin) != 0u;
+}
+
 void Deploy(uint8_t channel, DeployState deploy_state) {
 	switch (channel) {
 	case 1:
@@ -49,6 +57,23 @@ bool IsDeploymentActive(uint8_t channel) {
 	return deployment_active;
 }
 
+// Same four pins, read from the OUTPUT register instead of the input one: what
+// the firmware last commanded, regardless of what the pad managed to do.
+bool IsDeploymentDriven(uint8_t channel) {
+	switch (channel) {
+	case 1:
+		return (D1_GPIO_Port->ODR & D1_Pin) != 0u;
+	case 2:
+		return (D2_GPIO_Port->ODR & D2_Pin) != 0u;
+	case 3:
+		return (D3_GPIO_Port->ODR & D3_Pin) != 0u;
+	case 4:
+		return (D4_GPIO_Port->ODR & D4_Pin) != 0u;
+	default:
+		return false;
+	}
+}
+
 uint8_t DeploymentChannelContinuity() {
 	uint8_t status = 0;
 	// Engage pull-up resistor for valid measurement. Using P-channel MOSFET, logic level low = on
@@ -71,6 +96,19 @@ Deployment::Deployment() {
 }
 
 void Deployment::ServiceTestDeployment() {
+	// Cancel is checked BEFORE the tick advances, and drops the channel
+	// unconditionally rather than only when IsDeploymentActive() says it is up:
+	// the one state worth being paranoid about is a cancel that lands in the same
+	// cycle as the fire, and reading the pin back to decide whether to clear it
+	// makes the outcome depend on which of the two got there first.
+	if (test_cancel_requested_) {
+		test_cancel_requested_ = false;
+		Deploy(active_deployment_channel_, DeployState::Off);
+		test_deploy_count_ = deploy_signal_duration * samples_per_second;
+		test_deployment_state_ = TestDeploymentState::Canceled;
+		RgbLed(RgbColor::Off);
+		return;
+	}
 	test_deploy_count_--;
 	if (test_deploy_count_ > samples_per_second * 3) {
 		if (test_deploy_count_ % samples_per_second >= (samples_per_second - 5))
@@ -92,7 +130,9 @@ void Deployment::ServiceTestDeployment() {
 			Deploy(active_deployment_channel_, DeployState::Off);
 			test_deploy_count_ = deploy_signal_duration * samples_per_second;
 			test_deployment_state_ = TestDeploymentState::Complete;
-//      device_state = DeviceState::Armed;
+			// Deployment does not own DeviceState.  Factory watches for Complete
+			// and restores the state the test was started from — which is not
+			// always Armed, as this commented-out line used to assume.
 		}
 	}
 }
@@ -101,4 +141,8 @@ void Deployment::ResetTestDeployment() {
 	test_deploy_count_ = deploy_signal_duration * samples_per_second;
 	test_deployment_state_ = TestDeploymentState::Idle;
 	active_deployment_channel_ = 0;
+	// Drop any cancel that arrived with no test running.  Every test start calls
+	// this first, so a stale flag cannot reach across and abort the NEXT test —
+	// which would look exactly like the bug this cancel path exists to fix.
+	test_cancel_requested_ = false;
 }

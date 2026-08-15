@@ -405,14 +405,27 @@ void Communication::OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
 		}
 
 		case MsgType::DeploymentTestRequest: {
-			if (flight_state == FlightStates::WaitingLaunch) {
-				// Channel sits after the header AND the target id (ADR-0020).
-				uint8_t channel = payload[sizeof(PacketHeader) + sizeof(uint32_t)];
-				if (channel >= 1 && channel <= 4) {
-					deploy_.ResetTestDeployment();
-					deploy_.SetActiveDeploymentChannel(channel);
-					device_state = DeviceState::Test;
-				}
+			// Channel sits after the header AND the target id (ADR-0020).
+			const uint8_t channel = payload[sizeof(PacketHeader) + sizeof(uint32_t)];
+			// Channel 0 is CANCEL — it is what the app has always sent when the
+			// countdown button is pressed a second time (DeploymentTestOption.None).
+			// The locator used to drop it on the floor: the guard below read
+			// `channel >= 1 && channel <= 4`, so a cancel matched nothing, the
+			// countdown ran on and the charge fired — while the app, having cleared
+			// its own deploymentTestActive flag, stopped displaying the countdown it
+			// was still being sent.  The operator saw a canceled test and got a live
+			// one.
+			//
+			// Deliberately NOT gated on flight_state, arm state, or anything else.
+			// Every other condition here decides whether a charge may fire; this one
+			// decides that it may not, and a stop command that can be refused is not
+			// a stop command.
+			if (channel == 0) {
+				deploy_.RequestTestCancel();
+			} else if (flight_state == FlightStates::WaitingLaunch && channel <= 4) {
+				deploy_.ResetTestDeployment();
+				deploy_.SetActiveDeploymentChannel(channel);
+				device_state = DeviceState::Test;
 			}
 			break;
 		}

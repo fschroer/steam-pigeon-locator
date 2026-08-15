@@ -10,7 +10,8 @@ extern "C" {
 #include "FlightManager.hpp"
 #include "Communication.hpp"
 #include "Archive.hpp"
-#include "Deployment.hpp"
+// No Deployment.hpp: the console has no way to fire a channel (FR-A7, app-only).
+// DeployMode, which the config menu edits, comes from Types.hpp.
 #include "PasswordKdf.hpp"
 #include "ConsoleBaud.hpp"
 
@@ -54,11 +55,9 @@ enum UserInteractionState
   EditPassword,
   EditConsoleBaud,
   DataHome,
-  TestHome,
-  TestDeploy1,
-  TestDeploy2,
-  TestDeploy3,
-  TestDeploy4,
+  // No test states.  The deployment test is app-only (FR-A7): firing a charge
+  // from the console requires the operator to be at the end of a USB-C cable,
+  // i.e. within arm's reach of the e-match they are about to light.
   DfuHome
 };
 
@@ -67,23 +66,19 @@ public:
   UserInteraction(FlightManager& flight,
   		Communication::Communication& comm,
 			Archive& archive,
-			Deployment& deploy,
 			UART_HandleTypeDef& huart2,
 			ConsoleBaud& console_baud);
   void ProcessChar(uint8_t uart_char, DeviceState& device_state);
-  void SetUserInteractionState(UserInteractionState user_interaction_state);
   // True when no menu is open, i.e. ProcessChar is only accumulating a command
   // word ("conf", "data", ...).  Factory's hidden diagnostic keys check this
   // before claiming any character the menus also use — digits in particular
   // select config items and flight records, so intercepting them unconditionally
   // silently breaks both menus.
   bool IsConsoleIdle() const { return user_interaction_state_ == WaitingForCommand; }
-  void NotifyTestComplete() { HAL_UART_Transmit(&huart2, (uint8_t*)test_complete_text_, strlen(test_complete_text_), uart_timeout); };
 private:
   FlightManager& flight_;
   Communication::Communication& comm_;
   Archive& archive_;
-  Deployment& deploy_;
   UART_HandleTypeDef& huart2_;
   ConsoleBaud& console_baud_;
 
@@ -107,7 +102,6 @@ private:
   const char* clear_screen_ = "\x1b[2J" "\x1b(B" "\x0f" "\r\0";
   const char* config_command_ = "config\0";
   const char* data_command_ = "data\0";
-  const char* test_command_ = "test\0";
   const char* dfu_command_ = "dfu\0";
   const char* crlf_ = "\r\n\0";
   const char* cr_ = "\r\0";
@@ -210,15 +204,6 @@ private:
                 "AppendMany() truncates silently, so raise UART_LINE_MAX_LENGTH before "
                 "adding columns.");
 
-  const char* test_menu_intro_ = "Rocket Locator Test Menu\r\n\r\n\0";
-  const char* test_deploy1_text_ = "1) Test Deployment Channel 1\r\n\0";
-  const char* test_deploy2_text_ = "2) Test Deployment Channel 2\r\n\0";
-  const char* test_deploy3_text_ = "3) Test Deployment Channel 3\r\n\0";
-  const char* test_deploy4_text_ = "4) Test Deployment Channel 4\r\n\0";
-  const char* test_exit_text_ = "Exiting Test Menu\r\n\r\n\0";
-  const char* test_guidance_text_ = "\r\nSelect an option and deployment test will fire in 10 seconds\r\n";
-  const char* test_complete_text_ = "Test complete, exiting test mode.\r\n\r\n\0";
-
   const char* dfu_intro_ = "Device Firmware Upgrade\r\n\r\n\0";
   const char* dfu_guidance_text_ = "Enter to continue, Esc to cancel\r\n\r\n\0";
   const char* dfu_warning_text_ = "Warning - device will stop working until reset by administrator\r\n\0";
@@ -295,7 +280,6 @@ private:
   // fallback rate when it is not in the table.
   static int ConsoleBaudIndexOf(uint32_t rate);
   void DisplayDataMenu();
-  void DisplayTestMenu();
   void ExportData(uint16_t archive_position);
   void ExportFlightStats(uint16_t archive_position);
   void DisplayCycleProfile();   // per-segment super-loop timing breakdown

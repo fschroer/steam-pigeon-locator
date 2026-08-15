@@ -237,7 +237,7 @@ Auto is there for an installation whose axis genuinely is not known. If you know
 | **Connection password** | — | ✅ **only** |
 | Export recorded flights as CSV | — | ✅ |
 | Erase flight memory | — | ✅ |
-| Deployment test | ✅ (armed only) | ✅ |
+| Deployment test | ✅ **only** (armed) | — |
 
 Everything in the app lives behind the menu button at the top left of the flight map:
 
@@ -500,6 +500,8 @@ This confirms two things: that each channel actually fires, and that your ignite
 - Wear eye protection.
 - E-matches produce a hot spark and a bang. Do this on a bare bench, not on carpet, not near solvents.
 
+**The app is the only way to run one.** There is no USB-C console deployment test — it was removed deliberately. A console test can only be started with a cable in your hand, which puts you within arm's reach of the e-match you are about to light; the app starts one from wherever you are standing. Everything else the console does is safe to do at the bench, so this is the one capability that belongs on the radio and nowhere else.
+
 **Using the app** (deployment test is only reachable while the locator is **armed**, because that's the only time the outputs are live):
 
 1. Connect an e-match to the channel you want to test.
@@ -510,9 +512,11 @@ This confirms two things: that each channel actually fires, and that your ignite
 
    <img src="images/app-10b-deployment-test-select.png" alt="Choosing the channel to test" width="300">
 
-6. **Press the button** — now reading *Deployment Channel n Test* — to start the countdown. The button itself becomes the countdown, and the locator's status LED blinks red, faster in the last 3 seconds.
+6. **Press the button** — now reading *Deployment Channel n Test* — to start the countdown. The button becomes the countdown and greys out, the red **STOP TEST** button below it comes alive, and the locator's status LED blinks red, faster in the last 3 seconds.
 
    <img src="images/app-10-deployment-test.png" alt="The countdown running on channel 2" width="300">
+
+   > 📷 **Screenshot needs retaking** — `images/app-10-deployment-test.png` and `app-10b-deployment-test-select.png` predate the separate **STOP TEST** button and show the countdown button as the only control.
 
 7. The channel fires.
 8. Repeat for each channel you will use.
@@ -522,11 +526,13 @@ This confirms two things: that each channel actually fires, and that your ignite
 
 ⚠️ **Read this before you start one, not after.**
 
-- **The countdown button is also the cancel button.** Pressing it while the countdown runs aborts the test. But it has shrunk to the width of a single digit, so it is a much smaller target than the button you pressed to start — aim at the number, not at where the button used to be.
-- **Leaving the screen also cancels**, and it is the more reliable of the two: **Return**, or the back arrow, is a large target and the screen cancels the test as it closes. ⚡ **If you need to stop a countdown in a hurry, press Return.**
-- ⚡ **A press that lands just after the countdown has lapsed starts a *new* test**, because the same button means "start" whenever no countdown is running. If you are stabbing at it near zero you can restart the very thing you were trying to stop. Return does not have this failure mode.
+- **STOP TEST is the cancel**, sitting under the countdown in red. It is on screen from the moment you open the page — greyed out until there is a test to stop — so you can see where it is *before* you start one. It is a full-width target, not the shrunken digit the countdown becomes.
+- **The button that started the test cannot restart it.** It greys out for the duration, so stabbing near zero can no longer set off a fresh countdown. (Older firmware and app versions used one button for both, and this was a real way to fire the charge you were trying to stop.)
+- **Leaving the screen sends the cancel too.** Return and the back arrow both send it as the screen closes.
+- ⚡ **The cancel is a radio message, and radio messages get lost.** ⚠️ **It is a request, not a switch.** STOP TEST reads **STOPPING…** while a cancel is outstanding, and the count above it keeps ticking until the locator actually honors it. **Until the countdown clears, treat the charge as live.** If it keeps ticking, press again — pressing repeatedly is the right answer, not a mistake.
+- ⚡ **Watch it stop.** This is the reason to prefer STOP TEST over Return: leaving the screen sends the same cancel but takes away the one display that would tell you whether it landed. If you need to be sure, stay and watch. (If you have already left, come back — the screen picks the countdown back up if it is still running.)
 
-**Using the USB-C console:** connect a cable, open a terminal (§Appendix D), type `test`, and select channel 1–4. The channel fires **10 seconds** after you select it. Same safety rules.
+**There is no USB-C console equivalent**, by design — see above. Earlier firmware had a `test` command; it is gone, and `?` on the console no longer lists it.
 
 ## 3.6 Make room in flight memory
 
@@ -1314,8 +1320,9 @@ They are exported in that order.
 | No continuity on a wired channel | Broken igniter, loose terminal, or a lead not making contact (§4.6). |
 | Continuity on a channel set to `Unused` | Mis-wired, or the mode is wrong (§4.6). |
 | Deployment Test isn't in the menu | It only appears while the locator is **armed** (§3.5). |
-| Can't stop a deployment test countdown | The countdown button is the cancel, but it has shrunk to the width of the digit — aim at the number. **Press Return instead**; leaving the screen cancels and is a far bigger target (§3.5). |
-| The countdown restarted instead of stopping | You pressed the button just after it lapsed, and the same button starts a fresh test whenever no countdown is running (§3.5). |
+| Can't stop a deployment test countdown | Press the red **STOP TEST** button below the countdown; leaving the screen sends the same cancel. It is a radio message and can be lost: while one is outstanding the button reads **STOPPING…** and the count keeps ticking until the locator honors it. Press again, and treat the charge as live until the countdown clears (§3.5). |
+| STOP TEST is greyed out | No test is running as far as the app knows. If the locator's LED is still blinking red, the app has lost the link — the countdown is not reaching it, and the cancel would not reach the locator either. |
+| A deployment test counted down but the channel never fired | First check you are measuring the channel you tested — the terminal blocks are numbered 1–4 and it is an easy one to get wrong. Then connect USB-C, press `p` for the pin trace (Appendix D), and run the test again. `cmd DARM=1 D`*n*`=1` with your meter reading nothing puts the fault in the hardware; anything else puts it in the locator's firmware and is worth reporting. The channel is live for **1 second**, so a meter may miss it where a scope will not. |
 | Locator Settings / Flight Profiles aren't in the menu | They only appear while the locator is powered, in range, and **disarmed** (§2.1). |
 | Ready-beep never starts after arming | Flight memory full (§3.6) or battery too low. Longest when re-arming after a completed flight. **Don't launch** (§7.4). |
 | Locator is playing a repeating *descending* double-beep | It is not armed and it thinks it's on the pad (§6.6). Arm it, lay the rocket down, or snooze the alert. Do not tape over the buzzer. |
@@ -1572,8 +1579,11 @@ Reading it:
 |---|---|
 | `config` | Configuration menu |
 | `data` | Flight data menu |
-| `test` | Deployment test menu |
 | `dfu` | Firmware update mode |
+
+There is no console deployment test. Firing a charge is an app-only command, so
+that starting one never requires you to be at the other end of a USB-C cable —
+see §3.5.
 
 **On the locator**, if you forget any of this, press `?` with no menu open and
 it prints the list — the commands above, plus the service keys below. It comes
@@ -1583,9 +1593,9 @@ and `dfu`.
 
 ## Service diagnostics (locator)
 
-Type these at the console with **no menu open** and the locator **disarmed**. Both conditions apply to every key in this table. Most of them exist for diagnosing a locator that is behaving oddly, and their output is intended for service rather than for pre-flight checks — you do not need to understand it to use it. **`m` is the exception:** "did my sensor-axis setting take effect?" is an ordinary question to ask while the rocket is still in your hands, and this is the only place it can be answered.
+Type these at the console with **no menu open**. All but one also require the locator to be **disarmed**. Most of them exist for diagnosing a locator that is behaving oddly, and their output is intended for service rather than for pre-flight checks — you do not need to understand it to use it. **`m` is the exception:** "did my sensor-axis setting take effect?" is an ordinary question to ask while the rocket is still in your hands, and this is the only place it can be answered.
 
-If a key seems to do nothing, you are in a menu — press Esc. If it answers `REFUSED - disarm first`, the locator is armed. These are ground tools; nothing in this table is meant to be reached in flight.
+If a key seems to do nothing, you are in a menu — press Esc. If it answers `REFUSED - disarm first`, the locator is armed. These are ground tools; nothing here is meant to be reached in flight.
 
 | Key | Action |
 |---|---|
@@ -1593,10 +1603,14 @@ If a key seems to do nothing, you are in a menu — press Esc. If it answers `RE
 | `v` | Battery-sense check. Prints how the battery measurement behaves over ~100 ms. **If the numbers don't respond at all, the fault is in the locator's battery-sense circuit rather than the battery** — which is the one case an empty gauge cannot distinguish on its own (Part 11). |
 | `h` | Holds the battery-sense circuit powered for ~10 seconds so it can be measured with a meter. Press again to release early. Releases on its own regardless. |
 | `/` | Prints the last fault the locator recorded, if any — what kind, what reset it, and how long it had been running. Says `DIAG\|NONE` when there is nothing stored, which is the normal, healthy answer. Service will ask for this text if you send a locator in. |
+| `p` | **Deployment pin trace — works armed.** Prints a line whenever the deployment hardware changes state: `cmd` is what the firmware asked the pins to do, `pad` is what the pins actually did, `DARM` is the load switch that feeds all four channels, and `D1`–`D4` are the channels themselves. Press again to turn it off. Use it when **a channel doesn't fire** (below). It only reads pins — it cannot fire anything, and it is not a way to test a channel from the console. |
 
-None of these affects flight behavior, and all of them are refused while the locator is armed.
+None of these affects flight behavior.
 
-`?` is the exception to the rule above: it still needs no menu open, but it answers whether the locator is armed or not — so a list of the commands is always available, even when the commands themselves are not.
+**Two keys answer while the locator is armed**, and everything else in the table is refused until you disarm:
+
+- `?` — so a list of the commands is always available, even when the commands themselves are not.
+- `p` — because the thing it exists to watch, a deployment test, only ever happens while armed. A disarmed-only trace would be a trace of nothing.
 
 ## Editing keys (configuration menu)
 
@@ -1636,14 +1650,6 @@ Lists stored flights as `#  Date  Time  Apogee (m)  Time to Apogee (s)`.
 | `c` | Clear empty/unused records |
 | `e` | Erase ALL flight memory — asks for `Y` to confirm |
 | `t` | Per-cycle timing breakdown (diagnostic) |
-
-## `test` — Rocket Locator Test Menu
-
-| Key | Action |
-|---|---|
-| `1`–`4` | Test deployment channel 1–4. **Fires 10 seconds after selection.** |
-
-⚠️ E-matches only. No black powder. Point it away from everything.
 
 ## `dfu` — Device Firmware Upgrade
 

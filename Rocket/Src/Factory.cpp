@@ -41,7 +41,7 @@ Factory::Factory(UART_HandleTypeDef &huart2, SPI_HandleTypeDef &hspi2, I2C_Handl
 				power_), navigation_(&hspi2, &hi2c2, &htim17, CS_IMU_GPIO_Port, CS_IMU_Pin, CSB_ALT_GPIO_Port,
 		CSB_ALT_Pin), comm_(deviceUID_, flight_, navigation_, archive_, power_, deploy_), flash_(&hspi2_,
 		CSB_MEM_GPIO_Port,
-		CSB_MEM_Pin), archive_(deviceUID_, flash_), console_baud_(huart2_), config_(flight_, comm_, archive_, deploy_,
+		CSB_MEM_Pin), archive_(deviceUID_, flash_), console_baud_(huart2_), config_(flight_, comm_, archive_,
 		huart2_, console_baud_), power_(&hadc), deploy_() {
 }
 
@@ -155,8 +155,40 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			BuzzerReset();
 			buzzer_phase_ = BuzzerPhase::Disarming;
 		}
+		// Every buzzer sequence is driven from the Disarmed/Armed case of the
+		// switch below, so entering Config, Test, MetadataRequested or
+		// DataRequested abandons whatever was playing.  Silence it here rather
+		// than leaving the note sounding for the length of a config session, a
+		// deployment test or an archive download.
+		if (device_state_ != DeviceState::Disarmed && device_state_ != DeviceState::Armed) {
+			BuzzerReset();
+			BuzzerStop();
+			buzzer_phase_ = BuzzerPhase::Idle;
+		}
 		prev_device_state_ = device_state_;
 	}
+
+	// Disarmed and Armed are the two states the operator actually sits in;
+	// Config, Test, MetadataRequested and DataRequested are transients that have
+	// to hand control back to one of them.  Tracked here, outside the transition
+	// block, so it survives a chain of transients.
+	//
+	// The deployment test is the case that needs it: its completion path used to
+	// hard-code a return to Armed, so a test that began from Disarmed ended with
+	// the locator armed and its pyro bus live with nobody having asked for it —
+	// precisely what ADR-0021 makes arming the sole gate for.  Returning whence
+	// it came cannot invent an arm state that was never requested.
+	//
+	// DeploymentTestRequest is now the only way in (ADR-0027 removed the console
+	// test menu, which was the other), and the app only offers it while armed —
+	// but the locator's own handler gates the request on flight state, not arm
+	// state, so "the app would not do that" is not something this can rely on.
+	//
+	// prev_device_state_ would not do: transients can chain (Config → Test), and
+	// then the state one hop back is itself a transient rather than anything to
+	// return to.
+	if (device_state_ == DeviceState::Disarmed || device_state_ == DeviceState::Armed)
+		resting_device_state_ = device_state_;
 
 	// Run deferred communication tasks (e.g. pending VersionInfo response)
 	// regardless of device state, before the per-state switch below.
@@ -344,39 +376,47 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 		// audible recovery aid and now sounds after ANY flight, which is the whole
 		// point of #36: a forgotten arm must not also cost you the ability to find
 		// the rocket on the ground.
+		//
+		// EXACTLY ONE driver call per tick.  note_index_ and duration_index_ are
+		// shared by every sequence, so two calls in one tick decrement the same
+		// duration twice and walk one sequence's index through the other's array
+		// — which is what the Landed beacon and the Disarming one-shot did to
+		// each other when the rocket was disarmed after a flight.  Anything that
+		// declines to drive it here simply plays nothing, and the per-tick
+		// watchdog at the end of this function silences the transducer.
 		if (device_state_ == DeviceState::Disarmed) {
 			if (buzzer_phase_ == BuzzerPhase::PowerOn) {
 				if (BuzzerSequenceOnce(PowerOn))
 					buzzer_phase_ = BuzzerPhase::Idle;
-			}
-			if (buzzer_phase_ == BuzzerPhase::Disarming) {
+			} else if (buzzer_phase_ == BuzzerPhase::Disarming) {
 				if (BuzzerSequenceOnce(Disarming))
 					buzzer_phase_ = BuzzerPhase::Idle;
 			}
 			// Repeats while the condition holds, escalating once unanswered.  Both
 			// patterns descend (C8→A7) against the rising triads used by Armed and
 			// Landed, so the pad can tell "you forgot" from "ready to fly" by ear.
-			if (buzzer_phase_ == BuzzerPhase::DisarmedAlert) {
+			else if (buzzer_phase_ == BuzzerPhase::DisarmedAlert) {
 				if (disarmed_alert_elapsed_ >= kDisarmedUrgentCycles)
 					BuzzerSequence(DisarmedAlertUrgent);
 				else
 					BuzzerSequence(DisarmedAlert);
-			}
+			} else if (flight_state == FlightStates::Landed)
+				BuzzerSequence(Landed);   // recovery beacon after a disarmed flight (#36)
 		} else if (buzzer_phase_ == BuzzerPhase::Arming) {
 			if (BuzzerSequenceOnce(Arming))
 				buzzer_phase_ = BuzzerPhase::Armed;
-		} else if (buzzer_phase_ == BuzzerPhase::Armed) {
-			if (flight_state == FlightStates::WaitingLaunch) {
+		} else if (flight_state == FlightStates::Landed) {
+			BuzzerSequence(Landed);
+		} else if (buzzer_phase_ == BuzzerPhase::Armed
+				&& flight_state == FlightStates::WaitingLaunch) {
 #if !defined(NAV_TEST) || SP_BENCH_REPLAY
-				// Withhold the ready-beep until the flight record is fully open
-				// (activeOpen = true).  Users launch on the ready-beep, so this
-				// guarantees sample recording is active before the rocket leaves
-				// the pad — closing the residual open-vs-launch race.
-				if (archive_.IsActiveOpen())
+			// Withhold the ready-beep until the flight record is fully open
+			// (activeOpen = true).  Users launch on the ready-beep, so this
+			// guarantees sample recording is active before the rocket leaves
+			// the pad — closing the residual open-vs-launch race.
+			if (archive_.IsActiveOpen())
 #endif
-					BuzzerSequence(Armed);
-			} else if (flight_state > FlightStates::WaitingLaunch && flight_state != FlightStates::Landed)
-				BuzzerStop();
+				BuzzerSequence(Armed);
 		}
 
 		// GPS-PPS discipline state for this cycle (#31).  Counters are cumulative,
@@ -414,7 +454,8 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 				flight_.WriteEkfDiagSnapshot(FlightArchive::Statistic::EkfDiagAtClose);
 				archive_.CloseCurrentFlight();
 			}
-			BuzzerSequence(Landed);
+			// The Landed beacon is driven from the buzzer block above, with every
+			// other sequence, so that only one driver ever runs per tick.
 		}
 		switch (rocket_service_count) {
 		case 0:
@@ -466,12 +507,11 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			}
 			Diag::end(Diag::Seg::Telemetry);
 			(void) t_tlm;
-			// Silence the transducer when nothing is playing — but NOT while the
-			// Landed beacon is sounding.  The beacon now runs disarmed too, where
-			// buzzer_phase_ is Idle, so without the flight-state guard this would
-			// chop the recovery aid once per second.
-			if (buzzer_phase_ == BuzzerPhase::Idle && flight_state != FlightStates::Landed)
-				HAL_TIM_PWM_Stop(&htim16, TIM_CHANNEL_1);
+			// The once-per-second HAL_TIM_PWM_Stop that used to sit here is gone:
+			// BuzzerServiceWatchdog silences the transducer on the very next tick
+			// after nothing drives it, which covers this case and the several it
+			// missed (it only fired while buzzer_phase_ was Idle, in these two
+			// device states, and left EN1/EN2 asserted).
 			break;
 		}
 		case 3:
@@ -498,11 +538,32 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			comm_.SendTestCountdownMessage(test_deploy_count);
 		}
 		deploy_.ServiceTestDeployment();
-		if (deploy_.GetTestDeploymentState() == TestDeploymentState::Complete) {
-			config_.SetUserInteractionState(UserInteractionState::WaitingForCommand);
+		// Canceled leaves Test by exactly the same door as Complete: the channel is
+		// already down and the countdown is already rewound, so the only thing left
+		// is to stop being in the state that services it.
+		const TestDeploymentState test_state = deploy_.GetTestDeploymentState();
+		if (test_state == TestDeploymentState::Complete || test_state == TestDeploymentState::Canceled) {
+			// Say which ending this was, on the console, once per test.
+			//
+			// "Did the cancel arrive?" is otherwise unanswerable from the bench:
+			// a cancel that was never received and one that was received and
+			// honored differ only in what the LED does over the following 50 ms,
+			// and the countdown the app is showing may be up to 3 s stale either
+			// way.  This turns it into a line you can read.  Main-loop context,
+			// not the radio callback that sets the flag — UartSend can hold the
+			// loop for its 100 ms timeout, which has no business in an ISR.
+			UartSend(test_state == TestDeploymentState::Canceled
+					? "\r\nDIAG|TEST: CANCELED - channel off, no fire\r\n"
+					: "\r\nDIAG|TEST: complete - channel fired\r\n");
 			deploy_.ResetTestDeployment();
-			config_.NotifyTestComplete();
-			device_state_ = DeviceState::Armed;
+			// Back to whatever the test interrupted — NOT unconditionally Armed.
+			// See resting_device_state_ above.
+			//
+			// The console is no longer told anything here.  It cannot start a
+			// test, so it has no state to unwind, and a "test complete" line
+			// printed unbidden would land in the middle of whatever menu the
+			// operator happens to have open.
+			device_state_ = resting_device_state_;
 		}
 		break;
 	}
@@ -514,6 +575,16 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 		comm_.CheckFlightProfileTimeout(device_state_);
 		break;
 	}
+
+	// Outside the switch, and last: whatever any state above decided, a note
+	// that nothing is still driving must not be left sounding.
+	BuzzerServiceWatchdog();
+
+	// Also outside the switch.  A deployment test runs in DeviceState::Test, so a
+	// trace hung off the Disarmed/Armed branch would miss every edge it exists to
+	// catch — which is the same mistake that left the buzzer stuck and the
+	// receiver's forward window shut.
+	ServiceDeployTrace();
 
 	Diag::mark(Diag::Seg::ProcTotal, t_proc);
 }
@@ -749,6 +820,23 @@ void Factory::HandleConsoleChar(uint8_t uart_char) {
             UartSend("\r\nDIAG|BATT: REFUSED - disarm first (this stalls the loop ~120 ms)\r\n");
         }
     }
+    // Deployment pin trace.  Toggles, and is NOT disarm-gated — see
+    // ServiceDeployTrace for why the shared rule cannot apply to this one.
+    // 'p' rather than 'd': root letters are matched ahead of the command-word
+    // buffer, so 'd' would eat the 'd' in "data" and "dfu".
+    else if (config_.IsConsoleIdle() && (uart_char == 'p' || uart_char == 'P')) {
+        deploy_trace_ = !deploy_trace_;
+        if (deploy_trace_) {
+            UartSend("\r\nDIAG|PYRO: trace ON - reports DARM + channel pins on change\r\n");
+            // Force the first sample to print, whatever the pins are doing, so
+            // the operator gets a baseline instead of silence until something
+            // moves — and so "all zero" is stated rather than assumed.
+            deploy_trace_last_ = 0xFFFFu;
+            ServiceDeployTrace();
+        } else {
+            UartSend("\r\nDIAG|PYRO: trace off\r\n");
+        }
+    }
     // Hold BATTRD on so the load switch can be metered.  Toggles, so a second
     // press releases early rather than leaving the operator waiting it out.
     else if (config_.IsConsoleIdle() && (uart_char == 'h' || uart_char == 'H')) {
@@ -914,6 +1002,60 @@ void Factory::HandleConsoleChar(uint8_t uart_char) {
 }
 
 // ---------------------------------------------------------------------------
+// ServiceDeployTrace — 'p' console key
+//
+// "The channel did not fire" is three different faults wearing the same face:
+// the DARM load switch never came up, the channel FET was never driven, or both
+// were driven and the hardware did not follow.  From outside the board they are
+// indistinguishable — a scope on the terminal block reads 0 V in all three —
+// and the first two are firmware questions the firmware can simply answer.
+//
+// So this reports what the firmware DROVE, next to a scope reading what the
+// board DID.  If the line says DARM=1 D3=1 while the probe says 0 V, the fault
+// is downstream of the MCU and no amount of reading this code will find it.
+//
+// Read-only by construction: pin reads and a UART line, nothing driven.  That is
+// what lets it run while ARMED, which the other diagnostics may not — the event
+// it exists to observe only happens while armed, so a disarm gate would make it
+// useless (ADR-0027 leaves the deployment test app-only and armed-only).
+// ---------------------------------------------------------------------------
+void Factory::ServiceDeployTrace() {
+	if (!deploy_trace_)
+		return;
+
+	// Commanded (ODR) in the high nibble pair, actual (IDR) in the low: a change
+	// in EITHER has to print, or the one case worth catching — firmware drove it,
+	// pad did not follow — would be the one case that stays silent.
+	const uint8_t cmd = static_cast<uint8_t>(
+			  (IsDeploymentBusCommanded() ? 0x10u : 0u)
+			| (IsDeploymentDriven(1)      ? 0x01u : 0u)
+			| (IsDeploymentDriven(2)      ? 0x02u : 0u)
+			| (IsDeploymentDriven(3)      ? 0x04u : 0u)
+			| (IsDeploymentDriven(4)      ? 0x08u : 0u));
+	const uint8_t act = static_cast<uint8_t>(
+			  (IsDeploymentBusEnabled()   ? 0x10u : 0u)
+			| (IsDeploymentActive(1)      ? 0x01u : 0u)
+			| (IsDeploymentActive(2)      ? 0x02u : 0u)
+			| (IsDeploymentActive(3)      ? 0x04u : 0u)
+			| (IsDeploymentActive(4)      ? 0x08u : 0u));
+	const uint16_t now = static_cast<uint16_t>((cmd << 8) | act);
+	if (now == deploy_trace_last_)
+		return;
+	deploy_trace_last_ = now;
+
+	char line[176];
+	snprintf(line, sizeof(line),
+			"\r\nDIAG|PYRO: cmd DARM=%u D1=%u D2=%u D3=%u D4=%u | pad DARM=%u D1=%u D2=%u D3=%u D4=%u"
+			"%s  state=%u t=%lu\r\n",
+			(cmd >> 4) & 1u, cmd & 1u, (cmd >> 1) & 1u, (cmd >> 2) & 1u, (cmd >> 3) & 1u,
+			(act >> 4) & 1u, act & 1u, (act >> 1) & 1u, (act >> 2) & 1u, (act >> 3) & 1u,
+			(cmd != act) ? "  <<< PIN DISAGREES - fault is at the pin, not the firmware" : "",
+			static_cast<unsigned>(device_state_),
+			static_cast<unsigned long>(HAL_GetTick()));
+	UartSend(line);
+}
+
+// ---------------------------------------------------------------------------
 // PrintConsoleHelp — '?' console key
 //
 // The root console had no way to discover itself: the four command words and
@@ -930,18 +1072,21 @@ void Factory::HandleConsoleChar(uint8_t uart_char) {
 // ---------------------------------------------------------------------------
 void Factory::PrintConsoleHelp() {
 	UartSend("\r\n--- CONSOLE ---\r\n");
+	// No 'test': the deployment test is app-only (FR-A7).  Listing it here would
+	// be advertising a command that no longer exists.
 	UartSend("Command words (type, then Enter):\r\n"
 			 "  config   configuration menu\r\n"
 			 "  data     flight data menu\r\n");
-	UartSend("  test     deployment test menu\r\n"
-			 "  dfu      firmware update mode\r\n");
+	UartSend("  dfu      firmware update mode\r\n");
 
-	// '?' sits alone: it is the only root key that answers while armed, which is
-	// the point of saying so on its own line rather than in a footnote.  An
-	// operator who has just been refused by one of the four below needs to know
-	// the refusal was the arm state and not a dead console.
-	UartSend("\r\nKeys (no menu open):\r\n"
-			 "  ?        this list - works armed or disarmed\r\n");
+	// '?' and 'p' are the two root keys that answer while armed, and they are
+	// grouped under their own heading rather than footnoted: an operator who has
+	// just been refused by one of the four below needs to know the refusal was
+	// the arm state and not a dead console.  Keeping them out of the block below
+	// is also what lets its DISARMED heading stay true without exceptions.
+	UartSend("\r\nKeys (no menu open, armed or disarmed):\r\n"
+			 "  ?        this list\r\n"
+			 "  p        deployment pin trace (DARM + channels, on change)\r\n");
 
 	// The diagnostics carry one shared rule instead of four per-line carve-outs.
 	// Naming the requirement in the heading is what makes a refusal legible: the

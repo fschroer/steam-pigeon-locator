@@ -8,6 +8,13 @@ constexpr uint32_t TIMCLK = HSI48_VALUE;
 constexpr uint32_t PSC    = 11;
 uint8_t note_index_ = 0;
 uint8_t duration_index_ = 0;
+// True while the PWM is energized.  Tracked so the watchdog below can tell a
+// genuinely stuck note from the normal quiet between sequences, and so it costs
+// nothing on the ticks where nothing is playing.
+bool buzzer_playing_ = false;
+// Set by the sequence drivers, cleared by BuzzerServiceWatchdog.  See the
+// watchdog for why this exists.
+bool buzzer_serviced_ = false;
 
 enum class Tone : uint8_t {
 	Rest,
@@ -290,6 +297,7 @@ void BuzzerPlay(Tone n, uint8_t volume)
     HAL_GPIO_WritePin(EN1_GPIO_Port, EN1_Pin, (GPIO_PinState)(volume & 0x02));
     HAL_GPIO_WritePin(EN2_GPIO_Port, EN2_Pin, (GPIO_PinState)(volume & 0x01));
     HAL_TIM_PWM_Start(&htim16, TIM_CHANNEL_1);
+    buzzer_playing_ = true;
 }
 
 void BuzzerStop()
@@ -297,6 +305,7 @@ void BuzzerStop()
     HAL_TIM_PWM_Stop(&htim16, TIM_CHANNEL_1);
     HAL_GPIO_WritePin(EN1_GPIO_Port, EN1_Pin, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(EN2_GPIO_Port, EN2_Pin, GPIO_PIN_RESET);
+    buzzer_playing_ = false;
 }
 
 // Reset to the beginning of a sequence.  Sets note_index_ = 0 directly so
@@ -317,6 +326,7 @@ void BuzzerReset()
 template <size_t N>
 void BuzzerSequence(const Note (&sequence)[N])
 {
+    buzzer_serviced_ = true;
     if (duration_index_ == 0) {
         if (note_index_ >= N)
             note_index_ = 0;
@@ -336,6 +346,7 @@ void BuzzerSequence(const Note (&sequence)[N])
 template <size_t N>
 bool BuzzerSequenceOnce(const Note (&sequence)[N])
 {
+    buzzer_serviced_ = true;
     if (duration_index_ == 0) {
         if (note_index_ >= N) {
             BuzzerReset();
@@ -351,4 +362,27 @@ bool BuzzerSequenceOnce(const Note (&sequence)[N])
     if (--duration_index_ == 0)
         note_index_++;
     return false;
+}
+
+// Call once per main-loop tick, unconditionally, AFTER the buzzer has had its
+// chance to run.
+//
+// A note is started once at its boundary and then left sounding while the timer
+// runs free, so the transducer is only ever silenced by the NEXT call into a
+// sequence driver.  Anything that stops those calls mid-note — a device-state
+// change into a state whose service block does not touch the buzzer, a guard
+// that withholds a beep, a phase that no branch matches — therefore leaves the
+// note on indefinitely.  BuzzerReset() does not help: it rewinds the sequence
+// but never touches the hardware.
+//
+// The callers stop each of the paths known today, but a stuck buzzer is a
+// recovery aid that has failed silently-in-reverse, so this backstops them by
+// asserting the invariant directly: if nothing drove the buzzer this tick,
+// nothing should be sounding.  Worst case a stuck note now lasts one tick, and
+// any branch added later gets that guarantee without knowing this exists.
+void BuzzerServiceWatchdog()
+{
+    if (!buzzer_serviced_ && buzzer_playing_)
+        BuzzerStop();
+    buzzer_serviced_ = false;
 }

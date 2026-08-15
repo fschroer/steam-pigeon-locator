@@ -41,5 +41,6 @@ Write an ADR for a decision that is costly to reverse, or that future work must 
 | [0024](0024-console-baud-and-sync-byte-recovery.md) | Console baud is an operator setting, kept off the air, with a 0x7F sync-byte recovery path so it cannot brick its own access | Accepted |
 | [0025](0025-lora-channel-plan-and-part-15-compliance.md) | The 902–928 MHz channel plan — settle Part 15 compliance before adding channels | Proposed |
 | [0026](0026-archive-capacity-for-fusion-diagnosability.md) | Spend one archive record and a format break so a flight can report whether its own fused solution was alive | Proposed |
+| [0027](0027-deployment-test-is-app-only.md) | The deployment test is app-only — a firing command should not require you to be within reach of the charge | Accepted |
 
 > **Numbering note (resolved 2026-08-03):** the iOS-port ADR and the launch-detection ADR were both filed as **0015**. Launch detection was filed first (2026-07-17) and keeps the number; the iOS port moved to **0016**. Commit `4b6bb45` and any external reference calling the iOS port "ADR-0015" mean [0016](0016-ios-port-corebluetooth-and-platform-parity.md) — a note in that file records the change. When picking the next number, check this table rather than the highest number you remember.

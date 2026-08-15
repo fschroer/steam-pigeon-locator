@@ -20,8 +20,8 @@ constexpr uint16_t max_main_backup_deploy_altitude = 400;
 constexpr uint16_t max_lora_channel = 63;
 
 UserInteraction::UserInteraction(FlightManager &flight, Communication::Communication &comm, Archive &archive,
-		Deployment &deploy, UART_HandleTypeDef &huart2, ConsoleBaud &console_baud) :
-		flight_(flight), comm_(comm), archive_(archive), deploy_(deploy), huart2_(huart2), console_baud_(console_baud) {
+		UART_HandleTypeDef &huart2, ConsoleBaud &console_baud) :
+		flight_(flight), comm_(comm), archive_(archive), huart2_(huart2), console_baud_(console_baud) {
 }
 
 int UserInteraction::ConsoleBaudIndexOf(uint32_t rate) {
@@ -67,10 +67,6 @@ void UserInteraction::ProcessChar(uint8_t uart_char, DeviceState &device_state) 
 					device_state = DeviceState::Config;
 					user_interaction_state_ = UserInteractionState::DataHome;
 					DisplayDataMenu();
-				} else if (StrCmp(user_input_, test_command_, char_pos)) {
-					device_state = DeviceState::Config;
-					user_interaction_state_ = UserInteractionState::TestHome;
-					DisplayTestMenu();
 				} else if (StrCmp(user_input_, dfu_command_, char_pos)) {
 					device_state = DeviceState::Config;
 					user_interaction_state_ = UserInteractionState::DfuHome;
@@ -272,46 +268,6 @@ void UserInteraction::ProcessChar(uint8_t uart_char, DeviceState &device_state) 
 			HAL_UART_Transmit(&huart2_, (uint8_t*) uart_line_, uart_line_len, uart_timeout);
 		}
 		break;
-	case UserInteractionState::TestHome:
-		if (uart_char == '1') {
-			deploy_.ResetTestDeployment();
-			deploy_.SetActiveDeploymentChannel(1);
-			device_state = DeviceState::Test;
-			user_interaction_state_ = UserInteractionState::TestDeploy1;
-		} else if (uart_char == '2') {
-			deploy_.ResetTestDeployment();
-			deploy_.SetActiveDeploymentChannel(2);
-			device_state = DeviceState::Test;
-			user_interaction_state_ = UserInteractionState::TestDeploy2;
-		} else if (uart_char == '3') {
-			deploy_.ResetTestDeployment();
-			deploy_.SetActiveDeploymentChannel(3);
-			device_state = DeviceState::Test;
-			user_interaction_state_ = UserInteractionState::TestDeploy3;
-		} else if (uart_char == '4') {
-			deploy_.ResetTestDeployment();
-			deploy_.SetActiveDeploymentChannel(4);
-			device_state = DeviceState::Test;
-			user_interaction_state_ = UserInteractionState::TestDeploy4;
-		} else if (uart_char == 27) { // Esc key
-			deploy_.ResetTestDeployment();
-			device_state = DeviceState::Disarmed;
-			user_interaction_state_ = UserInteractionState::WaitingForCommand;
-			uart_line_len = MakeLine(uart_line_, cancel_text_);
-			HAL_UART_Transmit(&huart2_, (uint8_t*) uart_line_, uart_line_len, uart_timeout);
-		}
-		break;
-	case UserInteractionState::TestDeploy1:
-	case UserInteractionState::TestDeploy2:
-	case UserInteractionState::TestDeploy3:
-	case UserInteractionState::TestDeploy4:
-		if (uart_char == 27) { // Esc key
-			device_state = DeviceState::Disarmed;
-			user_interaction_state_ = UserInteractionState::WaitingForCommand;
-			uart_line_len = MakeLine(uart_line_, cancel_text_);
-			HAL_UART_Transmit(&huart2_, (uint8_t*) uart_line_, uart_line_len, uart_timeout);
-		}
-		break;
 	case UserInteractionState::DfuHome:
 		if (uart_char == 13) // Enter key
 			StartBootloader();
@@ -496,18 +452,6 @@ void UserInteraction::DisplayDataMenu() {
 //    }
 	}
 	export_line.WriteMany(data_guidance_text_, crlf_);
-}
-
-void UserInteraction::DisplayTestMenu() {
-	int uart_line_len = 0;
-	uart_line_len = MakeLine(uart_line_, clear_screen_, test_menu_intro_);
-	HAL_UART_Transmit(&huart2_, (uint8_t*) uart_line_, uart_line_len, uart_timeout);
-	HAL_UART_Transmit(&huart2_, (uint8_t*) test_deploy1_text_, strlen(test_deploy1_text_), uart_timeout);
-	HAL_UART_Transmit(&huart2_, (uint8_t*) test_deploy2_text_, strlen(test_deploy2_text_), uart_timeout);
-	HAL_UART_Transmit(&huart2_, (uint8_t*) test_deploy3_text_, strlen(test_deploy3_text_), uart_timeout);
-	HAL_UART_Transmit(&huart2_, (uint8_t*) test_deploy4_text_, strlen(test_deploy4_text_), uart_timeout);
-	uart_line_len = MakeLine(uart_line_, test_guidance_text_, crlf_);
-	HAL_UART_Transmit(&huart2_, (uint8_t*) uart_line_, uart_line_len, uart_timeout);
 }
 
 const char* UserInteraction::NoseAxisString(NoseAxis nose_axis_value) {
@@ -952,8 +896,4 @@ uint8_t UserInteraction::StartBootloader() {
 //    HAL_FLASH_OB_Lock();
 //    HAL_FLASH_Lock();
 	return 0;
-}
-
-void UserInteraction::SetUserInteractionState(UserInteractionState user_interaction_state) {
-	user_interaction_state_ = user_interaction_state;
 }

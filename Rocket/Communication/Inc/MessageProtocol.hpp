@@ -301,7 +301,7 @@ struct FlightDataRequest {
 struct DeploymentTestRequest {
 	PacketHeader packet_header;
 	uint32_t target_locator_id;
-	uint8_t channel;
+	uint8_t channel;       // 1-4 starts a test; 0 CANCELS a running one
 };
 
 // Bounded suppression of the #37 alert.  Duration is carried rather than fixed
