@@ -1,6 +1,39 @@
-# Session Handoff — 2026-08-06
+# Session Handoff — 2026-08-17
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
+
+## 2026-08-17 session — Mac dev environment stood up; iOS repo created; wire-format triad is now real — COMMITTED + PUSHED, NO HARDWARE INVOLVED
+
+App-side and docs only. **No firmware changed**, and nothing here has touched a radio — the whole session ran on a Mac with no locator, receiver, or iPhone present.
+
+### A. The three repos cloned to a Mac, and a fourth created ([steam-pigeon-ios](https://github.com/fschroer/steam-pigeon-ios))
+
+All four now sit as **siblings under `~/Developer/`**, which is the layout the `../` paths in the iOS repo's `CLAUDE.md` assume. That CLAUDE.md is the one that was parked in `Tools/ios-app-template/` for exactly this moment; it was copied to the new repo's root, its template header dropped, and its layout section corrected (the template guessed a `~/Developer/steam-pigeon/` parent; the sibling relationship is what actually matters).
+
+`Scripts/sp-status.sh` was Windows-only and knew about three repos. It now resolves each path through **env var → sibling of this repo → the original Windows absolute path**, anchored on the script's own location (`<locator>/Scripts/`), so one script works on both machines with no per-machine config; the Windows defaults are untouched as tier 3. The iOS entry is *optional* — it resolves to nothing on the Windows box and prints "not present on this machine (skipped)" rather than failing the exit-code gate, which is the whole point of that gate being usable as an end-of-session check.
+
+Also removed a dangling ADR-0016 link to a `.claude/skills` path that was never committed to any of the three repos (`4a4202d`). **The same-session cross-repo commit rule is now prose only — there is no tool enforcing it.**
+
+### B. Xcode project scaffolded, and step 1 of the iOS build order landed (iOS `73866fc`, `e76f77e`)
+
+`SteamPigeon` / `com.steampigeon.ios`, SwiftUI, deployment target iOS 16.0. Uses Xcode 16+ **file-system-synchronized groups**, so protocol sources land by dropping files into the folder — the seven files of `e76f77e` needed **zero** `project.pbxproj` changes, which keeps a wire-format diff readable.
+
+**One trap worth not rediscovering:** `INFOPLIST_KEY_UIBackgroundModes` is accepted as a build setting, reaches the build, and is then **silently dropped** — Xcode only promotes an allowlist of `INFOPLIST_KEY_*` names into a generated Info.plist, and `UIBackgroundModes` is not on it (`NSBluetoothAlwaysUsageDescription` is). Since `bluetooth-central` is the entire basis for background BLE on iOS per ADR-0016, this would have surfaced much later as "background scanning doesn't work" with nothing visibly wrong in the project. It now lives in a partial `Config/Info.plist` that Xcode merges generated keys onto — and it must sit **outside** the synchronized group, or it is also copied as a resource and the build fails with "Multiple commands produce".
+
+**The wire format is now genuinely defined three times.** `WireLayoutTests.swift` + `LocatorAuthTests.swift` are ported, 41 tests pass on an iOS 26.5 simulator. Every constant was cross-checked against **both** firmware headers before being copied — not taken from the Kotlin alone — and locator, receiver, and Android all agreed; no drift was found.
+
+**The auth port was verified against the firmware, not against itself.** A build/verify round-trip proves only internal consistency and would pass just as happily with a CRC that had drifted — which is precisely the silent mismatch [ADR-0006](adr/0006-locator-connect-password.md) warns fails closed or open with nothing to see. So `PasswordKdf.hpp` and `Crc16Update`/`Crc16Continue` from `Communication/Inc/Communication.hpp` were compiled natively with `clang++` and run over fixed byte patterns; Swift reproduced all ten vectors byte-identically, and those values are **pinned as hard expectations** in `LocatorAuthTests` rather than left as a round trip:
+
+| vector | value |
+|---|---|
+| `Fnv1a32("")` / `("a")` / `("foobar")` | `811c9dc5` / `e40c292c` / `bf9cf968` |
+| `DeriveKey("s3cret")` / `("launch42")` | `d5d1b367` / `9a0a43ac` |
+| auth tag, PreLaunchData base 118, key `s3cret` / open | `5d8fca2a` / `3c513c51` |
+| auth tag, TelemetryData base 77, key `s3cret` / open | `b6d82929` / `4b874b87` |
+
+Regenerate these only if the firmware auth primitives change — in which case Android's copy moves in the same session too. The guard was checked for the obvious failure: mutating `prelaunchBaseStructSize` 118 → 119 fails the suite, reverting restores green.
+
+**NOT done, and next:** CoreBluetooth transport (step 2) and SwiftUI UI (step 3). Both need a **physical iPhone** — the Simulator has no Bluetooth — plus the Apple Developer Program for background modes. Every row of the §4.4 parity matrix is still a gap; the protocol layer is not a capability. Flight-data download throughput on iOS remains unmeasured.
 
 ## 2026-08-06 session — interference detection (ADR-0019) and command addressing (ADR-0020) — COMMITTED + PUSHED, BENCH-VALIDATED
 

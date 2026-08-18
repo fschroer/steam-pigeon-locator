@@ -17,7 +17,7 @@ three are one linked system.
 
 - **Locator firmware** — `C:\STM32_Projects\Locator` (this repo)
 - **Receiver firmware** — `C:\STM32_Projects\Receiver`
-- **Android app** — `C:\Users\ftsch\StudioProjects\rocket-flight-manager` (iOS app planned; see ADR "iOS port")
+- **Android app** — `C:\Users\ftsch\StudioProjects\rocket-flight-manager` (iOS app — `steam-pigeon-ios`; see ADR "iOS port")
 
 All system docs live **here**, under `docs/`. The other two repos carry only a short
 `CLAUDE.md` pointing back to this one.
@@ -26,7 +26,7 @@ All system docs live **here**, under `docs/`. The other two repos carry only a s
 
 - **The wire format is defined by hand in three places** and must stay byte-identical:
   firmware `MessageProtocol.hpp` `static_assert`s, the app's `WireLayoutTest.kt`, and
-  (planned) the iOS `WireLayoutTests.swift`. Change all copies in the **same session**,
+  the iOS `WireLayoutTests.swift`. Change all copies in the **same session**,
   cross-referencing commit hashes. Same for shared enums (`FlightStates`, `MsgType`).
 - **Behavior lives in ADRs, not in one app's code comments.** A fix updates the ADR once;
   every platform follows. (e.g. ADR "app BLE connection-health probe" — GATT silence is

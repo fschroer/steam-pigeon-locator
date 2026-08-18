@@ -251,9 +251,9 @@ Android / Kotlin / Jetpack Compose, organized around a `RocketViewModel` and a s
 
 ### 4.4 Platform parity (Android ⇄ iOS)
 
-A native Swift/SwiftUI iOS app is planned as a **second codebase** ([ADR-0016](adr/0016-ios-port-corebluetooth-and-platform-parity.md)); nothing is implemented yet. **Android is the reference implementation** — new behavior lands there first, then iOS, and never without being written down in an ADR or here first.
+A native Swift/SwiftUI iOS app is under way as a **second codebase** ([ADR-0016](adr/0016-ios-port-corebluetooth-and-platform-parity.md)). Step 1 of its build order — the protocol + auth layer in pure Swift, with `WireLayoutTests.swift` and `LocatorAuthTests.swift` — landed in iOS `e76f77e`; **no BLE transport and no UI yet**, so every capability row below is still a gap. **Android is the reference implementation** — new behavior lands there first, then iOS, and never without being written down in an ADR or here first.
 
-The wire format is already defined twice by hand (C++ structs, Kotlin offsets); Swift makes it three, which is why parity is a stated policy. The guard is a **test triad** pinned to identical constants — firmware `static_assert`s in `MessageProtocol.hpp`, `WireLayoutTest.kt`, and (to add) `WireLayoutTests.swift` — all updated in the **same session** with cross-referenced commits. Behavioral invariants live in ADRs, not in one app's code comments, so a fix updates the ADR once and both apps follow. See [ADR-0016](adr/0016-ios-port-corebluetooth-and-platform-parity.md) for the per-layer mechanisms and the change checklist.
+The wire format is already defined twice by hand (C++ structs, Kotlin offsets); Swift makes it three, which is why parity is a stated policy. The guard is a **test triad** pinned to identical constants — firmware `static_assert`s in `MessageProtocol.hpp`, `WireLayoutTest.kt`, and `WireLayoutTests.swift` — all updated in the **same session** with cross-referenced commits. Behavioral invariants live in ADRs, not in one app's code comments, so a fix updates the ADR once and both apps follow. See [ADR-0016](adr/0016-ios-port-corebluetooth-and-platform-parity.md) for the per-layer mechanisms and the change checklist.
 
 **Parity matrix** — keep this current; an entry that differs is either a known gap or a bug.
 

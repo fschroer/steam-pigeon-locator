@@ -5,7 +5,7 @@
 > filed two days earlier and keeps the number. Commit `4b6bb45` and any external reference calling
 > the iOS port "ADR-0015" mean this document. Nothing else changed.
 
-- **Status:** Accepted (approach + invariants); implementation **not started**
+- **Status:** Accepted (approach + invariants); implementation **in progress** — step 1 of the build order (protocol + auth layer, with the Swift half of the test triad) landed in iOS `e76f77e`; CoreBluetooth transport and UI not started
 - **Date:** 2026-07-19
 - **Deciders:** fschroer
 - **Related issues:** [#26](https://github.com/fschroer/steam-pigeon-locator/issues/26) (map tile licensing — applies to both platforms), [#5](https://github.com/fschroer/steam-pigeon-locator/issues/5) (enum drift)
@@ -41,7 +41,7 @@ The wire format is already defined **twice** by hand (C++ structs, Kotlin offset
 
 | Layer | How it stays in sync |
 |---|---|
-| **Wire format** | A **test triad** pinned to identical constants: firmware `static_assert`s in `MessageProtocol.hpp` + `WireLayoutTest.kt` + (to add) `WireLayoutTests.swift`. A format change updates all three **in the same session**, cross-referencing commit hashes (the same-session cross-repo commit rule, extended to the iOS repo). |
+| **Wire format** | A **test triad** pinned to identical constants: firmware `static_assert`s in `MessageProtocol.hpp` + `WireLayoutTest.kt` + `WireLayoutTests.swift`. A format change updates all three **in the same session**, cross-referencing commit hashes (the same-session cross-repo commit rule, extended to the iOS repo). |
 | **Shared enums** (`FlightStates`, `MsgType`, `DeployMode`) | Same triad. Existing drift is tracked in [#5](https://github.com/fschroer/steam-pigeon-locator/issues/5). |
 | **Auth / security** | Port `LocatorAuthTest.kt` to Swift with the **same test vectors**. A silent mismatch here fails closed (locator won't authorize) or open — both bad. |
 | **Behavioral invariants** | **ADRs are the contract**, not one app's code comments. e.g. [ADR-0012](0012-app-ble-connection-health-probe.md) "GATT silence is not a dead link", [ADR-0011](0011-locator-lora-channel-from-app.md) channel-change recovery, [ADR-0009](0009-flight-data-transfer-reliability.md) framing. Both apps implement the ADR; a fix updates the ADR **once** and both apps follow. |
