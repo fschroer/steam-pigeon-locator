@@ -14,11 +14,53 @@
 
 set -u
 
-# Repo paths (override via env if the checkout ever moves).
+# Repo paths. Each resolves in this order, so ONE script works on every machine:
+#   1. the SP_*_DIR environment variable, if set;
+#   2. a sibling of this repo (the macOS layout: all four under ~/Developer/);
+#   3. the original Windows absolute path.
+#
+# This script lives in <locator repo>/Scripts/, so the locator root is always two
+# levels up. That is the anchor the sibling guesses hang off -- it is correct on
+# both machines, which is why the Windows defaults below can stay untouched.
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+LOCATOR_ROOT=$(cd -- "${SCRIPT_DIR}/.." && pwd)
+SIBLINGS=$(cd -- "${LOCATOR_ROOT}/.." && pwd)
+
+# first_repo <candidate>... -- echo the first candidate that is a git repo. If
+# none is, echo the last non-empty one so the error names a real expectation.
+first_repo() {
+  local last=""
+  for cand in "$@"; do
+    [ -z "$cand" ] && continue
+    last="$cand"
+    if git -C "$cand" rev-parse --git-dir >/dev/null 2>&1; then
+      printf '%s' "$cand"
+      return
+    fi
+  done
+  printf '%s' "$last"
+}
+
+# opt_repo <candidate>... -- like first_repo, but echoes NOTHING when no
+# candidate resolves. For repos that may legitimately be absent on a given
+# machine (the iOS repo needs a Mac, so it will not exist on the Windows box).
+# Without this, an absent optional repo would report as a hard failure.
+opt_repo() {
+  for cand in "$@"; do
+    [ -z "$cand" ] && continue
+    if git -C "$cand" rev-parse --git-dir >/dev/null 2>&1; then
+      printf '%s' "$cand"
+      return
+    fi
+  done
+  printf ''
+}
+
 REPOS=(
-  "app|${SP_APP_DIR:-/c/Users/ftsch/StudioProjects/rocket-flight-manager}"
-  "locator|${SP_LOCATOR_DIR:-/c/STM32_Projects/Locator}"
-  "receiver|${SP_RECEIVER_DIR:-/c/STM32_Projects/Receiver}"
+  "app|$(first_repo "${SP_APP_DIR:-}" "${SIBLINGS}/rocket-flight-manager" "/c/Users/ftsch/StudioProjects/rocket-flight-manager")"
+  "locator|$(first_repo "${SP_LOCATOR_DIR:-}" "${LOCATOR_ROOT}" "/c/STM32_Projects/Locator")"
+  "receiver|$(first_repo "${SP_RECEIVER_DIR:-}" "${SIBLINGS}/steam-pigeon-receiver" "/c/STM32_Projects/Receiver")"
+  "ios|$(opt_repo "${SP_IOS_DIR:-}" "${SIBLINGS}/steam-pigeon-ios")"
 )
 
 problems=0
@@ -27,6 +69,11 @@ handoff_lines=()
 for entry in "${REPOS[@]}"; do
   name="${entry%%|*}"
   dir="${entry#*|}"
+
+  if [ -z "$dir" ]; then
+    printf '%-9s  -- not present on this machine (skipped)\n' "$name"
+    continue
+  fi
 
   if ! git -C "$dir" rev-parse --git-dir >/dev/null 2>&1; then
     printf '%-9s  !! not a git repo: %s\n' "$name" "$dir"
