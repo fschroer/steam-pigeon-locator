@@ -251,7 +251,7 @@ Android / Kotlin / Jetpack Compose, organized around a `RocketViewModel` and a s
 
 ### 4.4 Platform parity (Android ⇄ iOS)
 
-A native Swift/SwiftUI iOS app is under way as a **second codebase** ([ADR-0016](adr/0016-ios-port-corebluetooth-and-platform-parity.md)). Step 1 of its build order — the protocol + auth layer in pure Swift, with `WireLayoutTests.swift` and `LocatorAuthTests.swift` — landed in iOS `e76f77e`; **no BLE transport and no UI yet**, so every capability row below is still a gap. **Android is the reference implementation** — new behavior lands there first, then iOS, and never without being written down in an ADR or here first.
+A native Swift/SwiftUI iOS app is under way as a **second codebase** ([ADR-0016](adr/0016-ios-port-corebluetooth-and-platform-parity.md)). Steps 1–2 of its build order are done: the protocol + auth layer in pure Swift (iOS `e76f77e`) and the CoreBluetooth transport (iOS `7139825`, `c854114`), the latter confirmed against a real receiver on 2026-08-18. **There is still no UI**, so every row below except the link layer remains a gap — including the password gate, whose primitives are ported and pinned against compiled firmware but which nothing yet calls. **Android is the reference implementation** — new behavior lands there first, then iOS, and never without being written down in an ADR or here first.
 
 The wire format is already defined twice by hand (C++ structs, Kotlin offsets); Swift makes it three, which is why parity is a stated policy. The guard is a **test triad** pinned to identical constants — firmware `static_assert`s in `MessageProtocol.hpp`, `WireLayoutTest.kt`, and `WireLayoutTests.swift` — all updated in the **same session** with cross-referenced commits. Behavioral invariants live in ADRs, not in one app's code comments, so a fix updates the ADR once and both apps follow. See [ADR-0016](adr/0016-ios-port-corebluetooth-and-platform-parity.md) for the per-layer mechanisms and the change checklist.
 
@@ -259,9 +259,9 @@ The wire format is already defined twice by hand (C++ structs, Kotlin offsets); 
 
 | Capability | Android | iOS | Notes |
 |---|---|---|---|
-| BLE receiver link (scan/connect/notify) | ✅ | ⬜ | iOS scans by service UUID FFE0 (confirmed advertised), not MAC |
+| BLE receiver link (scan/connect/notify) | ✅ | ✅ | iOS scans by service UUID FFE0 (confirmed advertised), not MAC. Confirmed against a real receiver 2026-08-18 (iOS `c854114`): connects, notifies, frames at 1 Hz. |
 | Background operation | ✅ foreground service | ⬜ | iOS: `bluetooth-central` + State Preservation & Restoration |
-| Connection-health probe (ADR-0012) | ✅ | ⬜ | Behavior is the ADR; both must implement it |
+| Connection-health probe (ADR-0012) | ✅ | ✅ | Behavior is the ADR; both must implement it. iOS confirmed on hardware 2026-08-18: link held through locator silence on probe replies alone. |
 | Locator password gate (ADR-0006) | ✅ | ⬜ | Keys on `locator_id`, platform-neutral; port test vectors |
 | Live telemetry + flight states | ✅ | ⬜ | |
 | Map + offline satellite (ADR-0014) | ✅ | ⬜ | Same MapLibre style JSON; blocked for release by [#26](https://github.com/fschroer/steam-pigeon-locator/issues/26) on both platforms |
