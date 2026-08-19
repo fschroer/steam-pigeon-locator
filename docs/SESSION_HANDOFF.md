@@ -1,6 +1,52 @@
-# Session Handoff — 2026-08-17
+# Session Handoff — 2026-08-18
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
+
+## 2026-08-18 session — iOS CoreBluetooth transport works on hardware; a stale receiver exposed an app-visible wire-format skew — COMMITTED + PUSHED, HARDWARE-CONFIRMED
+
+App and firmware-flashing only; **no firmware source changed**. Steps 1–2 of the [ADR-0016](adr/0016-ios-port-corebluetooth-and-platform-parity.md) build order are done, and the iOS app has now talked to a real receiver.
+
+### A. ⚠️ ANDROID ACTION: the receiver-info poll is rejected against pre-`aee36fe` receivers, and it fails invisibly
+
+**Read this before diagnosing anything about noise floor or interference classification.** A receiver flashed before receiver `aee36fe` (2026-08-11, "report channel status in ReceiverInfo") sends the **27-byte** `ReceiverInfoMessage` — `PacketHeader 6 + lora_channel 1 + device_name 20`, with no `noise_floor`, no `bad_frames`, and no `static_assert`. Both apps expect the 30-byte form (`RECEIVER_INFO_PAYLOAD_SIZE = 24`), frame 27 real bytes plus 3 taken from whatever follows, and fail the CRC. **Every receiver-info reply is silently discarded.**
+
+**It is invisible on both platforms, by design.** [ADR-0012](adr/0012-app-ble-connection-health-probe.md) records liveness for *every inbound byte before framing* — deliberately, so a corrupt reply still proves the link carries traffic. So the health watchdog reports a perfectly healthy link while the message it depends on never parses. What is actually lost is the **channel-status noise floor**, which [ADR-0019](adr/0019-channel-interference-detection.md) exists to deliver during locator silence: it is the only floor reading that reaches the app without a locator broadcast to ride on. An app fed no floor at all is not obviously distinguishable from one fed a quiet floor.
+
+Confirmed fixed by reflashing the receiver: 30-byte frames, zero CRC errors. **Android has not been checked against a stale receiver and should be**, since the symptom there is "interference classification looks off" rather than anything pointing at framing.
+
+**The general lesson, worth more than this instance:** an app-side CRC gate turns a wire-format version skew into silence, not into an error. The three-way `static_assert`/`WireLayoutTest`/`WireLayoutTests` triad pins the three *source trees* against each other; it says nothing about the firmware actually flashed on the bench hardware. Nothing in the system reports a device's wire-format version, so a stale device degrades quietly.
+
+### B. iOS transport (iOS `7139825`, `c854114`) — scan, connect, notify, and the ADR-0012 watchdog, all confirmed on hardware
+
+Service-UUID scanning on `FFE0`, `FFE1`/`FFE2` as on Android, MTU re-queried per write and never cached, State Preservation & Restoration, transport identity `peripheral.identifier` (locator identity still keys on `locator_id`, so [ADR-0006](adr/0006-locator-connect-password.md) ports unchanged). Confirmed against a real receiver: connects, `preLaunchData`/`telemetryData` at 1 Hz, and — the case that mattered — **the link stays up through arbitrary locator silence on probe replies alone**, which is the loop ADR-0012 was written to end.
+
+The ADR-0012 watchdog is deliberately **pure logic with no CoreBluetooth in it**, so its invariants are testable on a Mac. One test runs 200 idle probe/answer cycles and asserts the link is never condemned. Reintroducing the original tear-down-on-silence bug fails the suite.
+
+`OutboundMessage` enforces [ADR-0020](adr/0020-targeted-locator-commands.md) in the type system: a locator-directed command **cannot be constructed** without a target, and target `0` is refused because it addresses nothing.
+
+**Deployment note:** background BLE needs no paid Apple membership — verified on the signed device build, whose only entitlements are `application-identifier`, `team-identifier`, `get-task-allow`. `bluetooth-central` is an Info.plist key, not an entitlement. Also: `INFOPLIST_KEY_UIBackgroundModes` is **accepted as a build setting and then silently dropped** — Xcode promotes only an allowlist, and that key is not on it. It lives in a partial `Config/Info.plist`, which must sit **outside** the file-system-synchronized group or it is also copied as a resource and the build fails with "Multiple commands produce".
+
+### C. How the skew was found — diagnostics over inference, again
+
+Four hypotheses, **the first three wrong**, each killed by a measurement rather than an argument:
+
+| # | Hypothesis | Killed by |
+|---|---|---|
+| 1 | The relayed `Startup` message (74 B, unframed) pollutes the count | 3000 simulated serials: 0 bad frames 99.9% of the time |
+| 2 | Contention when locator traffic starts | bad frames appeared with the locator **off** |
+| 3 | One stale field (`noise_floor`) | single-byte brute force found no fix |
+| 4 | **Older, shorter message** | sender's CRC verifies at exactly 27 bytes |
+
+The app now reports, per rejected frame: both CRCs, the length at which the sender's CRC *does* verify, the single-byte fix if one exists, embedded header positions (truncation signature), and a diff against the previous reject. The ±2 length scan was itself a bug — a 3-byte difference was out of range, which is why this looked like corruption for two rounds. It scans every prefix now.
+
+**Reading the firmware did not solve this and twice pointed the wrong way.** `ComputeMessageCrc<TMsg>` hashes the whole struct, so the receiver's CRC *should* have moved when `noise_floor` moved; that it did not was the clue, and it was only legible once the app reported the sender's CRC alongside its own.
+
+### Also this session
+- Repos cloned to a Mac as siblings under `~/Developer/`; `Scripts/sp-status.sh` made portable and taught about the iOS repo.
+- Wire-format triad completed (iOS `e76f77e`): every constant cross-checked against **both** firmware headers before being copied; no drift found. Auth verified by compiling this repo's `PasswordKdf.hpp` and `Crc16Update`/`Crc16Continue` natively and diffing ten vectors against Swift.
+- `MsgType` in Swift takes the **receiver's full space**; issue [#5](https://github.com/fschroer/steam-pigeon-locator/issues/5)'s drift is coverage, not conflict — nothing collides.
+- **Not done:** SwiftUI UI (step 3), flight-data download (throughput on iOS still unmeasured), and every row of the §4.4 parity matrix is still a gap except the BLE link and health probe, which are now demonstrated.
+- **Known open:** running XCTest *on* the iOS device fails with "Logic Testing Unavailable" though `build-for-testing` succeeds and the `.xctestrun` declares `IsAppHostedTestBundle = true`. Three fixes tried and reverted. Does not block anything — the suite is pure logic and belongs on the simulator.
 
 ## 2026-08-17 session — Mac dev environment stood up; iOS repo created; wire-format triad is now real — COMMITTED + PUSHED, NO HARDWARE INVOLVED
 
