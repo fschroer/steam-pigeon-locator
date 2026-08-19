@@ -47,7 +47,7 @@ The wire format is already defined **twice** by hand (C++ structs, Kotlin offset
 | **Behavioral invariants** | **ADRs are the contract**, not one app's code comments. e.g. [ADR-0012](0012-app-ble-connection-health-probe.md) "GATT silence is not a dead link", [ADR-0011](0011-locator-lora-channel-from-app.md) channel-change recovery, [ADR-0009](0009-flight-data-transfer-reliability.md) framing. Both apps implement the ADR; a fix updates the ADR **once** and both apps follow. |
 | **Map** | Literally the same MapLibre **style JSON**, and the same tile provider ([ADR-0014](0014-maplibre-offline-satellite-maps.md), blocked by [#26](https://github.com/fschroer/steam-pigeon-locator/issues/26)). MapLibre Native runs on both platforms with the same style and offline-pack model. |
 | **Config data** | Same `launch_sites.csv` format (`name,lat,lon[,width_km[,height_km]]`, trailing numeric fields parsed so names may contain commas). |
-| **UI/UX** | **Capability parity is required; pixel parity is not.** Each platform may be idiomatic (Material vs. HIG). A feature existing on one platform and not the other must appear in the parity matrix as a known gap. |
+| **UI/UX** | **Capability parity is required; pixel parity is not** — see the 2026-08-19 clarification below for what that does and does not license. The bar is that **one user manual serves both platforms**. A feature existing on one platform and not the other must appear in the parity matrix as a known gap. |
 
 **Change checklist** — when you touch:
 
@@ -56,6 +56,25 @@ The wire format is already defined **twice** by hand (C++ structs, Kotlin offset
 - BLE connection behavior → the relevant ADR first, then both apps.
 - the map style or provider → the shared style JSON + ADR-0014.
 - a user-visible feature → both apps, or record the gap in the parity matrix.
+
+**"Pixel parity is not required" clarified (2026-08-19):** the original wording — *"each platform may be idiomatic (Material vs. HIG)"* — was read on the iOS side as licensing a freely different presentation, and the iOS app was built accordingly. That is wider than intended.
+
+**The bar is that a single user manual serves both platforms.** Pixel parity means "visually identical", and that is genuinely not required. What *is* required is that the flows, controls, vocabulary and screen-by-screen structure correspond closely enough that no instruction has to branch on the mobile OS. If writing a step forces a sentence like "on Android open the drawer; on iOS tap More", the two have diverged too far.
+
+The default is therefore **mirror Android**, and a departure needs a reason from this list rather than a preference:
+
+| Sanctioned iOS departure | Why |
+|---|---|
+| Navigation drawer → tab bar / navigation stack | A left drawer is a Material pattern with no HIG equivalent. The manual says "go to Settings", which reads correctly on both. |
+| Back: swipe + leading chevron, not an app-bar up arrow | A platform-level gesture users already have. |
+| SwiftUI switches, pickers and steppers rather than Material clones | A control mimicking the other platform's looks broken on this one. |
+| System heading-calibration HUD stays suppressed | [ADR-0023](0023-app-heading-true-north-and-compass-trust.md) puts the prompt on the map where the doubted bearing is visible; the system HUD covers it. |
+| No exit-app button | iOS has no sanctioned quit affordance, and an app that terminates itself reads as a crash. |
+| One-shot permission prompts | Android's rationale flows have no counterpart. |
+
+Anything not on that list mirrors Android — **including the theme**. The Material 3 dark palette and the three font families (Poppins body, Roboto display, Roboto Mono telemetry) are shared assets, not platform decisions; the `.ttf` files bundle on iOS unchanged.
+
+**Consequence for the parity matrix:** an iOS row may be marked ✅ only when its *presentation* corresponds too, not merely when the data is reachable. The rows marked so far — BLE link, health probe, password gate — are link-layer and identity concerns with no Android screen to mirror, so they stand. The iOS-side inventory and plan live in `steam-pigeon-ios/docs/UI_PARITY.md`.
 
 ## Consequences
 
