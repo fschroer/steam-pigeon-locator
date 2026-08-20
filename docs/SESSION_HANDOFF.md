@@ -1,12 +1,93 @@
-# Session Handoff — 2026-08-19
+# Session Handoff — 2026-08-20
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
-## 2026-08-19 session — iOS app built out to a working flight screen — COMMITTED + PUSHED, PARTLY HARDWARE-CONFIRMED, TWO OPEN BUGS
+## 2026-08-20 session — the two open bugs closed, then an eight-round parity pass driven from the phone — COMMITTED + PUSHED, LARGELY UNCONFIRMED ON HARDWARE
+
+App-side only, iOS repo only; **no firmware changed**, and nothing here has touched a
+radio. **340 tests passing** (from 248), clean build with no warnings from our own
+sources. Detail is in `steam-pigeon-ios/docs/NEXT_SESSION.md`; the field-by-field
+comparison is in that repo's `docs/UI_PARITY.md`.
+
+### The two bugs the previous handoff opened
+
+**Bug 1, the double-sheet crash: FIXED.** Two `.sheet` modifiers on one view, which
+iOS 16 refuses. Each screen now presents one sheet, named by a value, with a CONSTANT
+id across its cases — a changing id would make SwiftUI dismiss one and present another,
+which is the crashing sequence moved inside the modifier rather than removed.
+
+**Bug 2, "`LinkViewModel` constructed more than once": DID NOT REPRODUCE.** It is
+constructed once, measured by logging the initialiser. The two `CLLocationManager`s in
+the launch log are ours plus **MapLibre's**; the previous handoff's diagnosis is wrong
+and is marked as such in place. `@StateObject` evaluates its autoclosure at most once —
+the wart belongs to `@ObservedObject var x = X()`.
+
+### Then eight rounds of parity defects, every one reported from the phone
+
+**The standing instruction is now a rule at the top of `steam-pigeon-ios/CLAUDE.md`:
+read the Android source in full before porting, do not assume.** fschroer gave it on
+2026-08-19 and restated it on 2026-08-20; every defect below came from assuming.
+
+| Round | Reported | Root cause |
+|---|---|---|
+| 3 | controls missing/greyed; map wandered on pinch, snapped back on pan, would not rotate | three controls missing or defaulting off; **no gesture backoff** — one cause, three symptoms |
+| 4 | (the nine gaps that audit opened) | no camera filter, no auto-zoom, no deadbands, wrong auto-centre target, no track persistence, no landing freeze |
+| 5 | rotation jerky; no "Disarmed" banner; no escalated warning | bearing unfiltered; the centre banner and the whole pad-alert UI were never ported |
+| 6 | compass button greyed at startup; banners bold; two receivers offered no choice | trust gated the CONTROL not the bearing; Material baseline weight is Regular; `startScan` auto-reconnected and skipped scanning |
+| 7 | rotation stopped under interference; no voice, no vibration | ADR-0023 gates the AR overlay, not the map; **TTS had never been ported at all** |
+| 8 | escalation would not clear on arm; continuity needed an app restart | **stale-data latching, in both directions** |
+
+### The lesson worth carrying to the next platform question
+
+Rounds 7 and 8 are the same class of defect pointing opposite ways, reported a day
+apart. The locator broadcasts **two different messages** and stops sending `PreLaunchData`
+the moment it is armed:
+
+- Reading a pre-launch-only field off the last-seen object latches it through the whole
+  flight — that was the pad alert that would not clear, and the batteries would have
+  done the same.
+- Reading `telemetry ?? prelaunch` latches the other way, because `telemetry` is never
+  nil again once a flight has happened and the locator returns to `PreLaunchData` on
+  every disarm — that was the deployment continuity, and it also had **position** and
+  the accuracy ring, which is the one number the app exists to give.
+
+**Android has no such bug because it merges both messages into one `rocketState`, so
+whichever arrived last owns every field it carries.** iOS keeps the two decoded messages
+side by side, so the rule has to be applied where they are read. Every broadcast field
+belongs to exactly one of three categories — both / telemetry-only / pre-launch-only —
+and the table is in `UI_PARITY.md`. Getting it wrong is silent in both directions.
+
+### What is confirmed, and what is not
+
+**Confirmed on the iOS 26.5 simulator:** the single-sheet flow, the control column, the
+banner text and font, the initial centre, panning that holds, and the filtered voice
+list.
+
+**NOT confirmed, and mostly NOT confirmable here.** Only iOS 26.5 runtimes are
+installed, and that simulator has no Bluetooth, no magnetometer and no haptic engine —
+so the iOS 16 crash, every locator-driven behaviour, compass trust, the pad-alert voice
+and haptic, and the receiver picker all need the 16.7.16 phone. The pre-fix build does
+not even reproduce the crash on iOS 26. Use `Tools/devicelog.sh`.
+
+### Also worth knowing
+
+- **`TransportState.noDevicesFound` had no producer** — a label on two screens that
+  nothing set, so an empty scan said "Scanning" for ever.
+- **`willRestoreState` never re-ran GATT discovery.** iOS restores the connection, not
+  the session on top of it, and `didConnect` does not fire for an already-connected
+  peripheral — so a restored link stopped at `connected`, never reached `ready`, and
+  therefore refused to arm.
+- **Novelty voices** (Bubbles, Bells, Zarvox) are an iOS-only problem; Android's engine
+  offers none. Filtering by the `com.apple.speech.synthesis.voice.` prefix is WRONG —
+  Fred, Junior, Kathy and Ralph share it and are not novelty.
+
+## 2026-08-19 session — iOS app built out to a working flight screen — COMMITTED + PUSHED, PARTLY HARDWARE-CONFIRMED (both bugs below are resolved by the 2026-08-20 session)
 
 App-side only; **no firmware changed**. The iOS app now connects, recognises and authenticates locators, decodes both broadcasts, and puts them on a live map with the panels, controls and menu. **Detail and resume instructions live in `steam-pigeon-ios/docs/NEXT_SESSION.md`** — this is the summary.
 
-### ⚠️ Two open bugs, both to fix first
+### Two bugs reported here — both closed on 2026-08-20; read that section, not this one
+
+Kept for the record. The first was real and is fixed; **the second did not reproduce, and its diagnosis below is wrong** — the second `CLLocationManager` is MapLibre's, not an abandoned copy of ours.
 
 **A CRASH on the physical device:** two `.sheet` modifiers on one view, which iOS 16 does not support. Reproducible in the map screen (selecting a menu item dismisses one sheet and presents another in the same tick) and **latent in the root view**, where a password challenge arriving while the diagnostics sheet is open would do the same — not yet seen, and more dangerous for it. Fix is one sheet driven by an enum, not two racing.
 
