@@ -1,6 +1,32 @@
-# Session Handoff — 2026-08-18
+# Session Handoff — 2026-08-19
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
+
+## 2026-08-19 session — iOS app built out to a working flight screen — COMMITTED + PUSHED, PARTLY HARDWARE-CONFIRMED, TWO OPEN BUGS
+
+App-side only; **no firmware changed**. The iOS app now connects, recognises and authenticates locators, decodes both broadcasts, and puts them on a live map with the panels, controls and menu. **Detail and resume instructions live in `steam-pigeon-ios/docs/NEXT_SESSION.md`** — this is the summary.
+
+### ⚠️ Two open bugs, both to fix first
+
+**A CRASH on the physical device:** two `.sheet` modifiers on one view, which iOS 16 does not support. Reproducible in the map screen (selecting a menu item dismisses one sheet and presents another in the same tick) and **latent in the root view**, where a password challenge arriving while the diagnostics sheet is open would do the same — not yet seen, and more dangerous for it. Fix is one sheet driven by an enum, not two racing.
+
+**`LinkViewModel` is constructed more than once.** `@StateObject` evaluates its initialiser on every containing-View init and keeps only the first, which is harmless until the initialiser opens hardware — and this one creates a `CBCentralManager`, a `CLLocationManager` and CoreMotion updates. Abandoned centrals still hold sessions with `bluetoothd`, so this is a candidate cause for the slow receiver switch, worth re-measuring rather than assuming.
+
+### What landed
+
+Theme and fonts as **shared assets** (the same Poppins/Roboto/Roboto Mono `.ttf` files and the Material 3 dark palette, per the ADR-0016 clarification below); Android's VectorDrawables converted to iOS vector assets with `Tools/vd2svg.py`; the status and telemetry panels; the ADR-0019 link classifier; ADR-0022 distance/bearing plausibility; ADR-0023 compass trust; the map controls column with heading-up rotation; the menu with its gating; and Application Settings. 248 tests.
+
+**ADR-0016 was clarified (`60e2be4`)**: "pixel parity is not required" was being read as licensing a freely different presentation. The bar is now stated as a test — **one user manual serves both platforms** — with six sanctioned iOS departures listed. Worth reading before doing more UI work.
+
+### Runtime logs were the blind spot, and are not any more
+
+Most of this session's defects were found by the user on hardware, not by tests, because **runtime logs were unreachable**: `log stream` has no `--device` flag on current macOS and `devicectl` needs iOS 17+ against a 16.7.16 phone. `brew install libimobiledevice` closes that — `steam-pigeon-ios/Tools/devicelog.sh` wraps it. First use confirmed the transport running at 1 Hz from outside the app, confirmed a previously-fixed SwiftUI warning was gone, and found bug 2 above.
+
+**Also worth not rediscovering:** warnings are only emitted for files the compiler revisits, so incremental builds hid two real ones (including a camera-mutation bug) for several commits. Build with a fresh `-derivedDataPath` before trusting a clean log.
+
+### Method note, recorded because it cost the most
+
+The recurring defect pattern was **inferring a value or a style instead of reading what the Android widget specifies** — a fixed 190 dp column ported without checking it against a 375 pt phone, a monospaced face assumed where the rows specify none, a placeholder `nil` left at a call site through two commits. Two of the bugs were explained in comments sitting next to the code. Read the source, not a grep of it.
 
 ## 2026-08-18 session — iOS CoreBluetooth transport works on hardware; a stale receiver exposed an app-visible wire-format skew — COMMITTED + PUSHED, HARDWARE-CONFIRMED
 
