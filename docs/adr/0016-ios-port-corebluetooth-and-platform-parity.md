@@ -74,6 +74,10 @@ The default is therefore **mirror Android**, and a departure needs a reason from
 
 Anything not on that list mirrors Android — **including the theme**. The Material 3 dark palette and the three font families (Poppins body, Roboto display, Roboto Mono telemetry) are shared assets, not platform decisions; the `.ttf` files bundle on iOS unchanged.
 
+**The sanctioned list is not a general licence (clarified 2026-08-20).** Row 3 above was read on the iOS side as permitting any SwiftUI control wherever one was more idiomatic, and a run of defects reported off the phone came from that: settings screens built as a `Form` of `TextField` and `Stepper` rows, which renders as a list of labels — nothing shows a value is editable and numbers cannot be typed — where Android uses a Material `OutlinedTextField` with nudge arrows beside it. The row covers controls that look **broken** when imitated, such as a Material clone of an iOS switch. A bordered, labelled text box is not one; it is the ordinary way to show an editable value on either platform.
+
+The bar is therefore: **mirror Android's functionality *and* its UI — structure, widgets, wording, field order and type weights — and depart only where Android's approach genuinely does not work on iOS.** Where a departure is unavoidable, it is recorded in `steam-pigeon-ios/docs/UI_PARITY.md` with what would close it, because an unrecorded difference is indistinguishable from a defect. Three such departures exist today and are listed there.
+
 **Consequence for the parity matrix:** an iOS row may be marked ✅ only when its *presentation* corresponds too, not merely when the data is reachable. The rows marked so far — BLE link, health probe, password gate — are link-layer and identity concerns with no Android screen to mirror, so they stand. The iOS-side inventory and plan live in `steam-pigeon-ios/docs/UI_PARITY.md`.
 
 ## Consequences

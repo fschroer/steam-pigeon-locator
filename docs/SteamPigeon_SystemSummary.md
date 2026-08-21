@@ -251,26 +251,28 @@ Android / Kotlin / Jetpack Compose, organized around a `RocketViewModel` and a s
 
 ### 4.4 Platform parity (Android ⇄ iOS)
 
-A native Swift/SwiftUI iOS app is under way as a **second codebase** ([ADR-0016](adr/0016-ios-port-corebluetooth-and-platform-parity.md)). Steps 1–2 of its build order are done: the protocol + auth layer in pure Swift (iOS `e76f77e`) and the CoreBluetooth transport (iOS `7139825`, `c854114`), the latter confirmed against a real receiver on 2026-08-18. The ADR-0006 recognition gate is complete and hardware-confirmed, including the corrected "authorization is a set, connection is one held element" model and the password challenge. **There is still no real UI** — the app has a bring-up screen, not a flight display — so every remaining row is a genuine gap. **Android is the reference implementation** — new behavior lands there first, then iOS, and never without being written down in an ADR or here first.
+A native Swift/SwiftUI iOS app is under way as a **second codebase** ([ADR-0016](adr/0016-ios-port-corebluetooth-and-platform-parity.md)). All three steps of its build order are now done: the protocol + auth layer in pure Swift, the CoreBluetooth transport, and the UI. As of **2026-08-20** the app has a working flight map with the full camera model, Application Settings, Receiver Settings and Locator Settings, and everything testable has been exercised on hardware **except an actual flight**. The ADR-0006 recognition gate is complete and hardware-confirmed, including the corrected "authorization is a set, connection is one held element" model and the password challenge. **Android remains the reference implementation** — new behavior lands there first, then iOS, and never without being written down in an ADR or here first.
+
+ADR-0016's UI/UX bar was clarified twice during that work (2026-08-19 and 2026-08-20): mirror Android's functionality **and** its UI, and depart only where Android's approach genuinely does not work on iOS. The three departures that exist are recorded in `steam-pigeon-ios/docs/UI_PARITY.md` with what would close each; an unrecorded difference is a defect.
 
 The wire format is already defined twice by hand (C++ structs, Kotlin offsets); Swift makes it three, which is why parity is a stated policy. The guard is a **test triad** pinned to identical constants — firmware `static_assert`s in `MessageProtocol.hpp`, `WireLayoutTest.kt`, and `WireLayoutTests.swift` — all updated in the **same session** with cross-referenced commits. Behavioral invariants live in ADRs, not in one app's code comments, so a fix updates the ADR once and both apps follow. See [ADR-0016](adr/0016-ios-port-corebluetooth-and-platform-parity.md) for the per-layer mechanisms and the change checklist.
 
-**Parity matrix** — keep this current; an entry that differs is either a known gap or a bug.
+**Parity matrix** — keep this current; an entry that differs is either a known gap or a bug. ◐ means partially ported, with what is missing named in the note.
 
 | Capability | Android | iOS | Notes |
 |---|---|---|---|
 | BLE receiver link (scan/connect/notify) | ✅ | ✅ | iOS scans by service UUID FFE0 (confirmed advertised), not MAC. Confirmed against a real receiver 2026-08-18 (iOS `c854114`): connects, notifies, frames at 1 Hz. |
-| Background operation | ✅ foreground service | ⬜ | iOS: `bluetooth-central` + State Preservation & Restoration |
+| Background operation | ✅ foreground service | ◐ | iOS: `bluetooth-central` + State Preservation & Restoration, implemented — including re-running GATT discovery on a restored link, which iOS does not do for you. Not yet exercised across a real background wake. |
 | Connection-health probe (ADR-0012) | ✅ | ✅ | Behavior is the ADR; both must implement it. iOS confirmed on hardware 2026-08-18: link held through locator silence on probe replies alone. |
 | Locator password gate (ADR-0006) | ✅ | ✅ | Keys on `locator_id`, platform-neutral; test vectors ported and pinned against compiled firmware. iOS confirmed on hardware 2026-08-18 (iOS `bb58b18`): open locators admitted with no prompt, a password-protected locator challenged and authenticated. Includes the corrected model — authorization is a set, connection is one held element — and the two-locator conflict path. |
-| Live telemetry + flight states | ✅ | ⬜ | |
-| Map + offline satellite (ADR-0014) | ✅ | ⬜ | Same MapLibre style JSON; blocked for release by [#26](https://github.com/fschroer/steam-pigeon-locator/issues/26) on both platforms |
+| Live telemetry + flight states | ✅ | ✅ | Both broadcasts decoded, stats panel, centre banner, ADR-0021 pad alert with voice and haptics. Hardware-confirmed short of a flight. |
+| Map + offline satellite (ADR-0014) | ✅ | ◐ | Live map done, with Android's per-frame camera filter, deadbands, gesture backoff and track recording. **Offline region download not ported.** Same MapLibre style JSON; blocked for release by [#26](https://github.com/fschroer/steam-pigeon-locator/issues/26) on both platforms |
 | Archived-flight download (ADR-0009) | ✅ | ⬜ | iOS throughput unmeasured; no connection-interval control |
 | Flight profiles / path export | ✅ | ⬜ | |
-| Locator/receiver settings, LoRa channel (ADR-0011) | ✅ | ⬜ | |
+| Locator/receiver settings, LoRa channel (ADR-0011) | ✅ | ✅ | Both screens, the ADR-0019 channel survey, the ADR-0011 move with its split-link recovery, and the ADR-0006 conflict banner. Two Android controls deliberately omitted — `launch_detect_altitude` and `deploy_signal_duration` cannot be read back, so a change to either can never be confirmed on **either** platform; see `UI_PARITY.md`. |
 | Deployment test | ✅ | ⬜ | |
-| TTS callouts | ✅ | ⬜ | `AVSpeechSynthesizer` |
-| Heads-up "point at the sky" view | ✅ | ⬜ | CoreMotion + AVFoundation |
+| TTS callouts | ✅ | ◐ | `AVSpeechSynthesizer` engine, pad-alert warning and arm/disarm announcements done; the audio session is `.playback` so the ring/silent switch cannot mute a launch. `FlightSpeechAnnouncer`'s ascent/descent/apogee/landing callouts not ported. |
+| Heads-up "point at the sky" view | ✅ | ◐ | Landscape gauges and attitude done; **camera passthrough behind them not ported**. CoreMotion + AVFoundation |
 
 ---
 
