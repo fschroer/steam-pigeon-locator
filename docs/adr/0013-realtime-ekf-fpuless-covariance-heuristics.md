@@ -15,7 +15,7 @@ Two facts collided during the 2026-07-15 performance investigation (full trail i
 
 Consequence: the 15-state EKF's covariance propagation `P = Φ P Φᵀ + Q·dt` — two 15×15×15 matrix multiplies = ~6750 float multiplies/cycle — dominated the loop. Measured (cycle profiler, `-O3`, ITM stall fixed): **`Ekf` ≈ 13.3 ms/cycle**, ~26 % of the 50 ms budget (NFR-3). `-O3` barely helped because soft-float emulation, not code, is the cost. Running a retired-from-authority estimator at 13 ms/cycle purely to observe it was the tension.
 
-The **offline alternative** (ADR-0004 direction) remains valid and cheaper still: replay the archived raw sensor stream (accel/gyro/baro/GPS are all logged) through `InsEkf15` on a PC (which has an FPU) or on the locator in `NAV_TEST` mode post-flight, at zero flight-budget cost. The user chose to keep it **live** instead, and to pay for it by cutting the covariance cost.
+The **offline alternative** (ADR-0004 direction) remains valid and cheaper still: replay the archived raw sensor stream (accel/gyro/baro/GPS are all logged) through `InsEkf15` on a PC (which has an FPU) or on the locator under `SP_BENCH_REPLAY` (called `NAV_TEST` when this ADR was written) post-flight, at zero flight-budget cost. The user chose to keep it **live** instead, and to pay for it by cutting the covariance cost.
 
 ## Decision
 
@@ -48,7 +48,7 @@ These optimizations trade generality for speed based on the **current error-stat
 
 **Negative / accepted**
 - The covariance block is now **structure-specific** and carries the H1/H2 invalidation risk above. Mitigated by the code comments, the `kDyn` knob, and this ADR.
-- The EKF still costs ~7.6 ms/cycle for a purely observational output. If budget ever tightens (e.g. FR-P13 firing logic, more telemetry), the **offline-replay** path (ADR-0004: replay the archived raw stream through `InsEkf15` on a PC or in `NAV_TEST`) reclaims all of it — the archive already logs every EKF input.
+- The EKF still costs ~7.6 ms/cycle for a purely observational output. If budget ever tightens (e.g. FR-P13 firing logic, more telemetry), the **offline-replay** path (ADR-0004: replay the archived raw stream through `InsEkf15` on a PC or under `SP_BENCH_REPLAY`) reclaims all of it — the archive already logs every EKF input.
 
 ## Alternatives considered
 

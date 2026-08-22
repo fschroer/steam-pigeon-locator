@@ -424,7 +424,7 @@ bool Navigation::Update() {
     bool baro_new = false;
     bool gps_new  = false;
 
-#ifdef NAV_TEST
+#if SP_BENCH_REPLAY
     if (m_test_active_) {
         if (!advanceTestSample()) {
             m_test_active_   = false;
@@ -449,7 +449,7 @@ bool Navigation::Update() {
                 Diag::mark(Diag::Seg::GpsRead, t_gps);   // every 2nd cycle
             }
         }
-#ifdef NAV_TEST
+#if SP_BENCH_REPLAY
     }
 #endif
 
@@ -602,9 +602,9 @@ bool Navigation::Update() {
             // loops instead of in one coarse step.  FIFO words are raw sensor
             // frame → remap each before integrating.  Falls back to a single
             // loop-rate step when the FIFO is empty/unconfigured, or during
-            // NAV_TEST replay (one injected sample per loop, no hardware FIFO).
+            // bench replay (one injected sample per loop, no hardware FIFO).
             bool propagated = false;
-#ifdef NAV_TEST
+#if SP_BENCH_REPLAY
             if (!m_test_active_) {
 #endif
                 // Drain-and-integrate the 480 Hz gyro FIFO in small batches (a
@@ -646,7 +646,7 @@ bool Navigation::Update() {
                 m_strapdown_last_tim2 = t2_start;
                 Diag::recordCount(Diag::Cnt::FifoWords, words_drained);  // per-cycle drain count
                 Diag::mark(Diag::Seg::FifoDrain, t_drain);              // reads + propagate only
-#ifdef NAV_TEST
+#if SP_BENCH_REPLAY
             }
 #endif
             if (!propagated)
@@ -753,9 +753,9 @@ void Navigation::MS5611OCCallback() { m_baro.OCCallback(); }
 void Navigation::SetD1Converted()   { m_baro.SetD1Converted(); }
 
 // ============================================================================
-// NAV_TEST replay implementation
+// Bench replay implementation
 // ============================================================================
-#ifdef NAV_TEST
+#if SP_BENCH_REPLAY
 
 bool Navigation::startTestReplay(Archive& archive, uint8_t archive_position) {
     m_test_archive_     = &archive;
@@ -827,9 +827,12 @@ void Navigation::injectTestSample(ImuSample&  imu,  BaroSample& baro,
     baro.valid           = true;
     baro_new             = true;
 
-    const bool has_gps  = (s.lat_rad != 0.0 || s.lon_rad != 0.0);
-    gps.lat_rad         = s.lat_rad;
-    gps.lon_rad         = s.lon_rad;
+    // Archive stores position in the receiver's native degrees x 1e-7 (int32),
+    // not radians -- see FlightSample::lat_1e7.  Deg1e7ToRad is the same helper
+    // FlightProfileCodec uses, so replay and telemetry decode identically.
+    const bool has_gps  = (s.lat_1e7 != 0 || s.lon_1e7 != 0);
+    gps.lat_rad         = FlightArchive::Deg1e7ToRad(s.lat_1e7);
+    gps.lon_rad         = FlightArchive::Deg1e7ToRad(s.lon_1e7);
     gps.alt_m_msl       = baro.altitude_m_msl;
     gps.h_acc_m         = 3.0f;
     gps.v_acc_m         = 5.0f;
@@ -849,6 +852,6 @@ void Navigation::injectTestSample(ImuSample&  imu,  BaroSample& baro,
     m_test_gps_sample_  = gps;
 }
 
-#endif // NAV_TEST
+#endif // SP_BENCH_REPLAY
 
 } // namespace RocketNav

@@ -31,8 +31,6 @@ extern "C" {
 #define SP_FAULT_INJECT 0
 #endif
 
-constexpr bool test_mode = false;
-
 PowerManagement *batt = new PowerManagement(&hadc);
 
 Factory::Factory(UART_HandleTypeDef &huart2, SPI_HandleTypeDef &hspi2, I2C_HandleTypeDef &hi2c2,
@@ -84,10 +82,6 @@ void Factory::Init(const Radio_s *radio) {
 	navigation_.Init(SAMPLES_PER_SECOND);
 	flight_.Init();
 	RgbLed(RgbColor::Off);
-	// Plain NAV_TEST auto-replays at boot.  Bench replay must NOT: the operator
-	// needs to choose arm state and record first, and an auto-replay would open
-	// and close a record on every power-on.
-	nav_test_requested_ = (SP_BENCH_REPLAY == 0);
 
 	// Open a flight record at BOOT, not only on arm (ADR-0021 Decision 1, #36).
 	// A disarmed locator now runs the flight state machine and must have somewhere
@@ -101,9 +95,7 @@ void Factory::Init(const Radio_s *radio) {
 	// last_flight_sequence only advances in CloseCurrentFlight.  So bench sessions
 	// and power cycles reuse one slot indefinitely; the counter tracks flights
 	// actually recorded, not power-ons.
-#if !defined(NAV_TEST) || SP_BENCH_REPLAY
 	archive_.StartOpenNewFlight();
-#endif
 
 	// A captured fault (HardFault / assert / watchdog hang) is deliberately left
 	// in the .noinit record so it can be read over the USB-C console with '/'
@@ -148,9 +140,7 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			// per-flight variable, and drops any stale on-pad data from a prior arm.
 			flight_.PrepareForArm();
 			datestamp_saved_ = false;   // re-write FlightTimestampS for the new flight
-#if !defined(NAV_TEST) || SP_BENCH_REPLAY
 			archive_.StartOpenNewFlight();
-#endif
 		} else if (prev_device_state_ == DeviceState::Armed) {
 			BuzzerReset();
 			buzzer_phase_ = BuzzerPhase::Disarming;
@@ -222,69 +212,52 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 		else
 			DisableDeployment();
 
-#ifdef NAV_TEST
-		// Bench replay runs in WHATEVER state the operator is in — the point is to
-		// exercise the DISARMED path, so gating it on Armed (as plain NAV_TEST
-		// does) would test the one case that never needed help.  Started by the
-		// 'B' console key rather than automatically, so the state under test is
-		// deliberate and the locator can be armed or disarmed first.
-		if (SP_BENCH_REPLAY || device_state_ == DeviceState::Armed) {
-			if (nav_test_requested_) {
 #if SP_BENCH_REPLAY
-				// WAIT for the destination record to finish opening before reading
-				// the source.  StartOpenNewFlight kicks off a flash ERASE, and the
-				// replay's first read goes to the same flash over the same SPI2
-				// bus — a read issued mid-erase fails, startTestReplay returns
-				// false, and (until now) nothing said so: the console reported
-				// "starting" and then the replay simply never ran.
-				if (archive_.IsActiveOpen()) {
-					nav_test_requested_ = false;
-					if (navigation_.startTestReplay(archive_, bench_replay_record_)) {
-						UartSend("\r\nDIAG|REPLAY: running\r\n");
-					} else {
-						UartSend("\r\nDIAG|REPLAY: FAILED to open source record\r\n");
-					}
-				}
-#else
+		// Bench replay runs in WHATEVER state the operator is in — the point is to
+		// exercise the DISARMED path, so gating it on Armed would test the one case
+		// that never needed help.  Started by the 'B' console key rather than
+		// automatically, so the state under test is deliberate and the locator can
+		// be armed or disarmed first.
+		if (nav_test_requested_) {
+			// WAIT for the destination record to finish opening before reading
+			// the source.  StartOpenNewFlight kicks off a flash ERASE, and the
+			// replay's first read goes to the same flash over the same SPI2
+			// bus — a read issued mid-erase fails, startTestReplay returns
+			// false, and (until now) nothing said so: the console reported
+			// "starting" and then the replay simply never ran.
+			if (archive_.IsActiveOpen()) {
 				nav_test_requested_ = false;
 				if (navigation_.startTestReplay(archive_, bench_replay_record_)) {
-					// Navigation::Update() now feeds archive data to FlightManager.
-					// No other change needed — FlightManager sees normal sensor reads.
-				}
-#endif
-			}
-#if SP_BENCH_REPLAY
-			// Progress trace.  A replay that quietly does nothing is the failure
-			// mode this harness is most prone to — it drives real subsystems from
-			// fake data, so any one of them declining leaves no other trace.
-			if (navigation_.isTestReplayActive()) {
-				const uint32_t idx = navigation_.testSampleIndex();
-				if ((idx % (SAMPLES_PER_SECOND * 5u)) == 0u) {
-					char b[128];
-					const Vec3f a = navigation_.getFused().body_accel_mps2;
-					const float g = std::sqrt(a.x * a.x + a.y * a.y + a.z * a.z) / G0_F;
-					snprintf(b, sizeof(b),
-							"\r\nDIAG|REPLAY: n=%lu state=%u accel=%d.%02u g agl=%d m\r\n",
-							static_cast<unsigned long>(idx),
-							static_cast<unsigned>(flight_.GetFlightState()),
-							static_cast<int>(g),
-							static_cast<unsigned>(static_cast<int>(g * 100.0f) % 100),
-							static_cast<int>(navigation_.getRawBaro().altitude_m_agl));
-					UartSend(b);
+					UartSend("\r\nDIAG|REPLAY: running\r\n");
+				} else {
+					UartSend("\r\nDIAG|REPLAY: FAILED to open source record\r\n");
 				}
 			}
-#endif
-			if (navigation_.isTestReplayComplete()) {
-#if SP_BENCH_REPLAY
-				// Leave the device state alone: forcing Disarmed here would mask
-				// whether the ARMED path behaved, and would fire a disarm
-				// transition the operator never asked for.
-				navigation_.stopTestReplay();
-#else
-				// Replay finished; log result, switch back to disarmed, etc.
-				device_state_ = DeviceState::Disarmed;
-#endif
+		}
+		// Progress trace.  A replay that quietly does nothing is the failure
+		// mode this harness is most prone to — it drives real subsystems from
+		// fake data, so any one of them declining leaves no other trace.
+		if (navigation_.isTestReplayActive()) {
+			const uint32_t idx = navigation_.testSampleIndex();
+			if ((idx % (SAMPLES_PER_SECOND * 5u)) == 0u) {
+				char b[128];
+				const Vec3f a = navigation_.getFused().body_accel_mps2;
+				const float g = std::sqrt(a.x * a.x + a.y * a.y + a.z * a.z) / G0_F;
+				snprintf(b, sizeof(b),
+						"\r\nDIAG|REPLAY: n=%lu state=%u accel=%d.%02u g agl=%d m\r\n",
+						static_cast<unsigned long>(idx),
+						static_cast<unsigned>(flight_.GetFlightState()),
+						static_cast<int>(g),
+						static_cast<unsigned>(static_cast<int>(g * 100.0f) % 100),
+						static_cast<int>(navigation_.getRawBaro().altitude_m_agl));
+				UartSend(b);
 			}
+		}
+		if (navigation_.isTestReplayComplete()) {
+			// Leave the device state alone: forcing Disarmed here would mask
+			// whether the ARMED path behaved, and would fire a disarm
+			// transition the operator never asked for.
+			navigation_.stopTestReplay();
 		}
 #endif
 		Diag::begin(Diag::Seg::NavUpdate);
@@ -296,9 +269,7 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 		// write into; gating this poll behind anything leaves a window in which
 		// launch occurs before the record is open, and WriteBuiltSample then
 		// silently drops every sample.
-#if !defined(NAV_TEST) || SP_BENCH_REPLAY
 		archive_.PollOpenNewFlight();
-#endif
 
 		// ── Pad settle → mounting calibration (ADR-0021 Decision 6, #36) ──────
 		// Only meaningful before launch; in flight the accelerometer is measuring
@@ -409,13 +380,11 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			BuzzerSequence(Landed);
 		} else if (buzzer_phase_ == BuzzerPhase::Armed
 				&& flight_state == FlightStates::WaitingLaunch) {
-#if !defined(NAV_TEST) || SP_BENCH_REPLAY
 			// Withhold the ready-beep until the flight record is fully open
 			// (activeOpen = true).  Users launch on the ready-beep, so this
 			// guarantees sample recording is active before the rocket leaves
 			// the pad — closing the residual open-vs-launch race.
 			if (archive_.IsActiveOpen())
-#endif
 				BuzzerSequence(Armed);
 		}
 

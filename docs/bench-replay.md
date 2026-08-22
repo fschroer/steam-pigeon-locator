@@ -27,25 +27,24 @@ The criteria this unblocks:
 | #36 | Pyro channels verified dead throughout a disarmed flight |
 | #35 | A disarmed locator broadcasting in-flight telemetry displays as DISARMED |
 
-## How it differs from `NAV_TEST`
+## Behavior
 
-`NAV_TEST` already replays archived samples, but it is not usable for the above,
-for two reasons:
+The archive stays **live** during a replay, so the recording path is exercised
+end-to-end. That is the whole point: #36's criteria are about the record a
+disarmed flight produces, so a harness that drove the state machine without
+recording would prove nothing.
 
-1. **It compiles the archive out.** The `#if !defined(NAV_TEST) || SP_BENCH_REPLAY`
-   guards in `Factory.cpp` exist for this: a plain `NAV_TEST` build drives the
-   state machine but records nothing, which is useless for testing the recording
-   path.
-2. **It only replays while armed**, which is the one case a real flight already
-   covers.
+The replay runs in whatever arm state the operator selects, and does **not**
+auto-replay at boot — that would open and close a record on every power-on, and
+would deny the operator the chance to choose the arm state under test. It starts
+on the `B` console key instead.
 
-`SP_BENCH_REPLAY` sets `NAV_TEST` (so the replay implementation is reused
-unchanged) and then reverses both of those: the archive stays live, and the
-replay runs in whatever arm state the operator selects.
-
-It also does **not** auto-replay at boot the way `NAV_TEST` does — that would
-open and close a record on every power-on, and would deny the operator the
-chance to choose the arm state under test.
+> **History.** This harness grew out of an earlier `NAV_TEST` compile flag, which
+> replayed archived samples but compiled the archive *out* (recording nothing) and
+> only ran while armed — useless for the criteria above. `SP_BENCH_REPLAY` used to
+> `#define NAV_TEST` to borrow its replay implementation unchanged. `NAV_TEST` had
+> no remaining use of its own and was removed; the replay machinery it provided
+> now lives under `SP_BENCH_REPLAY` alone, which is the only flag that guards it.
 
 ## Enabling
 
@@ -60,7 +59,65 @@ makefiles hard-code their compile flags, so passing `CXXFLAGS+=` on the `make`
 command line **does not reach the compiler** — it will appear to succeed and
 change nothing. Edit the header, or add the define to the project's symbol list.
 
-Cost when enabled: ~1.5 KB flash and ~5.2 KB RAM for the replay sample buffer.
+Cost when enabled, measured against the same tree at `SP_BENCH_REPLAY=0`:
+**+3.6 KB flash and +5.7 KB RAM** in the `Debug` (`-O0`) build, most of the RAM
+being the 64-sample replay buffer. A `Release` (`-O2`) build costs less flash.
+
+## Keeping it compiling
+
+Code behind a flag that is always off is never parsed, so it rots silently: a
+rename in a struct it reads breaks it without breaking any build anyone makes.
+That is not hypothetical. The archive migrated its GPS position fields from
+`double lat_rad`/`lon_rad` to `int32_t lat_1e7`/`lon_1e7`, and this harness kept
+referencing the old names. It stayed broken until someone tried to use it — the
+worst possible moment, because a debugging tool that itself needs debugging is
+worse than no tool.
+
+[`Scripts/check-bench-flags.sh`](../Scripts/check-bench-flags.sh) parses each
+bench harness at its **enabled** setting so that rot fails in seconds instead of
+on the bench, and asserts each flag still defaults to 0 so a flag left on after a
+session cannot reach a flight build:
+
+```bash
+Scripts/check-bench-flags.sh
+```
+
+It covers `SP_BENCH_REPLAY`, `SP_FAULT_INJECT` and `SP_LOSS_INJECT`, needs no
+header edit (it passes `-D` straight to the compiler, which works because each
+flag is declared `#ifndef`), and exits non-zero on any problem. It is a
+**syntax** check, not a link — for a declaration that is never defined, set the
+flag to 1 and run a full `make -j4 all` in `Debug/`.
+
+## Where the replay data comes from
+
+The source is **a flight record in the locator's own SPI flash**, read directly
+by `Archive::ReadFlightDataRange` in 64-sample chunks. It is *not* a file, and
+the firmware contains **no CSV parser at all** — CSV is an export format only
+(`UserInteraction::MakeCSVExportLine`, written out over the USB-C console).
+
+So a CSV downloaded from an archive record cannot be fed back into the on-device
+replay. It does not need to be: the record it came from is already in the flash
+the replay reads, selectable with the `0`-`9` keys.
+
+If what you actually want is to replay a CSV — a flight from a *different*
+locator, or a hand-edited/synthetic one — that already exists on the **host**
+side, where a file is cheap and a parser is free. Both harnesses share one
+name-matched CSV reader ([`Tests/common/FlightCsv.hpp`](../Tests/common/FlightCsv.hpp)),
+which understands the on-device export directly:
+
+| Harness | Command | Replays into |
+|---|---|---|
+| [`Tests/FlightReplay`](../Tests/FlightReplay) | `./test_flight_replay flight.csv` | `FlightManager` — deployment ladder, apogee, state machine |
+| [`Tests/EkfReplay`](../Tests/EkfReplay) | `./test_ekf_replay flight.csv` | `InsEkf15` — filter internals (the ADR-0004 analysis tool) |
+
+`FlightReplay` also takes `--spike`/`--dropout` to perturb a recorded flight, and
+`--emit <file>` to write a synthetic one.
+
+**What the host harnesses cannot do, and why this one exists:** they replay into
+one component. Bench replay drives the *whole device* — the flash recording path,
+the buzzer, the pyro channels, the live telemetry the app sees. Every #35/#36
+criterion in the table above is about one of those, which is precisely why a
+CSV-on-host replay could not cover them.
 
 ## Console keys (USB-C, UART2)
 

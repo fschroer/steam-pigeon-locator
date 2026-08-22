@@ -4,7 +4,7 @@
 // getters/setters FlightManager.cpp calls, backed by a per-cycle sample the
 // harness injects with SetSample().  This is the "sensor replay" seam: the
 // harness pushes one raw-baro + fused solution per cycle, exactly as the on-
-// device NAV_TEST replay feeds archived samples through Navigation.
+// device bench replay feeds archived samples through Navigation.
 // ---------------------------------------------------------------------------
 #pragma once
 #include <cstdint>

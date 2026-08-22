@@ -262,7 +262,7 @@ private:
 	// Rather than loading all flight samples into RAM at once, we keep a
 	// small sliding buffer and re-fetch from the archive whenever
 	// SendDataPacket needs samples that are outside the current window.
-	// This mirrors the NAV_TEST replay pattern in Navigation.cpp exactly.
+	// This mirrors the bench-replay chunk pattern in Navigation.cpp exactly.
 	//
 	// kChunkSize must be a whole multiple of MaxSamplesPerPacket() so that
 	// every packet's samples fall entirely within one chunk fetch.

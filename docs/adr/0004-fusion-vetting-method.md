@@ -21,7 +21,8 @@ To vet any fused quantity for an elevated-trust use, validate it against an **in
    - **GPS** as the independent anchor inside that smoother (different physics, error uncorrelated with baro);
    - optionally a **second known-good altimeter** as an independent altitude truth.
 2. **Acceptance gate** (parameters fixed per campaign): across **`<N>`** flights spanning the envelope (high-g boost, high apogee, tumbling/windy descent), the real-time fused quantity must track the reference within **`<ref_tolerance>`** through the relevant phase, **and** track it at least as well as raw does — better in the regimes where raw is known weak (velocity, high-speed ascent).
-3. **Reproducibility:** the comparison must be regenerable from archived data via the existing `NAV_TEST` replay path.
+3. **Reproducibility:** the comparison must be regenerable from archived data via the existing on-device replay path
+   (`SP_BENCH_REPLAY`; called `NAV_TEST` when this ADR was written).
 4. **Agreement-with-raw is explicitly not an acceptance criterion.** It is only a *runtime safety bound* (its role in [ADR-0003](0003-priority1-deployment-raw-baro.md)).
 
 > Note: there is no perfect ground truth available to a hobby program, so this method *triangulates* (offline smoother + GPS + optional second altimeter) and is explicit that the offline smoother shares some sensor-error sources — GPS and a second altimeter are what make it more than a fancier version of the same data.

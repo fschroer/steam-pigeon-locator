@@ -105,7 +105,7 @@ bool FlightManager::DetectLaunch(const NavSolution& sol) {
 // ---------------------------------------------------------------------------
 // DetectBurnout
 // Burnout is declared when body acceleration drops below kBurnoutAccelG
-// while in the Launched state.  Uses getRawImu() so that in NAV_TEST mode
+// while in the Launched state.  Uses getRawImu() so that during bench replay
 // it sees archived sensor data and advances state correctly.
 // ---------------------------------------------------------------------------
 bool FlightManager::DetectBurnout(const NavSolution& sol) {

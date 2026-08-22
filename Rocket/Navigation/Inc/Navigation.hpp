@@ -6,15 +6,12 @@
 #include "InsEkf15.hpp"
 #include "AttitudeEstimator.hpp"
 
-// Define NAV_TEST to compile in flight-archive replay support.
-// Leave undefined in production builds to save ~800 bytes of RAM.
-//#define NAV_TEST
-
 // ---------------------------------------------------------------------------
 // Bench replay (#35 / #36) — DISABLED by default.
 // Set to 1 here (or build with -DSP_BENCH_REPLAY=1) to replay an archived
 // flight through the live flight state machine while the locator sits on the
-// bench.  MUST remain 0 in any production/flight build.
+// bench.  MUST remain 0 in any production/flight build — it costs ~3.6 KB flash
+// and ~5.7 KB RAM at -O0, most of the RAM being the 64-sample replay buffer.
 //
 // This exists because several #35 / #36 acceptance criteria are otherwise
 // unreachable without a launch: a disarmed flight's record, the landing beacon
@@ -24,22 +21,15 @@
 // produced by hand — that hardening is exactly why the bench cannot fake a
 // flight, so the sensor data has to come from a recording instead.
 //
-// It reuses the NAV_TEST replay machinery but differs from it in the one way
-// that matters here: NAV_TEST compiles the ARCHIVE OUT (see the guards in
-// Factory.cpp), so a NAV_TEST build can drive the state machine but records
-// nothing — useless for testing the recording path.  Bench replay keeps the
-// archive live, and lets the replay run while DISARMED, which is the whole
-// point.
+// The replay keeps the archive live and runs in whatever arm state the operator
+// selects, started by the 'B' console key rather than automatically at boot.
+// Procedure and console keys: docs/bench-replay.md.
 // ---------------------------------------------------------------------------
 #ifndef SP_BENCH_REPLAY
 #define SP_BENCH_REPLAY 0
 #endif
 
-#if SP_BENCH_REPLAY && !defined(NAV_TEST)
-#define NAV_TEST          // pull in the replay implementation unchanged
-#endif
-
-#ifdef NAV_TEST
+#if SP_BENCH_REPLAY
 #include "Archive.hpp"
 #include "FlightArchive.hpp"
 #endif
@@ -173,24 +163,24 @@ public:
     uint32_t    attitudeLastUpdateMs()    const { return m_attitude.lastUpdateMs(); }
 
     // Raw sensor accessors.
-    // In NAV_TEST mode these return the currently injected archived sample
+    // During bench replay these return the currently injected archived sample
     // so that FlightManager sees archived sensor data during replay.
     const ImuSample& getRawImu() const {
-#ifdef NAV_TEST
+#if SP_BENCH_REPLAY
         if (m_test_active_) return m_test_imu_sample_;
 #endif
         return m_imu.raw();
     }
 
     const BaroSample& getRawBaro() const {
-#ifdef NAV_TEST
+#if SP_BENCH_REPLAY
         if (m_test_active_) return m_test_baro_sample_;
 #endif
         return m_baro.raw();
     }
 
     const GpsSample& getRawGps() const {
-#ifdef NAV_TEST
+#if SP_BENCH_REPLAY
         if (m_test_active_) return m_test_gps_sample_;
 #endif
         return m_gps.raw();
@@ -221,7 +211,7 @@ public:
     void MS5611OCCallback();
     void SetD1Converted();
 
-#ifdef NAV_TEST
+#if SP_BENCH_REPLAY
     bool startTestReplay(Archive& archive, uint8_t archive_position);
     bool isTestReplayActive()   const { return m_test_active_; }
     bool isTestReplayComplete() const { return m_test_complete_; }
@@ -374,7 +364,7 @@ private:
     static constexpr uint8_t GPS_RATE         = 10;
     static constexpr uint8_t GPS_POLL_DIVISOR = SAMPLES_PER_SECOND / GPS_RATE;
 
-#ifdef NAV_TEST
+#if SP_BENCH_REPLAY
     static constexpr uint32_t kTestChunkSize = 64u;
 
     Archive*  m_test_archive_      = nullptr;

@@ -12,10 +12,10 @@ fork, no reimplementation. **No production file is modified** (the harness uses
 access control is not part of the ABI, so the separately-compiled
 `FlightManager.cpp` links unchanged).
 
-This is the host counterpart to the on-device `NAV_TEST` replay: `NAV_TEST` feeds
-an archived flight through `Navigation` on real hardware, while this harness lets
-you inject spikes/dropouts near a deployment decision and assert the outcome in a
-fast edit-build-run loop.
+This is the host counterpart to the on-device bench replay (`SP_BENCH_REPLAY`),
+which feeds an archived flight through `Navigation` on real hardware, while this
+harness lets you inject spikes/dropouts near a deployment decision and assert the
+outcome in a fast edit-build-run loop.
 
 ## What it checks
 
