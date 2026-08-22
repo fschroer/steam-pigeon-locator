@@ -2,11 +2,13 @@
 
 **Flight tracking and recovery for mid- and high-power rocketry**
 
-Locator · Receiver · *Wherezit?* app
+Locator · Receiver · *SteamPigeon* app
 
 ---
 
-> **Document status:** Draft, 2026-08-13. Written against locator/receiver firmware and *Wherezit?* Android app as of this date. Two features are explicitly incomplete and are marked **WORK IN PROGRESS** where they appear: offline satellite maps (§3.7, §9.2) and flight-path export (§10.3). Air starts are **not** an available feature — see §7.6.
+> **Document status:** Draft, 2026-08-21. Written against locator/receiver firmware and *SteamPigeon* Android app as of this date.
+>
+> **The app is now called SteamPigeon.** It shipped as *Wherezit?*, which is the name you will see under the icon until you update it; nothing else about it changed with the name. Two features are explicitly incomplete and are marked **WORK IN PROGRESS** where they appear: offline satellite maps (§3.7, §9.2) and flight-path export (§10.3). Air starts are **not** an available feature — see §7.6.
 >
 > Placeholders marked 📷 and 📱 indicate images still to be captured.
 >
@@ -46,7 +48,7 @@ Steam Pigeon is a three-part system:
 |---|---|---|
 | **Locator** | Inside the rocket | Reads its own sensors, detects launch, apogee and descent, fires your recovery charges, records the whole flight, and transmits status by radio. |
 | **Receiver** | In your hand | Bridges the locator's long-range radio link to your phone's Bluetooth. |
-| ***Wherezit?* app** | Your Android phone | Shows telemetry and position, speaks status aloud, configures the locator and receiver, and downloads recorded flights. |
+| ***SteamPigeon* app** | Your Android phone | Shows telemetry and position, speaks status aloud, configures the locator and receiver, and downloads recorded flights. |
 
 The data path is:
 
@@ -225,12 +227,12 @@ Auto is there for an installation whose axis genuinely is not known. If you know
 
 ## 2.1 The two ways to configure
 
-| | App (*Wherezit?*) | USB-C console |
+| | App (*SteamPigeon*) | USB-C console |
 |---|---|---|
 | Deployment channel modes | ✅ | ✅ |
 | Deploy delays and altitudes | ✅ | ✅ |
-| Launch detect altitude | ✅ | — |
-| Deploy signal duration | ✅ | — |
+| Launch detect altitude | — | — |
+| Deploy signal duration | — | — |
 | Sensor axis along rocket | ✅ | ✅ |
 | LoRa channel | ✅ | ✅ |
 | Locator name | ✅ | ✅ |
@@ -317,9 +319,17 @@ Note how the redundant pairs are separated: the backup drogue fires 2 seconds af
 | **Drogue Backup Deploy Delay** | just above the primary delay, up to 3.0 s | 2.0 s | Same, for the backup charge. Must be longer than the primary. |
 | **Main Primary Deploy Altitude** | just above the backup altitude, up to 500 m | 130 m | Altitude above ground at which the primary main charge fires. |
 | **Main Backup Deploy Altitude** | 0 m up to just below the primary altitude | 100 m | Same, for the backup charge. Must be lower than the primary. |
-| **Launch Detect Altitude** | 10–100 m | 30 m | How far the rocket must climb before the locator will call it a launch. Raise it if you fly from a windy, bumpy pad; lower it for very short flights. |
-| **Deploy Signal Duration** | 0.5–10.0 s | 1.0 s | How long each channel stays energized when it fires. 1.0 s is plenty for an e-match. |
+| **Launch Detect Altitude** | *fixed* | 30 m | How far the rocket must climb before the locator will call it a launch. **Not adjustable** — see the note below. |
+| **Deploy Signal Duration** | *fixed* | 1.0 s | How long each channel stays energized when it fires. 1.0 s is plenty for an e-match. **Not adjustable** — see the note below. |
 | **Sensor Axis Along Rocket** | Auto / X / Y / Z | X | Which of the locator's own axes runs along the length of the airframe. A property of how you mounted it, not of the flight. The default assumes the standard installation; if yours runs along Y or Z, change it. Auto disables the not-armed pad alert entirely (§1.7). |
+
+> ⚠️ **Launch detect altitude and deploy signal duration are no longer adjustable, and the app no longer shows them.** They are fixed at 30 m and 1.0 s.
+>
+> They used to appear in Locator Settings, and editing either **looked like it failed while actually succeeding**: the locator accepted and saved the new value, the app reported *"Update not acknowledged"*, and the display reverted to the old number on the next broadcast. Neither field travels in the locator's status broadcast, so the app has no way to read back what the locator holds — and it confirms a settings change by comparing everything it sent against what comes back.
+>
+> Worse, because the app had to send *something* for both, every settings change — **including a plain LoRa channel change** — quietly wrote its guess over whatever the locator held. The app now leaves both alone, and the locator keeps its own.
+>
+> Making either adjustable again means carrying it in the broadcast, which is a change to all three pieces of firmware. Until then the defaults are the values, and they are the right ones for ordinary flying.
 
 The app enforces the primary/backup relationships for you — it won't let you set a backup drogue delay shorter than the primary, or a backup main altitude higher than the primary.
 
@@ -393,7 +403,7 @@ Each locator identifies itself with a permanent hardware ID and, optionally, a p
 - **If another locator is on the air and isn't the one you're watching**, the app warns you: *"Another locator (ID …) is on the air and is not being displayed. Connect to switch to it, or move to an uncontested channel."* Its data is not shown.
 - **To deliberately switch to that other locator**, tap **Connect** on the banner. If you're already authorized for it, the app switches immediately; if not, it asks for its password first.
 - **The connection releases on its own** if your locator goes quiet for about 15 seconds — long enough to ride out a fade, so a moment's dropout never hands the display to a different rocket.
-- **If you set no password**, the locator is open and any *Wherezit?* app will pick it up. Note that "open" means *authorized*, not *connected* — two open locators still can't fight over the display.
+- **If you set no password**, the locator is open and any *SteamPigeon* app will pick it up. Note that "open" means *authorized*, not *connected* — two open locators still can't fight over the display.
 
 <img src="images/app-08-password-dialog.png" alt="The locator password prompt on first contact" width="300">
 
@@ -410,7 +420,7 @@ The prompt names the locator it is asking about — *Enter the password to conne
 ## 2.7 Device names
 
 - **Locator Name** and **Receiver Name** are both up to 20 characters. Use something you'll recognize at a launch with six other fliers ("Frank's Receiver", not "Receiver").
-- ⚠️ **After you rename the receiver, the old name will keep appearing** — both in *Wherezit?* and in your phone's Bluetooth settings. That's because the name is cached by Bluetooth itself, not by our app. **Fix: go to your phone's Bluetooth settings and "Forget" the receiver, then reconnect.** The new name will appear.
+- ⚠️ **After you rename the receiver, the old name will keep appearing** — both in *SteamPigeon* and in your phone's Bluetooth settings. That's because the name is cached by Bluetooth itself, not by our app. **Fix: go to your phone's Bluetooth settings and "Forget" the receiver, then reconnect.** The new name will appear.
 
 ## 2.8 App settings
 
@@ -474,17 +484,19 @@ The screen scrolls; it is shown here in two halves.
 
 <img src="images/app-09-locator-settings.png" alt="Locator Settings — firmware version and the four deployment channels" width="300">
 
-<img src="images/app-09b-locator-settings-lower.png" alt="Locator Settings — name, channel, launch detect, sensor axis, deploy duration" width="300">
+<img src="images/app-09b-locator-settings-lower.png" alt="Locator Settings — name, channel and sensor axis" width="300">
+
+> 📷 **This screenshot predates the change in §2.4** and still shows Launch Detect Altitude and Deploy Signal Duration. The current screen has neither.
 
 Set, in this order:
 
 1. **Each channel's mode** — including `Unused` for channels you aren't wiring (§2.2).
 2. **The delay or altitude** for each channel that has a role. The field appears underneath the channel once you pick its mode.
-3. **Launch detect altitude** if you're changing it from the default.
-4. **Sensor Axis Along Rocket** — the axis running along the airframe (§1.7). It sits between launch detect altitude and deploy signal duration. Only needs changing when you move the locator into a different rocket, but it is the one setting whose default is an assumption about *your* hardware rather than a preference, so check it.
-5. **Deploy signal duration** if you're changing it from the default.
-6. **LoRa channel** (§2.5).
-7. **Locator name**.
+3. **Sensor Axis Along Rocket** — the axis running along the airframe (§1.7). Only needs changing when you move the locator into a different rocket, but it is the one setting whose default is an assumption about *your* hardware rather than a preference, so check it.
+4. **LoRa channel** (§2.5).
+5. **Locator name**.
+
+⚠️ **Launch detect altitude and deploy signal duration used to be steps 3 and 5 here, and are gone** — they are fixed at 30 m and 1.0 s and the screen no longer offers them. See the note in §2.4 for why, and why their absence is an improvement on what was there before.
 
 💡 **Enter finishes a field.** Every box that raises a keyboard now closes it on Enter, and does so by committing the value — the same thing that happens when you tap away from the field, including clamping a number back into its allowed range. The three numeric locator fields used to have no way to do this at all: the numeric keypad carries no Done key, and Enter inserted a line break.
 
@@ -564,7 +576,7 @@ Recovery happens where there is no cell signal. This screen pre-loads the satell
 
 **To download a site:**
 
-1. Open the menu → **Download maps**. It opens on the whole world; frame down from there.
+1. Open the menu → **Download maps**. It opens centred on **where you are**, zoomed out far enough to see a state or two — so a site a few hours' drive away is a pan rather than a search. If the phone has no position fix yet it opens on the whole world instead; frame down from there.
 2. **Frame the area** in one of three ways:
    - Pan and zoom the map directly.
    - **Go to preset site…** — pick from the built-in list of known launch sites, each with the area it will frame. It also fills in the **Site name** for you.
@@ -577,11 +589,11 @@ Recovery happens where there is no cell signal. This screen pre-loads the satell
 4. Set **Detail (max zoom)** with the slider. The hint under the slider tells you what each level is good for — z17 is described as *"Field features — good for recovery"*, which is the level you want. The thumbnail on the right previews the actual detail you'll get.
 5. Check the estimate. The screen shows the ground coverage, the tile count and the download size.
 6. Give it a **Site name**.
-7. Press **Download this area for offline**. If the area is too large the button instead reads **"Over 1 GB — tighten the area or lower the zoom"** and cannot be pressed; shrink the area or drop the max zoom until it changes back.
+7. Press **Download this area for offline**. If the area is too large the button instead reads **"Over 1 GB — tighten the area or lower the zoom"** and cannot be pressed; shrink the area or drop the max zoom until it changes back. Lowering the max zoom by one step is the biggest single lever — each level costs about four times the one above it.
 
 <img src="images/app-07-download-maps-detail.png" alt="Download maps — the site name and the download button, below the estimate" width="300">
 
-The example above is the **BALLS Black Rock, NV** preset: 22.1 × 22.1 km at z10–z17, about **12,580 tiles and 289 MB**. That's a realistic figure for one launch site.
+The example above is the **BALLS Black Rock, NV** preset: 22.1 × 22.1 km at z10–z17, about **61,600 tiles and 790 MB**. That's a realistic figure for one launch site — and a large one. Dropping the max zoom one step, to z16, cuts it to roughly a quarter.
 
 💡 **Do this on Wi-Fi, the day before.** 289 MB over a marginal cell connection at the field is not a plan.
 
@@ -589,7 +601,7 @@ The example above is the **BALLS Black Rock, NV** preset: 22.1 × 22.1 km at z10
 
 When it finishes you get a line saying so — *✓ "your site name" downloaded — renders offline on the map* — with a **Dismiss** next to it. That message is the confirmation to look for, not the region simply appearing in the list below (see the warning further down).
 
-💡 **The size shown before you download is an estimate, and it runs a little light.** A 1.4 × 1.4 km area estimated at ~2 MB finished at 3 MB. Budget accordingly on a big site.
+💡 **The size shown before you download is an estimate, and it is now roughly right.** It used to run about 2.7× light — a region shown as 290 MB really cost 790 MB — because it counted one zoom level fewer than the map actually fetches. **If these numbers look much larger than you remember, that is the fix, not a new limit:** the downloads were always this big, the screen was under-reporting them. It follows that the 1 GB ceiling now stops you sooner than it used to, and for the first time it means what it says.
 
 **Offline regions** are listed at the bottom of the screen, below the download button, each with a status line and a delete button. ⚡ **The whole section is absent until you have at least one region** — an empty screen there means nothing has been downloaded, not that the list failed to load.
 
@@ -612,7 +624,7 @@ Each entry has the site name, its status line, and a **trash icon** to delete it
 ## 3.8 Verify the app-to-receiver link
 
 1. Power the receiver on.
-2. Open *Wherezit?*. The status pill at the top of the map shows **Scanning**, then a **Select receiver** dialog appears listing what it found.
+2. Open *SteamPigeon*. The status pill at the top of the map shows **Scanning**, then a **Select receiver** dialog appears listing what it found.
 
 <img src="images/app-03-device-picker.png" alt="Select receiver" width="300">
 
@@ -625,6 +637,8 @@ With the receiver connected but the locator off, the status panel reads **No Loc
 While the locator is off the app keeps measuring the channel through the receiver, so it can still warn you that something else is transmitting where your rocket is about to. **Nothing under the No Locator line means the channel is clear** — which is the reading you want before you power up.
 
 ⚡ **Silence is not a dropped connection.** The receiver relays nothing when the locator is quiet — off, on the pad, or out of range. The app knows this, checks the receiver's health in the background, and will not tear down a working link just because the locator has gone quiet. Don't "fix" a link that isn't broken.
+
+💡 **A locator that is already armed when you open the app still gets named.** An armed locator broadcasts flight telemetry and nothing else — no name, from either the locator or the receiver — so the panel used to come up blank while the app was plainly receiving, plotting and able to arm that rocket. The app now remembers the name of every locator it accepts a broadcast from and shows the remembered one when no live name is arriving. The catch: it can only show a name it has heard before, so a locator this phone has **never** seen disarmed still comes up blank. Power the rocket up within range once, before you arm it, and the name is learned.
 
 ## 3.9 Pack list
 
@@ -705,7 +719,7 @@ It comes in two pieces.
 
 | Indicator | What good looks like |
 |---|---|
-| **Receiver / locator names** | Both present. **No Locator** means the locator is off, out of range, or on another channel (§3.8). |
+| **Receiver / locator names** | Both present. **No Locator** means the locator is off, out of range, or on another channel (§3.8). A locator that was already **armed** when you opened the app is named too, from the name the app remembers for it — see §3.8. |
 | **Satellites** | The small number beside the rocket icon. More is better; watch it climb after power-on. |
 | **Battery, ×2** | Bar gauges — receiver on top, locator below. Don't fly a locator showing one bar. **This is your only chance to read it**; the gauges go away at launch (§1.6). An *empty* gauge on a battery you know is charged is a different problem — see Part 11. |
 | **dBm / SNR** | How loud and how clean the link is (§8.4). |
@@ -1485,8 +1499,8 @@ AT THE FLIGHT LINE
 | Drogue Backup Deploy Delay | App, USB-C | just over primary delay → 3.0 s | 2.0 s | Must exceed the primary |
 | Main Primary Deploy Altitude | App, USB-C | just above backup → 500 m | 130 m | AGL |
 | Main Backup Deploy Altitude | App, USB-C | 0 m → just below primary | 100 m | AGL, must be below the primary |
-| Launch Detect Altitude | App | 10–100 m | 30 m | Climb required to declare launch |
-| Deploy Signal Duration | App | 0.5–10.0 s | 1.0 s | How long a channel stays energized |
+| Launch Detect Altitude | *neither* | fixed | 30 m | Climb required to declare launch. Not adjustable (§2.4) |
+| Deploy Signal Duration | *neither* | fixed | 1.0 s | How long a channel stays energized. Not adjustable (§2.4) |
 | Sensor Axis Along Rocket | App, USB-C | Auto / X / Y / Z | X | Which locator axis runs along the airframe. The default assumes the standard installation. Auto disables the not-armed alert and off-pad calibration (§1.7) |
 | LoRa Channel | App, USB-C | 0–63 | 0 | See §2.5 for which control to use |
 | Locator Name | App, USB-C | 20 characters | blank | |
