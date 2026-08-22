@@ -29,7 +29,15 @@ struct RocketPersistentSettings
     DeployMode deployment_ch3_mode = DeployMode::MainPrimary;
     DeployMode deployment_ch4_mode = DeployMode::MainBackup;
 
-    uint16_t launch_detect_altitude = 30;         // meters
+    // NOT settable from anywhere today.  The app leaves the matching wire slot
+    // RESERVED (Communication.cpp restores this locator's value after copying a
+    // LocatorCfgChgRequest), and the console's config save does not assign it
+    // either — so this default is the value in practice.  The app cannot read the
+    // field back, since neither it nor deploy_signal_duration rides in
+    // PreLaunchData, so it could only ever have overwritten it with a guess, which
+    // is what it used to do.  Offering either in a UI means carrying it in a
+    // broadcast first.
+    uint16_t launch_detect_altitude = 30;         // meters — see above
 
     uint8_t drogue_primary_deploy_delay = 0;      // tenths of a second
     uint8_t drogue_backup_deploy_delay = 20;      // tenths of a second
@@ -37,7 +45,8 @@ struct RocketPersistentSettings
     uint16_t main_primary_deploy_altitude = 130;  // meters
     uint16_t main_backup_deploy_altitude = 100;   // meters
 
-    uint8_t deploy_signal_duration = 10;          // tenths of a second
+    // Pyro firing time.  Not settable from anywhere — see launch_detect_altitude.
+    uint8_t deploy_signal_duration = 10;          // tenths of a second — see above
     uint8_t lora_channel = 0;
 
     char device_name[device_name_length] = {0};

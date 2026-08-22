@@ -345,6 +345,32 @@ void Communication::OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
 			std::memcpy(&pending_cfg_settings_,
 					payload + sizeof(PacketHeader) + sizeof(uint32_t),
 					sizeof(pending_cfg_settings_));
+
+			// launch_detect_altitude and deploy_signal_duration are RESERVED on the
+			// wire: the app does not set them, and this locator keeps its own.
+			//
+			// Neither field rides in PreLaunchData, so the app can never read back
+			// what this locator holds for either, and it confirms a config change by
+			// comparing the whole settings object against one rebuilt from the next
+			// broadcast.  It therefore had to send SOMETHING for both, and what it
+			// sent was a guess — so every config change, a pure channel move included,
+			// wrote two values the app had invented.  deploy_signal_duration is pyro
+			// firing time.
+			//
+			// This also makes the two save paths agree.  The console's config save
+			// (UserInteraction.cpp) assigns field by field into the settings it read
+			// from the archive, so it has always left both alone; the app path was the
+			// one overwriting them, because it copied the message whole.
+			//
+			// Restored after the copy rather than parsed around, so the wire layout is
+			// untouched: lora_channel keeps the offset the RECEIVER reads it at to
+			// follow a channel change (ADR-0011), and every size assertion still holds.
+			// That also means an app predating this change can no longer reset them
+			// either, which is the direction that matters.
+			const RocketPersistentSettings& held = archive_.GetLocatorSettings();
+			pending_cfg_settings_.launch_detect_altitude = held.launch_detect_altitude;
+			pending_cfg_settings_.deploy_signal_duration = held.deploy_signal_duration;
+
 			pending_cfg_save_ = true;
 			break;
 		}
