@@ -60,7 +60,12 @@ enum class MsgType : uint8_t {
 	// one standing on the pad, so no sensor can tell them apart — this is the
 	// operator saying "still prepping". Addressed like every other command
 	// (ADR-0020): snoozing somebody else's rocket would be a safety hole.
-	PadAlertSnoozeRequest = 22
+	PadAlertSnoozeRequest = 22,
+	// Reserved for the same reason as 20/21 above: the locator search is
+	// app<->receiver only, and claiming the values here stops a future locator
+	// message colliding with them.  Behavior-free — nothing here sends or parses these.
+	LocatorSearchRequest = 23,
+	LocatorSearchResult = 24
 };
 
 // Flight event summary indices.  One entry per archived event timestamp; the
