@@ -43,5 +43,6 @@ Write an ADR for a decision that is costly to reverse, or that future work must 
 | [0026](0026-archive-capacity-for-fusion-diagnosability.md) | Spend one archive record and a format break so a flight can report whether its own fused solution was alive | Proposed |
 | [0027](0027-deployment-test-is-app-only.md) | The deployment test is app-only — a firing command should not require you to be within reach of the charge | Accepted |
 | [0028](0028-app-does-not-transmit-unconfirmable-settings.md) | The app does not transmit a setting it cannot read back — launch-detect altitude and deploy-signal duration become reserved wire fields | Accepted |
+| [0029](0029-locator-search-candidate-channels.md) | Finding a locator whose channel you have lost — search likely channels first, the band only on request | Accepted |
 
 > **Numbering note (resolved 2026-08-03):** the iOS-port ADR and the launch-detection ADR were both filed as **0015**. Launch detection was filed first (2026-07-17) and keeps the number; the iOS port moved to **0016**. Commit `4b6bb45` and any external reference calling the iOS port "ADR-0015" mean [0016](0016-ios-port-corebluetooth-and-platform-parity.md) — a note in that file records the change. When picking the next number, check this table rather than the highest number you remember.

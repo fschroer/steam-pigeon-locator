@@ -192,6 +192,10 @@ Judged against the broadcast-era baseline, that difference could never resolve: 
 - **Dropping the absolute test during silence reopens the hole it was added to plug** (the second row of the table above): a *continuous* emitter already present when polling starts sits inside the polled baseline and reads as quiet, and if it is not LoRa it produces no bad frames and no decoded frames either. Nothing in the passive path catches that. The tier-3 survey does, because it compares channels against each other rather than against a same-channel history — which is an argument for offering it from the no-locator state.
 - **Bench-validated** for the two reported cases: locator switched off and receiver switched off both go quiet. **Not** validated against a real interferer during locator silence, which is the case decision 4 is tuned for.
 
+### Tier 3, item 4: who, not just how many (2026-08-24)
+
+The frame count established *that* a channel is occupied and deliberately threw away *who* occupied it — right for a survey, and useless to the person holding a locator they cannot find. The occupant's cleartext `locator_id` now rides alongside the count (`confirmed_locator_id[5]`, sizeof 84 → 104), and the search this sweep could never perform — dwelling on the channels a locator is **likely** to be on, rather than the ones that read quietest — moved to its own message pair and its own record: [ADR-0029](0029-locator-search-candidate-channels.md). The rule that survives unchanged is the asymmetry: **non-zero excludes, zero proves nothing.**
+
 ### Status
 
 Tiers 1 and 2 are bench-validated ([#32](https://github.com/fschroer/steam-pigeon-locator/issues/32), closed). Tier 3's sweep is validated except for the known-interferer case, which RSSI alone cannot establish ([#33](https://github.com/fschroer/steam-pigeon-locator/issues/33), open). Thresholds remain reasoned rather than fitted, and all of them are app-side so tuning needs no reflash.
