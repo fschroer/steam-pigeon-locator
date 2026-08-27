@@ -1,6 +1,49 @@
-# Session Handoff — 2026-08-20
+# Session Handoff — 2026-08-24
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
+
+## 2026-08-23/24 session — iOS caught up with the 2026-08-21 Android session, plus one tint the phone caught — COMMITTED + PUSHED (iOS `5f42f9b`), TWO OF THREE HARDWARE-CONFIRMED
+
+iOS repo only; **no firmware and no Android code changed**. **518 tests passing** (from
+500), clean build from a fresh `derivedDataPath`. Detail is in
+`steam-pigeon-ios/docs/UI_PARITY.md`; the resume map for that repo is its
+`NEXT_SESSION.md`.
+
+The 2026-08-21 Android/firmware session (app `39559b3..b878c32`, locator `4ffce9c` +
+`9c39fda`) had **not been fetched** into the Mac's sibling checkouts, so its seven app
+commits looked absent — worth knowing, because the same trap is one `git fetch` away next
+time. Four of them were owed to iOS and are now ported:
+
+- **`3f921a4` — the offline size estimate was ~2.7x low**, on both platforms. See the
+  parity matrix row and the correction to the "validated within 2%" claim below.
+- **`5d52383` — the flight chart clipped the first digit off its own altitude labels**,
+  on both platforms. Gutter 64 → 112 px plus a clamp. **Held for real flight data**
+  before it is judged: it is a legibility call, and the gutter is space taken from the
+  plot.
+- **`b6c67ad` + locator `4ffce9c` — [ADR-0028](adr/0028-app-does-not-transmit-unconfirmable-settings.md)**,
+  the two unconfirmable settings become reserved wire slots. iOS's BYTES did not change —
+  it was already sending the same 30 and 1.0 s — but both fields left `LocatorConfig`,
+  and `WireLayoutTests.swift` now pins the 35-byte body field by field, so the third leg
+  of the triad covers that message at all for the first time.
+- **`b209671` — naming a locator heard only while armed** was already on iOS (it was the
+  iOS-first behaviour Android implemented from the description). One asymmetry came back
+  the other way: Android notes the name **before** its `mayConnect` check, so it names an
+  authorized locator it declines to connect to. iOS noted it only on accept, which lost
+  exactly the two-rocket case. Closed on iOS.
+
+Plus one defect reported off the phone: **the rocket icon on the map's status panel said
+nothing about being armed.** It was tinted by GPS fix quality, so armed and disarmed
+looked identical — and that glyph is the only thing on that screen reporting armed state,
+in colour alone. Now Android's rule value for value, including that the blink stops on
+the locator's own change of broadcast rather than running out a 2 s timeout.
+
+**Confirmed on hardware 2026-08-24 by fschroer:** a config change AND a channel move
+against a real locator (the pair ADR-0028 needs — the move is what proves `lora_channel`
+still sits where the receiver reads it out of a relayed frame), and the rocket tint
+through arm and disarm. The chart gutter is the one part still unjudged, by choice.
+
+**Two deliberate divergences closed**, both because Android moved: five remain, from
+seven.
 
 ## 2026-08-20 session — two open bugs closed, then the iOS app brought to UI parity across four screens — COMMITTED + PUSHED, HARDWARE-TESTED SHORT OF A FLIGHT
 
@@ -54,16 +97,21 @@ one glyph).
 that look *broken* when imitated, not a general licence to prefer a more idiomatic
 control. The bar is to mirror Android's functionality **and** its UI — structure, widgets,
 wording, field order, type weights — and record any unavoidable departure in
-`UI_PARITY.md` with what would close it. Three exist today.
+`UI_PARITY.md` with what would close it. Five exist today (2026-08-24).
 
 ### Two system-level questions, neither an iOS decision
 
-1. **`launch_detect_altitude` and `deploy_signal_duration` cannot be read back.** Neither
-   rides in `PreLaunchData`, so every locator config change writes placeholders. On
-   Android both are editable and editing either **can never succeed** — it reports "not
-   acknowledged" while the locator has in fact accepted the change, and the display
-   reverts. fschroer decided to omit both controls on iOS. Closing it properly means
-   carrying both fields in a broadcast: three binaries, and an ADR.
+1. ~~**`launch_detect_altitude` and `deploy_signal_duration` cannot be read back.**~~
+   **ANSWERED 2026-08-21 by [ADR-0028](adr/0028-app-does-not-transmit-unconfirmable-settings.md).**
+   Neither rides in `PreLaunchData`, so every locator config change wrote a placeholder
+   the app had invented; on Android both were editable and editing either **could never
+   succeed** — it reported "not acknowledged" while the locator had in fact accepted the
+   change. The decision: a setting the app cannot read back is not a setting the app
+   transmits. Both are now **reserved wire slots** (the layout is untouched, so
+   `lora_channel` keeps its offset), the locator restores its own values, and neither
+   platform offers a control. The cost is recorded as one — both fields are now fixed at
+   their defaults on every device, and the console never set them either. It reopens when
+   the firmware carries them in a broadcast: three binaries, and an ADR of its own.
 2. **A stale-data hazard that bit in both directions**, a day apart. The locator stops
    broadcasting `PreLaunchData` the moment it is armed, so a pre-launch-only field read
    off the last-seen object latches for the whole flight (the pad alert would not clear
@@ -247,7 +295,7 @@ Non-obvious things that cost real time — all captured in ADR-0014:
 - MapLibre's offline downloader accepts **only an `http(s)` style URL** (rejects `asset://`, `data:`, `file://` — region stalls at "0/1 tiles"). Hence the embedded `LocalStyleServer` on 127.0.0.1 and the localhost-scoped `network_security_config.xml` — **that config is required, not scaffolding**.
 - **Never probe the map to compute camera framing.** The old 2D `moveCamera(newLatLngBounds(...))` "probe" moved the camera mid-frame; MapLibre's continuously-rendering GL thread drew that intermediate state as a persistent auto-zoom **wobble**. Use the pure `getCameraForLatLngBounds(bounds, padding, 0.0, 0.0)` query, fit **north-up/flat** (tilt is already compensated by `zoomCorrection` — letting the SDK also account for it corrects twice and over-zooms out).
 - The picker's **shape becomes the region's shape** (download takes the visible bounds), so the preview is square on purpose.
-- Tile-size estimates are **measured per zoom**, not tiles × one constant (Mapbox bytes/tile collapse past z19 — upscaled imagery; Esri flat ~23 KB). Validated within 2% against a real 23,014-tile region.
+- Tile-size estimates are **measured per zoom**, not tiles × one constant (Mapbox bytes/tile collapse past z19 — upscaled imagery; Esri flat ~23 KB). ⚠️ **The "validated within 2%" claim here was wrong** and stood until 2026-08-21: the estimate was ~2.7× LOW on both platforms, because the count missed one zoom level (a 256-px source on MapLibre's 512 logical grid) and the per-zoom byte table had been derived by dividing a real download by that same undercount. Fixed on Android in `3f921a4` and on iOS 2026-08-23. A 9.1 km region that estimated ~64 MB downloaded 139 MB.
 
 **⛔ Release blocker — [#26](https://github.com/fschroer/steam-pigeon-locator/issues/26):** no wired tile provider permits permanent offline caching. Mapbox §2.9.1 requires their own Mobile SDK on mobile and §2.8.1 caps caching at 30 days; Esri and MapTiler Cloud restrict bulk caching. Wired providers are **evaluation-only**. Public-domain **NAIP** is the identified clean path (~3–4 days: GDAL pipeline + on-device MBTiles server). USGS `USGSImageryOnly` was evaluated and rejected — **z16 ceiling (~2 m/px)**, too coarse to spot a rocket. Cheapest next step: **ask Mapbox/MapTiler in writing** (both terms say "unless otherwise agreed in writing").
 
