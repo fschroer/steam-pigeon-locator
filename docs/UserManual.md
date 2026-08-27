@@ -254,14 +254,14 @@ Arming swaps the menu over — **Locator Settings** and **Flight Profiles** go a
 | Menu item | Appears when |
 |---|---|
 | Application Settings | Always |
-| Channels | The receiver is connected |
+| Communication | The receiver is connected |
 | Receiver Settings | The receiver is connected |
 | Locator Settings | The locator is powered, in range, and **disarmed** |
 | Flight Profiles | The locator is powered, in range, and **disarmed** |
 | Deployment Test | The locator is powered, in range, and **armed** |
 | Download maps | Always (last in the menu) |
 
-So if a screen you want isn't in the menu, the reason is almost always the locator's arm state or the fact that it isn't transmitting. The screenshot above was taken with a live, disarmed locator — which is why five items appear. With the locator switched off you get four: Application Settings, Channels, Receiver Settings and Download maps.
+So if a screen you want isn't in the menu, the reason is almost always the locator's arm state or the fact that it isn't transmitting. The screenshot above was taken with a live, disarmed locator — which is why five items appear. With the locator switched off you get four: Communication, Receiver Settings, Application Settings and Download maps — in that order, which is the menu's order throughout: the things that depend on a live link first, the ones you set up at home last.
 
 Two rules apply to all configuration:
 
@@ -346,21 +346,25 @@ What this means for you:
 - If you set the drogue primary and backup delays very close together, the backup will fire slightly later than the number you set — it waits its turn.
 - Give redundant pairs some separation (the default 0.0 s / 2.0 s is a good starting point) so the backup genuinely acts as a backup rather than a simultaneous second charge.
 
-## 2.5 LoRa channels — the Channels screen
+## 2.5 LoRa channels — the Communication screen
 
-Everything to do with which channel you are on lives on one screen: **Channels**, in the app menu. It holds four things, in the order you normally reach for them — find a locator you've lost, find a clean channel to move to, point the receiver by hand, move the locator by hand.
+Everything to do with which channel you are on lives on one screen: **Communication**, at the top of the app menu. It holds up to four things, in the order you normally reach for them — find a locator you've lost, find a clean channel to move to, point the receiver by hand, move the locator by hand.
+
+Two of those come and go with what the app can hear. **Find a clean channel** appears only while a locator's messages are arriving: it is for a link that is working badly, and with nothing coming through the question is not which channel is quiet but where the rocket is. **Locator channel** likewise needs a connected locator, since there has to be one to move.
 
 Channels are numbered **0–63**. Default is 0.
 
-> **Channels → *Receiver channel***
+> **Communication → *Receiver channel***
 > Points **your receiver** at a locator that is already on another channel. Your own locator does not move. Use this when you have two locators and want to switch which one you're watching — and it's what **Find a locator** fills in for you.
 >
-> **Channels → *Locator channel***
+> **Communication → *Locator channel***
 > Moves **your locator** to a new channel. Your receiver automatically follows it, so your link is preserved. Use this when the channel is chosen for you — someone else at the launch is on yours, or the club assigns one. Shown only while a locator is connected; there has to be one to move.
 
-<!-- Screenshot needed: the Channels screen. app-05-receiver-settings.png predates the move and shows the channel field in its old home. -->
+<!-- Screenshot needed: the Communication screen. app-05-receiver-settings.png predates the move and shows the channel field in its old home. -->
 
 If a scan has already found somebody on the channel you type, the app says so underneath — *"Prometheus is on channel 12"* — so you are not moving a rocket onto an occupied channel blind. It only speaks up when you have actually changed the number, and it never counts the locator you are connected to: that one is on your channel because it is yours.
+
+💡 **Can't see *Find a clean channel*?** It is hidden while nothing is being heard. Power the locator up, wait for its name to appear on the status panel, and it will be there. **Find a locator** is the one that works when the link is down.
 
 💡 **These two used to sit on separate screens and carried the same label, which was a reliable way to move the wrong device.** They are now side by side and named for what they move. If you have used an older build, the muscle memory to unlearn is *Locator Settings → channel*: that field is gone, and the locator's channel is set here.
 
@@ -375,7 +379,7 @@ If a scan has already found somebody on the channel you type, the app says so un
 
 ### Finding a clean channel
 
-**Channels → *Find a clean channel*** asks the receiver to listen to all 64 channels in turn and rank them from quietest to busiest. It takes about a second. Tap the button next to a suggestion to go there — **Move here** with a locator connected, which moves the rocket and lets the receiver follow, or **Point receiver** without one. Either takes effect on the tap; there is no second step.
+**Communication → *Find a clean channel*** asks the receiver to listen to all 64 channels in turn and rank them from quietest to busiest. It takes about a second. Tap the button next to a suggestion to go there — **Move here** with a locator connected, which moves the rocket and lets the receiver follow, or **Point receiver** without one. Either takes effect on the tap; there is no second step.
 
 A few things to know about the result:
 
@@ -391,7 +395,7 @@ A few things to know about the result:
 
 This is the other half of the problem, and it looks nothing like interference. You power a locator up, the app sits on **No Locator**, and nothing is wrong with the channel you're listening to — you're simply listening to the wrong one. It's the normal hazard of one receiver and several rockets: each one remembers its own channel, and you don't.
 
-**Channels → *Find a locator*** asks the receiver to listen for a rocket on the channels it's most likely to be on. The app already knows most of them, because it remembers the channel it last heard each of your locators on. It tries that first, then your other locators' channels, then a channel a move was staged to but never confirmed, then channel 0 (where a locator that lost its settings ends up), then the channel you're on now. That's usually four to six channels and a few seconds.
+**Communication → *Find a locator*** asks the receiver to listen for a rocket on the channels it's most likely to be on. The app already knows most of them, because it remembers the channel it last heard each of your locators on. It tries that first, then your other locators' channels, then a channel a move was staged to but never confirmed, then channel 0 (where a locator that lost its settings ends up), then the channel you're on now. That's usually four to six channels and a few seconds.
 
 - **Pick which rocket you're looking for, if you know.** *Looking for* lets you choose one of your known locators; the search then stops the moment it hears from that one, usually on the first channel it tries. Leave it on **Any locator** and it reports everything it finds — which is what you want for a borrowed locator the app has never met, or when you want to see both of your rockets at once.
 - **Each channel takes about a second and a half.** That's not slack: a locator only transmits for about a seventh of each second, so anything quicker would walk past a channel while the rocket happened to be silent. It's the same reason the clean-channel scan listens properly to its final candidates.
@@ -480,7 +484,7 @@ The prompt names the locator it is asking about — *Enter the password to conne
 - [ ] Offline maps app installed, site region downloaded in it (§3.7)
 - [ ] App connects to receiver (§3.8)
 - [ ] Chosen channel reads clear — receiver connected, locator still off, no interference note (§2.5)
-- [ ] Locator heard on that channel once powered up — if not, **Channels → Find a locator** rather than assuming range (§2.5)
+- [ ] Locator heard on that channel once powered up — if not, **Communication → Find a locator** rather than assuming range (§2.5)
 - [ ] Phone compass calibrated — figure-eight, away from metal (§9.3)
 - [ ] Magnet, cable, spare igniters packed (§3.9)
 
@@ -741,7 +745,7 @@ It comes in two pieces.
 
 | Indicator | What good looks like |
 |---|---|
-| **Receiver / locator names** | Both present. **No Locator** means the locator is off, out of range, or on another channel — **Channels → Find a locator** settles the last of those in a few seconds (§2.5, §3.8). A locator that was already **armed** when you opened the app is named too, from the name the app remembers for it — see §3.8. |
+| **Receiver / locator names** | Both present. **No Locator** means the locator is off, out of range, or on another channel — **Communication → Find a locator** settles the last of those in a few seconds (§2.5, §3.8). A locator that was already **armed** when you opened the app is named too, from the name the app remembers for it — see §3.8. |
 | **Satellites** | The small number beside the rocket icon. More is better; watch it climb after power-on. |
 | **Battery, ×2** | Bar gauges — receiver on top, locator below. Don't fly a locator showing one bar. **This is your only chance to read it**; the gauges go away at launch (§1.6). An *empty* gauge on a battery you know is charged is a different problem — see Part 11. |
 | **dBm / SNR** | How loud and how clean the link is (§8.4). |
@@ -866,7 +870,7 @@ Walk back to where you'll be standing during the launch, and check that telemetr
 If the link is marginal:
 
 - **Hold the receiver vertically, clear of your body.** This alone often fixes it.
-- **Change the LoRa channel** if you suspect another flier is on yours — use *Channels → Locator channel*, so your receiver follows (§2.5).
+- **Change the LoRa channel** if you suspect another flier is on yours — use *Communication → Locator channel*, so your receiver follows (§2.5).
 - **Move.** Vehicles, trailers and crowds between you and the pad all attenuate the signal.
 
 ## 6.5 Leave the rocket Disarmed
@@ -1343,7 +1347,7 @@ They are exported in that order.
 | Status panel says "No Locator" but the receiver is connected | Normal when the locator is off (§3.8). Otherwise: locator off, out of range, or on a different channel — **Find a locator** answers the channel question directly (§2.5). If an interference note appears under it, the channel is occupied and that may be why you are hearing nothing. |
 | App asks for a password | First contact with a locator it doesn't know (§2.6). Also happens to a locator it *used* to know, if you have since set or changed that locator's password — the app's stored key no longer verifies, so it treats it as a stranger and asks again. |
 | App opened while the locator was already armed | Supported: armed telemetry identifies itself, so the app picks up a locator it already knows and shows live data straight away. If it still reads "No Locator", that locator has never been connected on this phone — **disarm it once** so the app can prompt for its password (§2.6). |
-| "Another locator … is not being displayed" | Someone else is on your channel — change **Channels → Locator channel** (§2.5). Or one of your *own* spare locators is powered up near the receiver, in which case the channel is irrelevant: move it away (§2.5). To switch to that locator on purpose, tap **Connect** (§2.6). |
+| "Another locator … is not being displayed" | Someone else is on your channel — change **Communication → Locator channel** (§2.5). Or one of your *own* spare locators is powered up near the receiver, in which case the channel is irrelevant: move it away (§2.5). To switch to that locator on purpose, tap **Connect** (§2.6). |
 | App shows a locator that isn't on your channel | A powered locator within a few feet of the receiver gets in regardless of channel (§2.5, Appendix G). Move it away. |
 | Telemetry patchy on the pad or the flight line | Check for another powered locator near the receiver — it deafens the receiver every time it transmits (§2.5). |
 | "Interference detected. Try another channel." under the signal reading | Something other than your rocket is transmitting in your channel. Move to another channel (§2.5), or find and move the nearby transmitter. Appears when an arriving signal is strong *and* noisy (§8.4), and also with the locator off, when the receiver reads the channel directly and finds it occupied. |
@@ -1351,7 +1355,7 @@ They are exported in that order.
 | "Channel is busy, but your link is clean" | Informational. Other traffic is present but isn't hurting you. No action needed. Shown only while the locator is being heard — it is a statement about a link, so it is not offered when there isn't one. |
 | Channel scan says every channel is loud | A transmitter is very close to the receiver — usually a spare locator left switched on. Move it; don't change channel (§2.5). |
 | Channel scan refuses to run | The locator is armed, or a flight data transfer is in progress. Disarm or wait (§2.5). |
-| Locator is powered on but the app stays on **No Locator** | Before suspecting range or interference, check you're on its channel: **Channels → Find a locator** (§2.5), or the **Find my locator** button on the status panel. With several rockets and one receiver this is the usual cause, and the channel you're listening to will measure perfectly clean while it happens. |
+| Locator is powered on but the app stays on **No Locator** | Before suspecting range or interference, check you're on its channel: **Communication → Find a locator** (§2.5), or the **Find my locator** button on the status panel. With several rockets and one receiver this is the usual cause, and the channel you're listening to will measure perfectly clean while it happens. |
 | Locator search finds nothing on the short list | Its channel isn't one the app has heard it on. Use **Search all 64 channels** (~80 s). Still nothing: check the locator is powered and in range (§2.5). |
 | Locator search refuses to run | A locator is armed or in flight, or the receiver is busy with a scan or a flight data transfer. A full sweep costs a minute of deafness, so it isn't allowed over a live flight (§2.5). |
 | Receiver's new name won't show up | Bluetooth name cache. "Forget" the receiver in your phone's Bluetooth settings, then reconnect (§2.7). |

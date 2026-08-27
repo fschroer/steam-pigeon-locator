@@ -196,6 +196,8 @@ Judged against the broadcast-era baseline, that difference could never resolve: 
 
 The frame count established *that* a channel is occupied and deliberately threw away *who* occupied it — right for a survey, and useless to the person holding a locator they cannot find. The occupant's cleartext `locator_id` now rides alongside the count (`confirmed_locator_id[5]`, sizeof 84 → 104), and the search this sweep could never perform — dwelling on the channels a locator is **likely** to be on, rather than the ones that read quietest — moved to its own message pair and its own record: [ADR-0029](0029-locator-search-candidate-channels.md). The rule that survives unchanged is the asymmetry: **non-zero excludes, zero proves nothing.**
 
+> **Narrowed 2026-08-25.** The argument above for offering the sweep from the no-locator state no longer holds in the app: "Find a clean channel" is shown only while a locator is being heard. The reasoning and what it costs — the continuous non-LoRa emitter becomes undetectable with no locator powered — are recorded in [ADR-0029](0029-locator-search-candidate-channels.md).
+
 ### Status
 
 Tiers 1 and 2 are bench-validated ([#32](https://github.com/fschroer/steam-pigeon-locator/issues/32), closed). Tier 3's sweep is validated except for the known-interferer case, which RSSI alone cannot establish ([#33](https://github.com/fschroer/steam-pigeon-locator/issues/33), open). Thresholds remain reasoned rather than fitted, and all of them are app-side so tuning needs no reflash.
