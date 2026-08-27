@@ -375,7 +375,7 @@ If a scan has already found somebody on the channel you type, the app says so un
 
 ### Finding a clean channel
 
-**Channels → *Find a clean channel*** asks the receiver to listen to all 64 channels in turn and rank them from quietest to busiest. It takes about a second. Tap **Use** next to a suggestion to stage that channel, then press **Update** as usual.
+**Channels → *Find a clean channel*** asks the receiver to listen to all 64 channels in turn and rank them from quietest to busiest. It takes about a second. Tap the button next to a suggestion to go there — **Move here** with a locator connected, which moves the rocket and lets the receiver follow, or **Point receiver** without one. Either takes effect on the tap; there is no second step.
 
 A few things to know about the result:
 
@@ -395,7 +395,9 @@ This is the other half of the problem, and it looks nothing like interference. Y
 
 - **Pick which rocket you're looking for, if you know.** *Looking for* lets you choose one of your known locators; the search then stops the moment it hears from that one, usually on the first channel it tries. Leave it on **Any locator** and it reports everything it finds — which is what you want for a borrowed locator the app has never met, or when you want to see both of your rockets at once.
 - **Each channel takes about a second and a half.** That's not slack: a locator only transmits for about a seventh of each second, so anything quicker would walk past a channel while the rocket happened to be silent. It's the same reason the clean-channel scan listens properly to its final candidates.
-- **Found it? Tap *Point receiver*.** That moves the **receiver** to the rocket's channel — not the rocket. It's already there, which is what the search just established, and moving it is the one thing guaranteed to lose it again. Then press **Update** as usual. If it's a locator the app doesn't know, you'll be asked for its password once broadcasts start arriving, exactly as if you'd tuned there by hand.
+- **Found it? Tap *Point receiver*.** That moves the **receiver** to the rocket's channel — not the rocket. It's already there, which is what the search just established, and moving it is the one thing guaranteed to lose it again. It takes effect immediately: the row changes to *Receiver is here* once the receiver confirms the new channel. If it's a locator the app doesn't know, you'll be asked for its password once broadcasts start arriving, exactly as if you'd tuned there by hand.
+
+  💡 **Picking a channel from a scan acts; typing one by hand needs Update.** Choosing a result is the decision — the search has already established where the rocket is — so there is nothing left to confirm. The *Receiver channel* field lower down is different: every keystroke is a valid channel number, so it waits for **Update**.
 - **Nothing found? You can search all 64 channels.** Offered only after the short list misses, and never started for you: it takes about 80 seconds, and the receiver hears nothing at all while it runs.
 - **It won't run while the locator is armed or flying**, and it stops immediately if a locator arms while it's running. A full sweep would leave you deaf for over a minute, which is intolerable over a live flight.
 - **Names and channels here aren't password-checked.** They're read straight off the air. Normal recognition happens the usual way (§2.6) once the receiver is pointed at the channel.
