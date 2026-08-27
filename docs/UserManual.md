@@ -475,7 +475,7 @@ The prompt names the locator it is asking about — *Enter the password to conne
 - [ ] Locator charged
 - [ ] Receiver charged
 - [ ] Phone charged
-- [ ] Firmware versions checked (§3.3)
+- [ ] Versions checked and noted — locator, receiver **and app** (§3.3)
 - [ ] Deployment channel modes set for **this** flight (§3.4)
 - [ ] Delays and altitudes set for **this** flight (§3.4)
 - [ ] **Sensor axis along rocket** matches this installation — the default X is right only if X runs along the tube (§1.7, §3.4)
@@ -496,11 +496,27 @@ Charge the locator, the receiver and your phone. Do this the night before, not t
 
 ⚡ The locator's magnetic switch means it can be switched on accidentally in storage (§1.2). Assume the battery is lower than you left it.
 
-## 3.3 Confirm firmware versions
+## 3.3 Confirm versions
 
-The app shows the **locator firmware version** at the top of the Locator Settings screen, and the **receiver firmware version** on the Receiver Settings screen. Each appears once that device has reported it, so give the screen a moment after opening it. Note both down — if you ever need help diagnosing something, these are the first two numbers anyone will ask for.
+Three pieces of software have to agree with each other, and each one tells you what it is:
 
-A version looks like `2026.08.14-c5e7297`: the date it was built and the exact source it was built from. **A version ending in `-dirty` and a time, like `2026.08.14-c5e7297-dirty.231500`, is a development build** — someone's work in progress rather than a released one. That is normal on a board you or a developer has just flashed, and the time is there so two development builds made the same day can be told apart. If you did not expect one, it is worth asking which build you have before flying it.
+- **Locator firmware** — top of the Locator Settings screen.
+- **Receiver firmware** — Receiver Settings.
+- **The app itself** — top of Application Settings.
+
+The firmware versions appear once that device has reported them, so give the screen a moment after opening it. Note all three down — if you ever need help diagnosing something, these are the first numbers anyone will ask for.
+
+All three are written the same way on purpose, so they can be compared at a glance. A version looks like `2026.08.14-c5e7297`: the date it was built, and the exact source it was built from.
+
+**A version ending in `-dirty` and a time, like `2026.08.14-c5e7297-dirty.231500`, is a development build** — someone's work in progress rather than a released one. That is normal on a board you or a developer has just flashed, and the time is there so two development builds made the same day can be told apart. A version with *no* such suffix is the useful kind: it names an exact, recorded state of the source. If you did not expect a development build, it is worth asking which one you have before flying it.
+
+### Is this device up to date?
+
+The middle part of the version is the answer. It identifies the source the build came from, so anyone with the project can look it up and say what that build is missing.
+
+⚠️ **Mismatched app and receiver versions are the one pairing that can stop things working outright.** The two talk to each other over Bluetooth in a fixed format, and that format changes occasionally. When it does, an old receiver and a new app cannot complete a channel scan or a locator search — the app waits, then reports that no answer came and suggests updating the receiver's firmware. That message is usually literal: it means what it says. The locator is not affected by that pairing; it talks over the radio in its own format.
+
+💡 **A device that has been flashed but not since updated will happily report a months-old version, and nothing else will tell you.** If you own more than one receiver, they drift apart quickly — check the version on the one you are actually flying with, not the one you tested with last.
 
 ## 3.4 Set flight configuration
 
@@ -1401,7 +1417,7 @@ They are exported in that order.
 
 ```
 □ Charge locator, receiver, phone
-□ Note firmware versions
+□ Note versions — locator, receiver, app
 □ Set channel modes (Unused for spares!)
 □ Set delays / altitudes
 □ Check SENSOR AXIS ALONG ROCKET matches this build (default X)
