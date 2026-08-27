@@ -251,17 +251,19 @@ Arming swaps the menu over — **Locator Settings** and **Flight Profiles** go a
 
 ⚡ **The menu changes depending on what's connected.** This is deliberate, not a bug:
 
+Listed in menu order:
+
 | Menu item | Appears when |
 |---|---|
-| Application Settings | Always |
 | Communication | The receiver is connected |
-| Receiver Settings | The receiver is connected |
-| Locator Settings | The locator is powered, in range, and **disarmed** |
 | Flight Profiles | The locator is powered, in range, and **disarmed** |
+| Locator Settings | The locator is powered, in range, and **disarmed** |
+| Receiver Settings | The receiver is connected |
+| Application Settings | Always |
+| Download maps | Always |
 | Deployment Test | The locator is powered, in range, and **armed** |
-| Download maps | Always (last in the menu) |
 
-So if a screen you want isn't in the menu, the reason is almost always the locator's arm state or the fact that it isn't transmitting. The screenshot above was taken with a live, disarmed locator — which is why five items appear. With the locator switched off you get four: Communication, Receiver Settings, Application Settings and Download maps — in that order, which is the menu's order throughout: the things that depend on a live link first, the ones you set up at home last.
+So if a screen you want isn't in the menu, the reason is almost always the locator's arm state or the fact that it isn't transmitting. The screenshot above predates the current menu and shows both an older order and an older set of names; it was taken with a live, disarmed locator, which today gives six items. With the locator switched off you get four: Communication, Receiver Settings, Application Settings and Download maps — in that order, which is the menu's order throughout: the things that depend on a live link first, the ones you set up at home last.
 
 Two rules apply to all configuration:
 
