@@ -74,6 +74,12 @@ ADR-0019's staging rule is **not** overturned. It applies to a survey pick that 
 
 All three receiver-channel call sites — the search's pick, the survey's pick with no locator connected, and the manual field's Update — now go through one `pointReceiverAtChannel`. They were three copies of the same four steps, which is how one of them came to behave differently from the other two without anyone deciding that it should.
 
+**A staged field's "dirty" flag is tracked, not derived (fixed 2026-08-25).** The screen seeded each staged channel from the device value and then guarded the follow-the-device sync with `staged != remote`. That reads correctly and behaves backwards: the sync runs *because* the device value changed, which is the one moment the two are guaranteed to differ, so the guard was true exactly when the sync was needed and blocked it. Reported as the Locator channel field reading 0 — the screen had composed before the locator's config arrived, seeded 0, and then refused every update on the grounds that 0 was an edit in progress.
+
+Worth stating how bad that was, because the symptom looked harmless. Channel 0 is the factory default, so a field stuck there reads as a plausible value rather than as missing data, and the Update button beside it was enabled — `staged != remote` being true is also what enables it. Tapping Update on a locator sitting on 48 would have moved it to channel 0. A stale display and an armed action, from one flag.
+
+Both fields now carry an explicit `edited` boolean set by the field's own callback and cleared when a pick or an apply hands the field back to the device. `staged != remote` survives only as what enables Update, which is the question it can actually answer. The pattern was already in the codebase — Receiver Settings tracks its name edits with a flag set by the editor — and this screen derived it instead.
+
 The **Find my locator** button on the status panel is the part that matters most. The tool is reached from the moment the problem is noticed rather than from a menu the user has no reason to open — and the channel readings cannot lead them there, because a receiver tuned to the wrong channel reports that channel as perfectly clean.
 
 ## Alternatives considered
