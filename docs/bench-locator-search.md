@@ -21,6 +21,18 @@ messages. Candidate list capped at **16**. Terminator status: `0` Progress, `1` 
 lines are the ground truth for what was actually searched — the progress bar is the app's
 view of the same stream and can lag it.
 
+> **Reproduced deliberately, 2026-08-28.** One locator, receiver close in: two channels
+> reported, and the weaker of the two flagged `· likely false hit`. That run also found a
+> bug worth knowing about, because it is the kind identity-based reasoning invites — BOTH
+> rows read *Connected*, since every hit for one locator carries the same id, and a user
+> parked on the false channel had no way to reach the real one. Fixed: the row now
+> requires the receiver to be on **that** channel *and* connected to that locator.
+>
+> **Still unrecorded, and it is the measurement that validates the flag:** which channel
+> got flagged. If the flagged one is the channel that disappears when the locator is moved
+> 15–20 ft away, the `rssi + snr` ordering is confirmed. If it is the other one, the rule
+> is backwards and should become SNR-first.
+
 **Near-field artifacts are real and were measured here.** On 2026-08-27 a locator on
 channel **57** was also reported on channel **17** — 8 MHz apart, far beyond any adjacent
 channel — and moving it 15–20 ft away removed the phantom. This qualifies ADR-0019's claim
