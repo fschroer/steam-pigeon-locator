@@ -153,9 +153,11 @@ cancel that arrives almost immediately is handled as cleanly as one mid-sweep.
 > did nothing visible, and the locator **armed when the sweep finished**, up to 77 s later.
 > The command had been queued in the receiver and delivered the moment the radio came
 > home. A queued command now ends the sweep instead, so Arm stops the search and is
-> delivered promptly, and the app reports why the scan stopped. Re-run 4.2 expecting an
-> abort: the search should end within a dwell of the arm, and the locator should arm
-> immediately rather than a minute later.
+> delivered promptly, and the app reports why the scan stopped.
+>
+> **Re-run against the fixed firmware 2026-08-28: PASSES.** Arming during a whole-band
+> search ends the search and the locator arms immediately. 4.2 is a pass/fail test now
+> rather than a measurement of how long telemetry goes missing.
 >
 > The paragraphs below still describe why the *flag-based* abort cannot fire. That limit
 > is real and unchanged — the receiver cannot hear a locator arm while parked elsewhere.
