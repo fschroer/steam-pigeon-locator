@@ -198,6 +198,18 @@ The frame count established *that* a channel is occupied and deliberately threw 
 
 > **Narrowed 2026-08-25.** The argument above for offering the sweep from the no-locator state no longer holds in the app: "Find a clean channel" is shown only while a locator is being heard. The reasoning and what it costs — the continuous non-LoRa emitter becomes undetectable with no locator powered — are recorded in [ADR-0029](0029-locator-search-candidate-channels.md).
 
+> ⚠️ **Qualified 2026-08-27 by bench measurement.** This ADR states that a decoded frame
+> proves transmission on the dwelt channel, because *"off-channel bleed does not survive
+> the demodulator, however loud it is"*. At **near-field saturation it does**: a locator on
+> channel 57, a few feet from the receiver, decoded on channel **17** as well — 8 MHz away,
+> far outside any adjacent-channel effect — and relocating it 15–20 ft removed the phantom.
+> The claim holds at any sane separation and fails when a locator is on top of the
+> receiver, which is the same condition Appendix G already warns about for RSSI. It matters
+> because the decoded-frame test is what licenses excluding a channel as occupied, so a
+> spare locator beside the receiver can make the survey withhold channels that are free.
+> [ADR-0029](0029-locator-search-candidate-channels.md) decision 8 adds RSSI **and SNR** to
+> every search hit so the two cases can be told apart on screen.
+
 ### Status
 
 Tiers 1 and 2 are bench-validated ([#32](https://github.com/fschroer/steam-pigeon-locator/issues/32), closed). Tier 3's sweep is validated except for the known-interferer case, which RSSI alone cannot establish ([#33](https://github.com/fschroer/steam-pigeon-locator/issues/33), open). Thresholds remain reasoned rather than fitted, and all of them are app-side so tuning needs no reflash.

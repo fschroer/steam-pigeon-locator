@@ -50,8 +50,15 @@ then [ADR-0019](adr/0019-channel-interference-detection.md)'s tier-3 item 4 and 
 length before checking its CRC fails against mismatched firmware, in both directions.
 
 **Additive.** `LocatorSearchRequest` (MsgType 23, sizeof 28 / payload 22) and
-`LocatorSearchResult` (MsgType 24, sizeof 38 / payload 32). Receiver-directed only; the
+`LocatorSearchResult` (MsgType 24, **sizeof 39 / payload 33**). Receiver-directed only; the
 locator reserves both values and implements neither, so no locator reflash is involved.
+
+> **Changed 2026-08-27, after the sizes were first written here.** `LocatorSearchResult`
+> grew an `int8_t snr` beside its `rssi` (38 → 39). Both are now displayed on each hit
+> row. The reason is a bench result: a locator on channel 57 was reported on channel 17 as
+> well, and the only way to tell the real occupant from the near-field artifact was to
+> physically move the locator 15–20 ft away. RSSI alone does not separate them — the
+> artifact reads *strong* — and SNR does.
 
 Authoritative layout is `steam-pigeon-receiver/Rocket/Communication/Inc/MessageProtocol.hpp`
 — the `static_assert`s for 104 / 28 / 38 are the contract. Mirror it in

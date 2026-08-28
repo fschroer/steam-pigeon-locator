@@ -15,10 +15,19 @@ messages. Candidate list capped at **16**. Terminator status: `0` Progress, `1` 
 `2` RefusedArmed, `3` RefusedBusy, `4` Cancelled.
 
 **Reading the console.** A run prints `[search] start channels/target <n> <id>`, then one
-`[search] channel/id <ch> <id>` per channel as it finishes, then
+`[search] channel/id <ch> <id>` per channel as it finishes — followed by
+`[search] channel rssi/snr <dBm> <dB>` when that channel produced a hit — then
 `[search] done status/ms <status> <ms>` and `[search] restored channel <ch>`. The channel
 lines are the ground truth for what was actually searched — the progress bar is the app's
 view of the same stream and can lag it.
+
+**Near-field artifacts are real and were measured here.** On 2026-08-27 a locator on
+channel **57** was also reported on channel **17** — 8 MHz apart, far beyond any adjacent
+channel — and moving it 15–20 ft away removed the phantom. This qualifies ADR-0019's claim
+that *"off-channel bleed does not survive the demodulator, however loud it is"*: at
+near-field saturation it does. Every hit row now shows RSSI and SNR for exactly this
+reason, so the next occurrence can be judged on the screen instead of by relocating
+hardware.
 
 ---
 
