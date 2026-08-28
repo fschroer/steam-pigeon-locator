@@ -148,7 +148,20 @@ cancel that arrives almost immediately is handled as cleanly as one mid-sweep.
 
 ## 4. Arming during a whole-band run — **known gap, not a pass/fail test**
 
-**This does not work, and the test should record that rather than expect an abort.**
+> **Update 2026-08-28: the abort works now, by a different route.** Running 4.2 found
+> something worse than the gap it was written for — Arm pressed during a whole-band search
+> did nothing visible, and the locator **armed when the sweep finished**, up to 77 s later.
+> The command had been queued in the receiver and delivered the moment the radio came
+> home. A queued command now ends the sweep instead, so Arm stops the search and is
+> delivered promptly, and the app reports why the scan stopped. Re-run 4.2 expecting an
+> abort: the search should end within a dwell of the arm, and the locator should arm
+> immediately rather than a minute later.
+>
+> The paragraphs below still describe why the *flag-based* abort cannot fire. That limit
+> is real and unchanged — the receiver cannot hear a locator arm while parked elsewhere.
+> What changed is that it does not need to.
+
+**The flag-based abort does not work, and it is worth knowing why.**
 
 ADR-0029 decision 7 claims the run aborts the moment a locator arms, and calls the mid-run
 re-check "the check that earns its keep". Reading the code while writing this procedure

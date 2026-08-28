@@ -47,6 +47,21 @@ An earlier comment in `LocatorSearch.kt` claimed ADR-0019 forbade displaying thi
 
 **7. The armed/in-flight refusal is enforced in the receiver, at the start of a run.** Same gate as the survey and against a worse version of the same hazard: a survey is ~7 s of deafness, a whole-band run is ~77 s.
 
+> ✅ **Resolved 2026-08-28 — by the command path, not the radio path.** A queued
+> app→locator message now **ends** a running sweep instead of waiting behind it, so
+> pressing Arm during a search stops the search, restores the radio and delivers the
+> command. The receiver still cannot *hear* a locator arm while parked on another
+> channel — that limit is physical and stands — but it does see the app's `ArmRequest`
+> pass through it, which is the abort this decision was reaching for. `ServicePendingTx`
+> carries the reasoning; `ChannelSurveyStatus` gains `Cancelled = 3` so the app can say
+> why a scan stopped, one more value in a byte that already existed.
+>
+> The bench measurement that forced it is worse than the gap it fixes: **Arm pressed
+> during a whole-band search did nothing visible, and the locator armed when the sweep
+> finished ~77 s later.** An operator reads a failed arm as "nothing happened" and may be
+> at the pad by the time it fires. Late pyro arming is a different class of problem from
+> the lost telemetry this decision was originally worrying about.
+>
 > ⚠️ **Correction, 2026-08-27.** This decision originally claimed the run is "re-checked every slice", and called the mid-run abort "the check that earns its keep — someone can walk to the pad and arm while a run is still going". **That is false and the code cannot deliver it.** `locator_armed_` and `locator_in_flight_` are assigned only in the `PreLaunchData` / `TelemetryData` cases of `ProcessRadioRx`, and during a run that function returns early — counting the frame and dropping it — before reaching them. The flags are frozen for the duration, and the start gate already refuses when either is set, so the mid-run re-check is unreachable. Beneath the software there is a physical limit no plumbing fixes: parked on another channel, the receiver cannot hear the arm event at all. The same hole exists in `ServiceChannelSurvey` and predates this work, where ~7 s makes it close to harmless. Exposure, mitigations and the measurement to take are in [bench-locator-search.md](../bench-locator-search.md) §4; nothing is implemented yet.
 
 ## Consequences
