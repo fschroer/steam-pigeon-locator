@@ -2,6 +2,26 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-08-24/27 session — locator search, the Communication screen, an app version stamp — COMMITTED + PUSHED, iOS OWES A PORT
+
+Android + receiver. The receiver can now be asked to hunt for a locator whose channel you
+have lost, the channel survey reports WHO is on an occupied channel, all channel controls
+moved to a Communication screen, and the app finally carries a build stamp in the same
+format as the two firmwares. Decision record: [ADR-0029](adr/0029-locator-search-candidate-channels.md).
+
+**Breaking receiver<->app wire change** — `ChannelSurveyResponse` 84 -> 104 (app payload
+78 -> 98). Flash the receiver and update the app together. The locator only reserves
+MsgTypes 23/24 (`e551970`) and needs no reflash.
+
+➡️ **iOS: start at [ios-port-brief-locator-search.md](ios-port-brief-locator-search.md).**
+It carries the commit ranges, the wire contract, the invariants that are not obvious from
+the ADR, and the three decisions that were REVERSED mid-session — which is why that brief
+insists on reading the diffs rather than the prose alone.
+
+Bench-validated only for the census case (three locators powered, all three found). A
+targeted early stop, widening to the full band, a mid-run cancel, and arming during a
+whole-band run are unexercised on either platform.
+
 ## 2026-08-23/24 session — iOS caught up with the 2026-08-21 Android session, plus one tint the phone caught — COMMITTED + PUSHED (iOS `5f42f9b`), TWO OF THREE HARDWARE-CONFIRMED
 
 iOS repo only; **no firmware and no Android code changed**. **518 tests passing** (from
