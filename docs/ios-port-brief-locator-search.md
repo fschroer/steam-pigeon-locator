@@ -87,6 +87,11 @@ Invariants that are not obvious and must survive the port:
 - Identity (`locator_id`, `device_name`) is **cleartext and unauthenticated**. Label with
   it; never gate anything on it.
 - A hit moves the **receiver**, never the locator, and **applies immediately**.
+- ⚠️ **Do not reproduce ADR-0029 decision 7's mid-run abort as originally written.** It
+  claimed the run aborts when a locator arms mid-sweep; the receiver cannot hear an arm
+  event while parked on another channel, so the check is unreachable and the ADR now
+  carries a correction. The **start** gate is real and must be ported. See
+  [bench-locator-search.md](bench-locator-search.md) §4.
 
 ## 3. Persistence
 
