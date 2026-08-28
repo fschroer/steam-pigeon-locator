@@ -27,28 +27,49 @@ view of the same stream and can lag it.
 **Claim under test.** With a target named, the receiver stops on the first frame carrying
 that id rather than searching every listed channel (ADR-0029 decision 4).
 
-The trap: if the target sits on the *first* candidate, stopping after one dwell proves
-nothing — it is indistinguishable from a list of one. The target must be positioned
-**behind** at least one other candidate.
+> **Corrected 2026-08-27, after the first bench run.** This procedure originally said to
+> position the target *behind* another candidate so that stopping proved something. That
+> fights the design and cannot easily be arranged: `LocatorSearch.candidates()` puts the
+> target's last-heard channel **first**, which its own unit test
+> (`targetChannelIsSearchedFirst`) pins. So a targeted run against a locator that is still
+> where it was last heard stops on the **first dwell** — that is the designed happy path,
+> not a degenerate case. The evidence is the **count**, not the hit list.
 
-**Setup.** Note the candidate order the app shows before starting (the button names the
-count; the order is target-first, then other known locators, then a staged move, then
-channel 0, then the current channel). Arrange for A to sit on an *earlier* candidate than
-B. Power A and B, leave C off. Choose **B** in *Looking for*.
+**Setup.** A and B powered, C off. Nothing to arrange about channels.
 
-**Steps.** Start the search. Watch the console.
+### 1a — targeted
 
-**Expect.**
-- `start channels/target <n> <B's id>` with a non-zero target.
-- A `channel/id` line for A's channel reporting **A's id** — a targeted run still reports
-  the locators it passes over; it just does not stop for them.
-- A `channel/id` line for B's channel reporting B's id, then **immediately**
-  `done status/ms 1 <ms>`.
-- **No further channel lines.** This is the whole test: `searched < total` at Done, and
-  the elapsed ms is roughly `(position of B) × 1200`, not `n × 1200`.
-- In the app: both A and B listed as hits, progress bar stopped short of full.
+*Looking for* = **A**. Start the search.
 
-**Fails if** the run continues past B's channel, or if A's hit stops it.
+**Expect** exactly one `[search] channel/id <A's channel> <A's id>`, then
+`done status/ms 1 <ms>` with **ms ≈ 1200–1500**. The app shows **1 of** the candidate
+count and lists A alone.
+
+### 1b — census, same rig, for contrast
+
+*Looking for* = **Any locator**. Start again without changing anything else.
+
+**Expect** a `channel/id` line for **every** candidate, `done status/ms 1 <ms>` with
+**ms ≈ candidates × 1200**, and **both A and B listed** if B sits on one of the candidate
+channels.
+
+**The pair is the proof.** 1a stopping at one dwell while 1b walks the whole list, on an
+otherwise identical rig, is what distinguishes an early stop from a short candidate list
+that happened to contain only A. Neither run alone establishes it: if B is not among the
+candidates, "A only" is the answer either way, and only the count and elapsed time differ.
+
+### 1c — a passed-over hit does not stop the run
+
+The other half of decision 4, and the one most likely to be got wrong in a port: a targeted
+run still **reports** the locators it passes over, it just does not stop for them.
+
+Power **B only**, leave A off, and set *Looking for* = **A**. The target is absent, so
+nothing can match it.
+
+**Expect** the run to walk **every** candidate and report **B** as a hit on the way past,
+ending `done status/ms 1` at the full count. A run that stops on B has confused "found
+something" with "found the target"; a run that omits B from the results has confused
+"do not stop for it" with "do not report it".
 
 ## 2. Widening to the full band after a miss
 
