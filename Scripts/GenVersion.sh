@@ -7,6 +7,25 @@ ROOT="$(dirname "$SCRIPT_DIR")"
 # git describe must run inside the repo, not the caller's working directory
 cd "$ROOT" || exit 1
 
+# Refresh the index before asking about --dirty.  This is hygiene, not a fix for a
+# demonstrated bug, and the distinction is worth recording so nobody credits it
+# with more than it does.
+#
+# `git describe --dirty` decides via `git diff-index`, which does not refresh the
+# index first.  That is the same reason git's own require_clean_work_tree refreshes
+# before testing, and it is cheap, so it is done here too.  What it does NOT
+# explain is a stamp that says dirty on a tree that is clean: diff-index falls back
+# to comparing CONTENT when stat data differs, so a touched-but-unchanged file was
+# tried on 2026-08-27 and did not produce a false -dirty.
+#
+# If a build ever stamps -dirty against a clean tree, look elsewhere first -- most
+# likely the binary is older than the commit, since the stamp is fixed at BUILD
+# time and reinstalling does not restamp it.
+#
+# A non-zero exit means genuinely modified files -- the case --dirty exists to
+# report -- so the result is deliberately ignored rather than checked.
+git update-index -q --refresh || true
+
 DESCRIBE="$(git describe --tags --long --dirty --always)"
 VERSION="$(date +%Y.%m.%d)-${DESCRIBE}"
 
