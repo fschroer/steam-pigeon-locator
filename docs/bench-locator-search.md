@@ -28,10 +28,10 @@ view of the same stream and can lag it.
 > parked on the false channel had no way to reach the real one. Fixed: the row now
 > requires the receiver to be on **that** channel *and* connected to that locator.
 >
-> **Still unrecorded, and it is the measurement that validates the flag:** which channel
-> got flagged. If the flagged one is the channel that disappears when the locator is moved
-> 15–20 ft away, the `rssi + snr` ordering is confirmed. If it is the other one, the rule
-> is backwards and should become SNR-first.
+> **Answered 2026-08-28: the flagged channel is the one that disappears at distance.** The
+> `rssi + snr` ordering therefore picks the real channel and the flag points at the
+> artifact. It would need revisiting only if an artifact were ever seen arriving *stronger*
+> than the true channel, which this rig did not produce.
 
 **Near-field artifacts are real and were measured here.** On 2026-08-27 a locator on
 channel **57** was also reported on channel **17** — 8 MHz apart, far beyond any adjacent
