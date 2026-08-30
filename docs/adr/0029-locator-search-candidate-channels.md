@@ -9,13 +9,15 @@
 
 [ADR-0019](0019-channel-interference-detection.md) tier 3 gave the receiver a band sweep, and its tier-3 addendum gave that sweep the one unambiguous occupancy test there is: a frame that **decodes** on the dwelt channel was transmitted on it. Two things were left on the floor, and both turn out to matter for the same user.
 
-**The sweep answers the opposite question to the one being asked here.** The confirm phase dwells on the five **quietest** coarse candidates, because it is choosing somewhere to move to. A locator you are trying to find is, by definition, making noise on the channel you want. It is shortlisted only by accident — and the accident does happen, because the 12 ms coarse dwell misses a 138 ms burst about 86% of the time, so an occupied channel routinely reads quiet. Luck is not a search.
+**The sweep answers the opposite question to the one being asked here.** The confirm phase dwells on the five **quietest** coarse candidates, because it is choosing somewhere to move to. A locator you are trying to find is, by definition, making noise on the channel you want. It is shortlisted only by accident — and the accident does happen, because the 12 ms coarse dwell misses a 200 ms burst about 79% of the time, so an occupied channel routinely reads quiet. Luck is not a search.
 
 **The frame is counted and then dropped, so nothing says who.** That drop was deliberate and remains right for a survey: forwarding a stranger's `PreLaunchData` mid-sweep put another rocket's data on screen and raised a conflict banner. But `locator_id` is in the frame in cleartext, the app already keeps a `locator_id → password/label` store, and the count alone cannot distinguish *your other rocket* from *someone else's*.
 
 The scenario that forces the issue is one receiver and several locators. You power one up, and you cannot remember which channel it is on. The app is not deaf because of interference; it is pointed at the wrong frequency, and every diagnostic in ADR-0019 is measuring a channel nobody is talking on. The borrowed-locator case is the same problem with less information: a locator the app has never heard of has no stored channel and no stored name.
 
-The cost of looking is the constraint on everything below. A locator is on air ~138 ms once per second, so ruling a channel out needs a dwell longer than one broadcast period — the reason the confirm phase exists at all. At ~1.2 s per channel the whole band is **~77 s**, and shortening the dwell does not help: a 300 ms dwell catches a burst ~16% of the time, needing ~13 passes for 90% confidence, which is ~250 s. Sub-sampling is strictly worse than dwelling properly.
+The cost of looking is the constraint on everything below. A **disarmed** locator — which is what a search hunts — is on air ~200 ms once per second (`PreLaunchData`, 118 bytes at SF7/125 kHz/CR4/5). Ruling a channel out needs a dwell that **contains a whole burst**, so it must exceed period *plus* airtime: 1000 + 200 = **1200 ms minimum**, and the dwell is 1400 ms to leave margin for cadence jitter. At 1.4 s per channel a whole band with nothing on it is **up to ~90 s**; a dwell ends the moment it gets a hit, so a band with locators on it finishes sooner. Shortening the dwell does not help: a 300 ms dwell contains a burst 10% of the time, needing ~22 passes for 90% confidence, which is ~420 s. Sub-sampling is strictly worse than dwelling properly.
+
+> ⚠️ **These figures were wrong until 2026-08-30** — see *The dwell was sized against the wrong frame*, below. This paragraph originally read "~138 ms" and "~77 s", from `TelemetryData`'s 77 bytes, which is the frame an **armed** locator sends.
 
 ## Decision
 
@@ -25,7 +27,7 @@ The cost of looking is the constraint on everything below. A locator is on air ~
 
 This required remembering something the app was throwing away: `KnownLocator.last_channel`, written whenever an authorized broadcast arrives. A receiver shared across several rockets has been tuned to each of them at some point, and that history is the entire reason the short list usually wins.
 
-**3. The results stream, one message per channel.** A single response at the end would leave a ~77 s run with a dead progress bar and no way to show a hit at the moment it happens. Streaming also makes cancel and partial results natural, and the app's timeout becomes a **silence** timeout (8 s between messages) rather than a run-length timeout that would have to be longer than the longest legal run.
+**3. The results stream, one message per channel.** A single response at the end would leave a ~90 s run with a dead progress bar and no way to show a hit at the moment it happens. Streaming also makes cancel and partial results natural, and the app's timeout becomes a **silence** timeout (8 s between messages) rather than a run-length timeout that would have to be longer than the longest legal run.
 
 **4. A named target stops the run early; no target makes it a census.** `target_locator_id` is the locator the user picked from their known list, and the receiver stops on the first frame carrying it — with its last-heard channel searched first, that is usually one dwell. With no target the run reports every hit on every listed channel, which is what finds a borrowed locator and what shows both rockets when two are powered.
 
@@ -45,7 +47,7 @@ That work also exposed a bug worth recording, because it is the mistake identity
 
 An earlier comment in `LocatorSearch.kt` claimed ADR-0019 forbade displaying this. It does not: that rule governs the survey's uncalibrated **channel level** near the noise floor, not a decoded packet's RSSI, which the status panel has displayed all along. The hit row now uses the same format and the same colour scales.
 
-**7. The armed/in-flight refusal is enforced in the receiver, at the start of a run.** Same gate as the survey and against a worse version of the same hazard: a survey is ~7 s of deafness, a whole-band run is ~77 s.
+**7. The armed/in-flight refusal is enforced in the receiver, at the start of a run.** Same gate as the survey and against a worse version of the same hazard: a survey is ~8 s of deafness, a whole-band run is up to ~90 s.
 
 > ✅ **Resolved and bench-confirmed 2026-08-28 — by the command path, not the radio path.** A queued
 > app→locator message now **ends** a running sweep instead of waiting behind it, so
@@ -58,7 +60,7 @@ An earlier comment in `LocatorSearch.kt` claimed ADR-0019 forbade displaying thi
 >
 > The bench measurement that forced it is worse than the gap it fixes: **Arm pressed
 > during a whole-band search did nothing visible, and the locator armed when the sweep
-> finished ~77 s later.** An operator reads a failed arm as "nothing happened" and may be
+> finished up to ~90 s later.** An operator reads a failed arm as "nothing happened" and may be
 > at the pad by the time it fires. Late pyro arming is a different class of problem from
 > the lost telemetry this decision was originally worrying about.
 >
@@ -70,7 +72,7 @@ An earlier comment in `LocatorSearch.kt` claimed ADR-0019 forbade displaying thi
 ## Consequences
 
 - **Breaking receiver↔app wire change on `ChannelSurveyResponse`** (sizeof 84 → 104, app payload 78 → 98): flash the receiver and update the app together. The app frames this message by exact length before checking its CRC, so a mismatched pair fails the survey rather than degrading. **The locator is unaffected** — it only reserves the new MsgType values. The *search* messages, by contrast, are additive: an app that does not know MsgType 24 resyncs byte-by-byte and drops it, and firmware that does not know 23 simply never answers, which the silence timeout already covers.
-- `ServicePendingTx` used to reason that a queued message "will be along shortly, a sweep is over in about a second". That is no longer true, and the code says so: a search runs ~77 s. It is survivable only because a search **is** the no-locator state — it is started when nothing is coming through, and it aborts the moment a locator arms or flies. A command queued against a locator we cannot hear had nowhere to go anyway.
+- `ServicePendingTx` used to reason that a queued message "will be along shortly, a sweep is over in about a second". That is no longer true, and the code says so: a search runs up to ~90 s. It is survivable only because a search **is** the no-locator state — it is started when nothing is coming through, and it aborts the moment a locator arms or flies. A command queued against a locator we cannot hear had nowhere to go anyway.
 - Every writer of `KnownLocator` now merges onto the stored entry instead of rebuilding it. The old writers hand-copied the one other field that existed, which worked only while there were two: adding `last_channel` would have made every name update silently erase the remembered channel, and the failure would have surfaced as a search that had forgotten where to look.
 - **Zero frames still proves nothing**, exactly as in ADR-0019. A dwell is one broadcast period, so a locator transmitting more sparsely than 1 Hz can slip through, and a search that finds nothing is evidence, not proof.
 - **The cleartext id is spoofable**, which is acceptable only because nothing is gated on it. If a future feature wants to *act* on "this is my locator", it must authenticate — which means forwarding enough of the frame for the app to check `auth_tag`, not trusting this field.
@@ -122,12 +124,261 @@ This **narrows** [ADR-0019](0019-channel-interference-detection.md), whose tier-
 
 Liveness is judged on the 5 s `CHANNEL_WATCH_SILENCE_MS` rule rather than the map's 2 s freshness, and re-evaluated on a 1 s tick. Both details matter: at 1 Hz a single dropped broadcast would blink a whole section off the screen, and silence generates no event, so nothing would trigger the recomposition that hides the section when the locator stops.
 
+**But the rule is about *offering* the sweep, not about hiding one that is running (fixed 2026-08-30).** A sweep leaves the receiver deaf for ~7.8 s, which is longer than the 5 s silence window the rule is judged on — so the section hid itself about five seconds into its own scan, taking the *"Scanning…"* indicator with it, and reappeared with the results once broadcasts resumed. Reported from the bench as the indicator vanishing and the results arriving three or four seconds later. Nothing was slow: the scan was running the whole time and the screen had stopped saying so.
+
+The gate now also holds for a survey in progress **and for a survey's results**. The second half is load-bearing rather than cautious: without it the section hides again at the instant the results land — the sweep has ended, so "in progress" is false, while the locator's next broadcast is still up to a second away — and flickers back a moment later. Results do not outlive the visit; `clearScansForNewVisit` drops them on entry, with the same *except one still running* exception.
+
+This is the same lesson that rule already learned once, in the opposite direction: **a condition about when to START something must not be applied to something already under way.** Clearing the scans unconditionally on entry orphaned a running search; hiding the section on silence orphaned a running sweep. Worth stating plainly, because the next condition added to this screen will be tempting to apply the same way.
+
 The **Find my locator** button on the status panel is the part that matters most. The tool is reached from the moment the problem is noticed rather than from a menu the user has no reason to open — and the channel readings cannot lead them there, because a receiver tuned to the wrong channel reports that channel as perfectly clean.
+
+### Four fixes from porting to iOS (2026-08-29)
+
+The port was asked to report anything it found wrong in the reference implementation, and it did. All four are Android defects fixed on Android; two of them changed the rules this ADR states, rather than only the code.
+
+**Only the ends of the candidate list are load-bearing — but the middle still has to be reproducible.** Decision 2 is careful that the target's channel goes first and the default and current channels go last, and equally careful that the ordering *between* the remembered channels is arbitrary. Arbitrary is not the same as unstable. Android built that middle by iterating a protobuf map, whose order is unspecified, so with more than 14 remembered locators **which channels survived the 16-channel cap could differ between two runs with identical stored state** — the same button searching a different band twice, with no way for the user to tell. Sorted by locator id on both platforms now. The list the user is shown before the run starts is a promise about what is about to happen, and it has to be the same promise each time.
+
+**A pick applies immediately, so it must also be refused visibly.** *Choosing from a list acts* (above) put a real command behind a tap, and the receiver's config path already refused a second one while the first was in flight — silently. Tapping a second hit did nothing at all: no motion, no message, no error. Worse, the screen staged the new channel into the Receiver channel field **before** asking whether the send was accepted, so the field showed a channel the app had never visited, with an enabled Update button offering to apply it. Both scans' pick buttons are now disabled while the change they would make is in flight, and `pointReceiverAtChannel` reports whether the in-flight guard passed so the caller stages only then. A control that silently does nothing is the failure this screen exists to avoid; a control that silently does the *wrong* thing is worse.
+
+**A search hit with no id is named, not hexed — and the two scans differ here on purpose.** Decision 5 says identity labels a channel and nothing else, and the occupancy hint follows that: a locator reporting no id resolves to no name and so to no warning. That reading was right for the **survey** and wrong for the **search**, and the app was doing the opposite of both — the survey path guarded against a zero id and the search path formatted it as `00000000`, announcing a locator by a name no locator has.
+
+The asymmetry that is now deliberate: the survey's `locator_id` slots are *also* zero against a receiver whose firmware predates this ADR (the response was 84 bytes and carried no ids), so a zero there cannot be told from "this receiver does not report ids", and naming an occupant would be wrong across the whole band. `LocatorSearchResult` is new here and has always carried the field, so a zero means exactly one thing: **the frame that was heard carried no id.** The channel is occupied, saying so is the point, and the answer is *"an unrecognized locator"* — which is what the hit row itself had said all along.
+
+That case is far more reachable than it looks, and the reason is in the receiver: `ProcessRadioRx` captures a search hit for **any** frame that clears `ParseLoraFrame`, and fills `sender_id` only from `PreLaunchData` and `TelemetryData`. A dwell landing on somebody's flight-data transfer, deployment test or arm command scores a hit with no id — routine at a launch, not an edge case. **Capturing those hits is correct** and is not changed here: a Steam Pigeon device transmitting on that channel is precisely what the search is looking for, and `system_id` already keeps foreign traffic out. It simply cannot be named, and the app is the layer that has to say so.
+
+One trap for anyone re-deriving the fix: both ports `return` from inside the search branch, so making it yield *nothing* would skip the survey fallback entirely and answer "nobody knows" over the top of a name the app already holds — worse than the `00000000` it replaces. It falls through instead.
+
+**A hit the run itself distrusts is not an occupant.** Decision 8 flags all but the best hit for a locator as *· likely false hit*, and the occupancy hint beside the channel fields did not consult that judgement. So the near-field artifact — a locator on 57 reported on 17 — was announced as the occupant of a free channel, **in red**, under the words *"moving here would put two locators on one channel"*, while the hit row three inches above flagged the very same reading as probably false. The screen contradicted itself and talked the user out of a channel that was fine. `ChannelOccupancy` now excludes suspect channels; since the firmware reports at most one hit per channel per run, dropping it leaves the channel to the survey rather than to a second hit.
+
+This is decision 8's caveat reaching further than decision 8 did. The rule to carry: **anywhere the app acts on a hit, it must ask the same question the hit row asks — is this attribution trustworthy — and not only where the hits are listed.**
+
+### The dwell was sized against the wrong frame (2026-08-30)
+
+Reported as **"sometimes the search misses one of the locators"** — intermittent, one at a
+time, with four locators on four known channels all of which were in the candidate list.
+
+`kSearchDwellMs` was 1200 ms, and this ADR justified it with "a locator is on air ~138 ms
+once per second". **138 ms is `TelemetryData` — 77 bytes, the frame an *armed* locator
+sends.** A search hunts a *disarmed* locator sitting on the pad, and that sends
+`PreLaunchData`: **118 bytes**, once per second at `rocket_service_count == 2` in the
+locator's 20 Hz service loop.
+
+Airtime at SF7 / 125 kHz / CR 4/5, using the model that reproduces
+[ADR-0006](0006-locator-connect-password.md)'s own published figures exactly (68 B →
+123.1 ms, 76 B → 138.5 ms):
+
+| frame | bytes | airtime |
+|---|---:|---:|
+| `TelemetryData` (armed) | 77 | ~140 ms |
+| `PreLaunchData` (**what a search hunts**) | 118 | **~200 ms** |
+
+A dwell must contain a **whole** burst — a frame straddling either edge does not decode,
+and a decoded frame is the entire occupancy test. For a burst of length `B` repeating with
+period `T`, a window of length `W` is guaranteed to contain one only when `W ≥ T + B`:
+
+```
+1000 ms period + 200 ms airtime = 1200 ms required
+kSearchDwellMs                  = 1200 ms actual
+                         margin =    0 ms
+```
+
+**Exactly on the boundary, with zero margin.** Against the assumed 138 ms there had
+appeared to be 62 ms. Whether a given channel caught its locator therefore came down to
+where that locator's 1 Hz phase happened to fall — per channel, per run, which is precisely
+the reported symptom and precisely why it was intermittent.
+
+**The dwell is now 1400 ms**, restoring 200 ms of margin — several times the 50 ms
+scheduling granularity the locator's 20 Hz tick imposes on its send instant. The
+requirement is recorded in the constant as *period + airtime + jitter*, not as a round
+number, so a broadcast that grows again takes the dwell with it.
+
+**A search dwell now also ends early on a hit**, which is what keeps the longer dwell
+affordable. A channel has one hit slot and the first frame fills it, so the remainder of
+the dwell is time spent deaf for nothing. A band with locators on it now finishes *faster*
+than it did at 1200 ms; only empty channels pay the full 1.4 s, which is why the whole-band
+figure is "up to ~90 s" rather than a flat cost. **The survey's confirm phase deliberately
+does not do this** — it *counts* frames across the dwell, so leaving early would
+under-report how busy a channel is.
+
+`kSearchDeadlineMs` went 90000 → 105000 with it. At 64 × 1.4 s = 89.6 s the old backstop
+would have fired on a legitimate empty-band run and reported it as `RefusedBusy` — the
+change that is easy to forget and turns a fix into a worse bug.
+
+**Not the only mechanism, and the other two are not fixed.** Two further causes of a missed
+locator were found while diagnosing this and are recorded rather than addressed, because
+neither is settled:
+
+- **A channel has one hit slot and the first frame wins it** (`Communication.cpp`,
+  `ProcessRadioRx`). At close range a locator on *another* channel can transmit first and
+  consume it, so the channel's genuine occupant is discarded — the near-field capture
+  decision 8 already documents, here costing a whole locator rather than adding a phantom.
+  The signature is a locator appearing **twice** in the results while another is absent.
+  Advancing early on a hit does not change which frame wins; it only stops waiting after.
+- **`KnownLocator.last_channel` can be poisoned by the same effect.** The app records the
+  *receiver's* channel for any authorized broadcast, and ADR-0006 is explicit that nothing
+  downstream can tell a frame arrived off-channel. A locator whose remembered channel is
+  wrong drops out of the candidate list, and the short run never looks where it is. The
+  signature is the "Search *x* channels" count being lower than usual.
+
+**Bench-validated: not yet.** The arithmetic is verified and the firmware builds; the
+change wants a run against the four-locator bench that produced the report.
+
+### The armed refusal is now visible before the press (2026-08-30)
+
+fschroer, running bench 4: the receiver's armed/in-flight refusal was reachable only by
+pressing a scan button whose one possible outcome was a refusal. Both scan buttons are now
+greyed while the locator is armed or flying, with the reason on screen above them.
+
+**The app-side gate mirrors the receiver's condition exactly** — armed, or a flight state
+that is neither `WaitingLaunch` nor `Landed` — rather than reusing the flight map's
+`isInFlight`, which counts `Landed` as flying. The receiver excludes `Landed` deliberately,
+so a rocket on the ground is refused for being *armed* and not for flying; disabling on a
+stricter rule would have greyed out a scan the receiver would have run.
+
+**It is an affordance, not enforcement.** The receiver's gate is unchanged and remains the
+real one — app-side gating is soft ([ADR-0006](0006-locator-connect-password.md) Decision 5)
+— and the refusal text still renders if a request reaches it anyway.
+
+**The armed flag deliberately does not expire — decided 2026-08-30 (fschroer).**
+`locator_armed_` is assigned only from received broadcasts and nothing clears it on silence,
+so a locator that arms and then goes out of range leaves the receiver refusing both scans
+indefinitely. **That is the wanted behaviour: once the connected locator is armed, the
+system locks in on it.**
+
+Raised as an open question because it looks like it blocks the recovery case, and it does
+not — the two are different failures:
+
+- **The search answers "I have lost the channel."** It is the tool for a locator you cannot
+  remember the settings of, or one the app has never met. Its whole premise is that the
+  locator is transmitting somewhere you are not listening.
+- **A rocket that armed on your channel and went quiet is a *range* problem, not a channel
+  one.** It is still on the channel you armed it on. Sweeping 64 other channels cannot find
+  it, and the 90 s of deafness spent trying is 90 s not spent hearing it come back — which
+  is exactly when the recovery beacon or a fading signal matters most. Direction, distance
+  and walking toward it are the recovery tools; the band sweep is not.
+
+So the gate is not a lockout from a tool that would have helped. It withholds one that
+cannot help, at the moment it would cost the most.
+
+**Expiring the flag on silence was the tempting alternative and is worse.** Telemetry drops
+out mid-flight routinely; a timeout would let a sweep start during a live flight and go deaf
+for up to 90 s, which is precisely the hazard the gate exists for. A flag that survives
+silence fails safe.
+
+**The way out, for the record:** regain contact and disarm, or power-cycle the receiver —
+the flag is not persisted. Both are deliberate friction on a state you should be leaving on
+purpose rather than drifting out of.
+
+### A scan's silence is not a missing locator (2026-08-30)
+
+Reported running bench 4: during a whole-band search the main screen reads **"No Locator"**,
+and the Arm control is live and works.
+
+Both halves are behaving as written, and they contradict each other because they answer
+different questions. The status panel's locator row is a **freshness** verdict — nothing
+has arrived for 2 s. The arm gate is on the **connection slot**, which deliberately
+survives silence ([ADR-0006](0006-locator-connect-password.md), "One connection at a time":
+only another authorized locator or an explicit release takes it, never mere quiet). A scan
+parks the receiver on other channels for up to ~90 s, so for that whole time the panel says
+the locator is gone while the app is still entitled to command it.
+
+**Arm staying live is correct and must not be "fixed".** Decision 7's abort exists precisely
+so an operator's Arm reaches the locator during a sweep — the 2026-08-28 bench measured the
+alternative, an Arm that did nothing visible and fired up to 90 s later. Disabling the
+control during a scan would restore that hazard in a quieter form.
+
+**So the display is what was wrong, and it was wrong in the dangerous direction.** The panel
+was reporting the app's own action as a fault, and the specific misreading it invited is the
+inverse of the one decision 7 fixed: press Arm believing nothing can happen because the app
+says there is no locator, and the rocket arms. "Nothing will happen" is a worse thing for a
+panel to imply at a pad than "nothing happened".
+
+The locator row now reads **"Searching…"** or **"Scanning…"** while a run is in progress,
+before it considers reporting an absence. The locator is not missing; the app stopped
+listening to it, on purpose, because the user asked it to.
+
+Third defect this session in the same shape, and the shape is worth naming once more: **a
+rule about the link must be able to tell a gap the app created from a gap the world
+created.** The survey section hid its own scan on a silence rule; the queued-command abort
+read the app's own poll as an operator command; the status panel read a deliberate scan as
+a lost locator.
+
+### A sweep must not start on top of a queued command (2026-08-30)
+
+Reported the same day the dwell fix passed 10/10: pressing **Search** the instant the
+button re-enables after a completed run answers *"Search stopped."* Waiting a beat and
+pressing again works.
+
+**Self-inflicted by decision 7's abort.** `ServicePendingTx` ends a sweep the moment
+anything is queued for the locator — right for a command that *arrives* during a run, and
+wrong for one that was **already waiting** when the run started. Such a message is not the
+operator asking for the sweep to stop; it is a message that has not reached its forwarding
+window yet. The run was therefore cancelled on its very first service pass, before a single
+channel was dwelt, and the app rendered the `Cancelled` terminator with the text written
+for a deliberate abort — *"If you did not stop it, a command you sent to the locator did"* —
+which was, ironically, true and useless.
+
+**Why the window sits exactly after a search**, rather than appearing at random.
+Forwarding is gated on the safe interval after the last `PreLaunchData` (ADR-0009 invariant
+4), and `ProcessRadioRx` counts and **drops** broadcasts during a sweep — so
+`last_locator_periodic_rx_ms_` is stale the moment a sweep ends, the window test fails, and
+anything queued stays latched until the locator's *next* broadcast, up to a second later.
+The app meanwhile re-enables its button on the terminator, which arrives immediately. The
+"beat" the user waits is that broadcast.
+
+**`BeginLocatorSearch` and `BeginChannelSurvey` now refuse to start while
+`pending_tx_.ready`**, rather than starting and being cancelled. Refusing rather than
+deferring is the point: the operator's command keeps its place at the front and goes out at
+the next window, instead of waiting out a run that can be 90 s long — which is the hazard
+decision 7 exists to prevent, and which "just ignore the pre-existing message" would have
+quietly reintroduced.
+
+The guard also makes the abort rule sound for the first time. With it in place, any
+`pending_tx_` that `ServicePendingTx` sees during a run **must** have arrived during that
+run — which is the condition the rule was always written for and never actually tested.
+
+**Reported as `RefusedBusy`, and the app text widened to match**: *"The receiver is busy —
+a scan, a flight data transfer, or a command still on its way to the locator. Try again in
+a moment."* No new status value, and no wire change. This is not the mistake this ADR warns
+about elsewhere: folding `Cancelled` into `RefusedBusy` was rejected because it would claim
+a transfer was in progress when the user had pressed Stop — a lie. Here the receiver
+genuinely is busy, with work that must go first, and the string now says which kinds of
+work those are. The survey's own `RefusedBusy` text said *"A flight data transfer is in
+progress"* and was widened for the same reason.
+
+**That guard was necessary and not sufficient — bench 6 still failed (2026-08-30).** It
+fixed the case where the message was already queued and left the far commoner one
+untouched, because the analysis above stopped at *"something is in `pending_tx_`"* without
+asking **what**.
+
+**What is in it is the app's own version poll.** `RocketViewModel`'s version job
+re-requests firmware versions on the **rising edge** of the locator link, and a scan is
+more than the 5 s of silence that edge is measured against — so *every scan long enough to
+matter makes the app queue a `VersionRequest` about a second after it ends*. Start another
+scan inside that window and the abort fires on housekeeping. The user is then told
+*"a command you sent to the locator did"* about a message they never sent, generated by the
+gap the previous scan created. A self-sustaining loop of the app cancelling its own scans.
+
+**Only an operator command ends a sweep, and only an operator command stops one starting.**
+`IsOperatorCommand` — a blacklist, so an unrecognised or newly added message still ends the
+sweep and fails toward the operator. `VersionRequest` is its only entry today, and anything
+added must be something the app sends on its own initiative rather than something a person
+asked for. The safety property is untouched: Arm, Disarm, a config change, a deployment
+test and a pad-alert snooze all still end a run the moment they are queued, which is the
+whole point of decision 7's abort.
+
+The general lesson is the one this ADR keeps relearning in different clothes: **a rule
+written about a person's action must be able to tell a person's action from the app's.**
+The queued-command abort could not, and neither could the message it printed.
+
+**Bench-validated 2026-08-30** (bench 6, ten runs, no refusal of either kind). Its first
+run is what caught the insufficient first fix — the procedure earning its place, since
+nothing about this was reachable from a unit test.
 
 ## Alternatives considered
 
 - **Extend the survey to report identity and call it done.** Cheapest, and it is half of what shipped here (decision 5) — but it cannot find a locator, because the survey shortlists quiet channels. It answers "who is on the channels I was already considering".
-- **Sub-sample the whole band repeatedly instead of dwelling.** Arithmetic kills it: ~250 s for 90% confidence against ~77 s for certainty. The same mistake the coarse pass already made once.
+- **Sub-sample the whole band repeatedly instead of dwelling.** Arithmetic kills it: ~420 s for 90% confidence against ~90 s for certainty. The same mistake the coarse pass already made once.
 - **Forward the whole frame so the app can authenticate each hit.** Real authentication rather than a claimed id, at ~150–200 bytes per occupied channel. Deferred, not rejected: nothing currently acts on the identity, so the cost buys nothing yet. It becomes necessary the moment something does.
 - **Auto-tune the receiver on a hit.** Fastest in the field, and it moves the receiver without confirmation while bypassing the recognition/revert cycle. Rejected for the reason ADR-0019 staged survey picks rather than sending them: one channel-change path, not two.
 - **Ask the locator where it is.** It cannot answer. That it is unreachable is the premise.

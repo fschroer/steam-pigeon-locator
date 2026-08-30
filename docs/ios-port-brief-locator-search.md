@@ -93,7 +93,7 @@ Invariants that are not obvious and must survive the port:
 
 - Results **stream**, one message per channel, then an explicit terminator. The client
   timeout is a **silence** timeout (8 s between messages), not a run-length timeout — a
-  whole-band run legitimately takes ~77 s.
+  whole-band run legitimately takes up to ~90 s.
 - Candidate **order** is load-bearing only for a targeted run: the firmware stops on the
   first frame from the target, so that locator's last-heard channel goes first. A targeted
   run against a locator still where it was last heard therefore ends on the **first
@@ -102,7 +102,7 @@ Invariants that are not obvious and must survive the port:
   them.
 - `target_locator_id = 0` means census, and it is the **only** thing that works for a
   borrowed locator the app has never heard of. Not a fallback.
-- **Zero hits proves nothing.** A dwell is one broadcast period.
+- **Zero hits proves nothing.** A dwell is one broadcast period plus one frame's airtime.
 - Identity (`locator_id`, `device_name`) is **cleartext and unauthenticated**. Label with
   it; never gate anything on it.
 - A hit moves the **receiver**, never the locator, and **applies immediately**.
@@ -112,8 +112,8 @@ Invariants that are not obvious and must survive the port:
   finds Twist 0, and a hit-count test calls that success.
 - **Widening is offered after any *completed* short run**, not only a missed one. Gating
   it on an empty result left no way to reach the band sweep at all while anything was
-  audible. A *cancelled* run does not qualify — answering "stop" with an offer of an
-  80-second sweep is not reading the room.
+  audible. A *cancelled* run does not qualify — answering "stop" with an offer of a
+  90-second sweep is not reading the room.
 
 ### Near-field artifacts are real — this is why SNR is on the wire
 
@@ -169,11 +169,28 @@ on channel 0" must stay distinguishable.
 **Firmware, and the most safety-relevant thing in this brief.** `ServicePendingTx` used to
 defer an app-to-locator message while a sweep held the radio. Bench 2026-08-28: **Arm
 pressed during a whole-band search did nothing visible, and the locator armed when the
-sweep finished — up to 77 s later.** An operator reads a failed arm as "nothing happened"
+sweep finished — up to 90 s later.** An operator reads a failed arm as "nothing happened"
 and may be at the pad by the time it fires.
 
 A queued command now **ends** the sweep, which restores the radio to the home channel and
 makes the command deliverable. Applies to the survey as well.
+
+**And a sweep no longer starts on top of one (added 2026-08-30).** The abort above fired
+for a message queued *before* the run as readily as one that arrived during it, so a run
+started while something was still waiting for its forwarding window was cancelled on its
+first service pass — reported as *"Search stopped."* when Search was pressed the instant
+the button re-enabled after a previous run. `BeginLocatorSearch` and `BeginChannelSurvey`
+now refuse with `RefusedBusy` while an **operator command** is queued, keeping it first
+rather than making it wait out a run. *Operator* is load-bearing: the first cut tested
+`pending_tx_.ready` alone and bench 6 still failed, because what is usually in that slot is
+the app's **own version poll** — the version job re-requests on the rising edge of the
+locator link, and a scan is longer than the 5 s that edge is measured against, so every
+scan queues one about a second after it ends. Housekeeping was cancelling scans and the app
+was blaming the user for a command they never sent. `IsOperatorCommand` is a blacklist
+(`VersionRequest` only), so anything unrecognised still ends the sweep. **App side: widen the `RefusedBusy` text** —
+"a scan, a flight data transfer, **or a command still on its way to the locator**" — since
+it now covers a third case. The survey's own `RefusedBusy` string said "A flight data
+transfer is in progress" and was widened the same way. No wire change.
 
 This is also the abort ADR-0029 decision 7 originally claimed and could not deliver. The
 flag-based version is unreachable — `locator_armed_` is assigned only in
@@ -255,10 +272,22 @@ The firmwares never hit this because `version.h` is a real prerequisite of
 
 ## Validation state
 
-**All four bench procedures now pass on Android** — targeted early stop, widening after a
-miss, cancel mid-run, and arming during a whole-band run (which aborts the run and arms
-immediately, since `aa9edc6`). The `rssi + snr` false-hit ordering is confirmed against
-hardware. See [bench-locator-search.md](bench-locator-search.md); the procedures port as
+**All four bench procedures passed on Android on 2026-08-28** — targeted early stop,
+widening after a miss, cancel mid-run, and arming during a whole-band run (which aborts the
+run and arms immediately, since `aa9edc6`). The `rssi + snr` false-hit ordering is confirmed
+against hardware.
+
+> ⚠️ **Those four passes are stale as evidence about timing (2026-08-30).** The receiver's
+> dwell went 1200 → 1400 ms, a search dwell now ends early on a hit, the deadline went
+> 90 → 105 s, and only an operator command now ends or blocks a sweep. The *logic* they
+> proved still holds; **§1, §2 and §4 want re-running** against the new constants, and §3
+> is untouched.
+>
+> **Three newer procedures all pass on Android (2026-08-30):** §5 the dwell catches a
+> locator every time (10/10), §6 starting a search the instant the last one ends, §7 the
+> survey's confirm phase — the survey's first procedure, since there had been none, which
+> is how its own constant came to be changed without it being measured. §6 and §7 each
+> found a defect on their first run; both are written up in the bench file. See [bench-locator-search.md](bench-locator-search.md); the procedures port as
 well as the code does.
 
 **Still unverified anywhere:** the UI changes made on 2026-08-28 — help popups, button
