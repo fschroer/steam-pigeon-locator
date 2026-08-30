@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# sp-status.sh — one-shot commit/push status across the three Steam Pigeon repos.
+# sp-status.sh — one-shot commit/push status across the four Steam Pigeon repos.
 #
-# Answers "is everything saved?" in one command: for the locator, receiver, and
-# app repos it prints the branch, short HEAD, whether the working tree is clean,
-# and whether the branch is ahead/behind its upstream (i.e. unpushed / unpulled).
+# Answers "is everything saved?" in one command: for the locator, receiver, app
+# and iOS repos it prints the branch, short HEAD, whether the working tree is
+# clean, and whether the branch is ahead/behind its upstream (unpushed/unpulled).
 #
 # Usage:
 #   Scripts/sp-status.sh          # human-readable report
@@ -43,8 +43,18 @@ first_repo() {
 
 # opt_repo <candidate>... -- like first_repo, but echoes NOTHING when no
 # candidate resolves. For repos that may legitimately be absent on a given
-# machine (the iOS repo needs a Mac, so it will not exist on the Windows box).
-# Without this, an absent optional repo would report as a hard failure.
+# machine: the iOS app is only BUILT on a Mac, so a Windows box may or may not
+# have a checkout. Without this, an absent optional repo reports as a hard
+# failure.
+#
+# Optional is not the same as ignorable, and the gap between them cost something
+# on 2026-08-30. The iOS repo WAS checked out on the Windows box -- under
+# StudioProjects beside the app rather than beside this repo -- and had
+# uncommitted work, which this script reported as "not present on this machine".
+# A skipped repo prints in the same column as a clean one, so nothing looked
+# wrong. Two defences, both below: every optional repo now carries the same
+# absolute-path fallbacks its siblings do, and the skip line names the variable
+# that would have found it.
 opt_repo() {
   for cand in "$@"; do
     [ -z "$cand" ] && continue
@@ -60,7 +70,7 @@ REPOS=(
   "app|$(first_repo "${SP_APP_DIR:-}" "${SIBLINGS}/rocket-flight-manager" "/c/Users/ftsch/StudioProjects/rocket-flight-manager")"
   "locator|$(first_repo "${SP_LOCATOR_DIR:-}" "${LOCATOR_ROOT}" "/c/STM32_Projects/Locator")"
   "receiver|$(first_repo "${SP_RECEIVER_DIR:-}" "${SIBLINGS}/steam-pigeon-receiver" "/c/STM32_Projects/Receiver")"
-  "ios|$(opt_repo "${SP_IOS_DIR:-}" "${SIBLINGS}/steam-pigeon-ios")"
+  "ios|$(opt_repo "${SP_IOS_DIR:-}" "${SIBLINGS}/steam-pigeon-ios" "/c/Users/ftsch/StudioProjects/steam-pigeon-ios" "${HOME}/Developer/steam-pigeon-ios")"
 )
 
 problems=0
@@ -71,7 +81,11 @@ for entry in "${REPOS[@]}"; do
   dir="${entry#*|}"
 
   if [ -z "$dir" ]; then
-    printf '%-9s  -- not present on this machine (skipped)\n' "$name"
+    # Name the escape hatch. A skipped repo prints in the same column a clean
+    # one does, so the reader has to be told how to tell the two apart.
+    envvar="SP_$(printf '%s' "$name" | tr '[:lower:]' '[:upper:]')_DIR"
+    printf '%-9s  -- no checkout found (skipped; set %s if there is one)\n' \
+      "$name" "$envvar"
     continue
   fi
 
