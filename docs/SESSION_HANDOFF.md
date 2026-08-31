@@ -37,9 +37,17 @@ screen was reorganised to eliminate.
 not on `run.running`. Either let the tap through and be honest that it ends the scan, or refuse
 mid-run with the reason on screen. Leaning to the first.
 
-**Diagnosis is from code reading only** — the mechanism accounts for every symptom, but the
-state split has not been observed directly. The receiver console's `[search] restored channel`
-trace against the settings value would confirm it in one run.
+✅ **FIXED 2026-08-30** — receiver `988b409`, app `4dc7c32`, ADR-0029 addendum. Both scans now
+**end** on a receiver channel change and then apply it, which is decision 7's rule reaching the
+route it had missed. Connect stays live during a run (a hit is actionable the moment it appears,
+and waiting out ~90 s to act on what is already on screen is worse than losing the sweep), with
+a note saying the scan stops — a scan stopping is otherwise indistinguishable from one failing.
+
+⚠️ **The split itself has still only been reasoned from code, and the diagnostic that would show
+it went in FIRST, deliberately** (receiver `1b4524f`, committed before the fix). The scan restore
+now prints the home channel **and** the persisted setting together; a mismatch between them is
+the bug, and printing either alone could not show it. **Flash `1b4524f` to see the split, or
+`988b409` to see the two numbers agree.** Receiver `text 116572` diagnostic, `116612` fixed.
 
 ## 2026-08-30 (coverage) — the channel-move sequence is testable now — APP + iOS BRIEF, NOT RE-RUN ON HARDWARE
 

@@ -376,6 +376,12 @@ The queued-command abort could not, and neither could the message it printed.
 run is what caught the insufficient first fix — the procedure earning its place, since
 nothing about this was reachable from a unit test.
 
+**The operator's command ends a scan — and a receiver channel change is one (2026-08-30, [#40](https://github.com/fschroer/steam-pigeon-locator/issues/40)).** Decision 7's abort note records `ServicePendingTx` ending a sweep for a queued operator command rather than letting it wait. That rule had a hole exactly the width of the route it did not cover: a `ReceiverCfgChgRequest` is receiver-local, handled in the BLE parse path rather than queued in `pending_tx_`, so it was applied **underneath** a running scan — overwritten by the next dwell, then undone by the scan's home-restore, while `SaveReceiverSettings` kept the new value.
+
+**Radio and settings on different channels, and nothing downstream could tell.** Both `ReceiverInfo` and the `receiver_lora_channel` stamped on every relayed frame are read from the settings, never the live radio, so the app was confidently wrong about where its own receiver pointed. Seven unrelated-looking symptoms came out of that one split, including two that read as separate bugs: messages still arriving (from the *original* locator, on the channel the radio was really on) and a conflicting-traffic banner that was firing **correctly** while everything around it was wrong.
+
+Both scans now end on a receiver channel change, then apply it. Deferring was rejected for the reason decision 7 gives: a whole-band run is up to ~90 s, and a tap that silently does nothing for that long is the failure this screen was reorganised to eliminate. The restore trace prints the home channel **and** the persisted setting together, because a mismatch between them is the bug and printing either alone could not show it.
+
 ## Alternatives considered
 
 - **Extend the survey to report identity and call it done.** Cheapest, and it is half of what shipped here (decision 5) — but it cannot find a locator, because the survey shortlists quiet channels. It answers "who is on the channels I was already considering".
