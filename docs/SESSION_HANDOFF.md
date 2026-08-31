@@ -43,11 +43,20 @@ route it had missed. Connect stays live during a run (a hit is actionable the mo
 and waiting out ~90 s to act on what is already on screen is worse than losing the sweep), with
 a note saying the scan stops — a scan stopping is otherwise indistinguishable from one failing.
 
-⚠️ **The split itself has still only been reasoned from code, and the diagnostic that would show
-it went in FIRST, deliberately** (receiver `1b4524f`, committed before the fix). The scan restore
-now prints the home channel **and** the persisted setting together; a mismatch between them is
-the bug, and printing either alone could not show it. **Flash `1b4524f` to see the split, or
-`988b409` to see the two numbers agree.** Receiver `text 116572` diagnostic, `116612` fixed.
+✅ **CONFIRMED ON HARDWARE 2026-08-30** (fschroer). Five of #40's six acceptance criteria pass;
+**the sixth — the mid-survey variant — was not separately run**, and is left open on the issue
+rather than assumed. It shares the guard but restores its own home channel through a different
+function, so it is untested, not covered.
+
+**The diagnostic went in FIRST, deliberately** (receiver `1b4524f`, before the fix), so the split
+could be observed rather than only inferred. The scan restore now prints the home channel **and**
+the persisted setting together — a mismatch between them is the bug, and printing either alone
+could not show it, which is why this one had to be reasoned out of the code before it could be
+seen at all. Receiver `text 116572` diagnostic, `116612` fixed.
+
+**Worth keeping as a method note:** this bug produced seven unrelated-looking symptoms, two of
+which read as separate faults, and none of them pointed at the cause. What found it was reading
+the restore path against the config path and asking which one wrote last.
 
 ## 2026-08-30 (coverage) — the channel-move sequence is testable now — APP + iOS BRIEF, NOT RE-RUN ON HARDWARE
 
