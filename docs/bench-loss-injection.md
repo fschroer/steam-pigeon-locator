@@ -113,6 +113,13 @@ of `kParityGroupSize`.
    6. the receiver returns to the old channel and the link resumes;
    7. the retry goes out and is **not** dropped (`&` is one-shot);
    8. banner *"Now on channel N"*, both devices on N. **Criterion 2 passes.**
+
+   **If the retry's own forward is lost** — a real single-frame loss, not the
+   injection — the app probes a second time rather than giving up, and on a repeat
+   `LocatorStayed` it puts the receiver back on the old channel so the run ends
+   together instead of split. Before that was added, this was the ~1-in-8 residual
+   failure on an otherwise passing criterion 2. There is no second retry: the extra
+   probe only decides where the receiver should be left.
 6. The two ways it can end instead. **Both are correct, and they are different tests
    — the previous version of this procedure offered them as interchangeable:**
    - **Arm `&` again before the retry lands.** The retry is dropped too, and the app
