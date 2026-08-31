@@ -22,7 +22,7 @@
 | Channels | 0–63 → 902.3–914.9 MHz | `max_lora_channel` ([`UserInteraction.cpp:20`](../../Rocket/Src/UserInteraction.cpp)) |
 | Bandwidth / SF / CR | 125 kHz / SF7 / 4-5 | [`subghz_phy_app.c:63,70,77`](../../SubGHz_Phy/App/subghz_phy_app.c) |
 | TX power | 22 dBm (158 mW) | [`subghz_phy_app.c:56`](../../SubGHz_Phy/App/subghz_phy_app.c) |
-| Cadence | ~1 Hz broadcast, ~138.5 ms airtime | [ADR-0006](0006-locator-connect-password.md) |
+| Cadence | ~1 Hz broadcast. Airtime depends on which frame: **~200 ms disarmed** (`PreLaunchData`, 118 B), ~138.5 ms armed (`TelemetryData`, 77 B) | [ADR-0006](0006-locator-connect-password.md), and *The occupancy margin was computed from the wrong frame* below |
 | Default channel | **0** — `default_settings_ { }` value-initialises it | [`Archive.hpp:115`](../../Rocket/Archive/Inc/Archive.hpp) |
 
 ### The plan is the LoRaWAN US915 uplink plan, verbatim
@@ -237,6 +237,14 @@ preference is conditional rather than settled.
 
 ### The current cadence is already compatible, which is the surprising part
 
+> ⚠️ **The margin below is overstated and the "once per window" line is no longer
+> an observation — corrected 2026-08-30, see *The occupancy margin was computed
+> from the wrong frame* in Consequences.** 138.5 ms is the **armed** frame; a
+> disarmed locator is on air ~200 ms, which halves the margin to 2.0× and makes a
+> second visit to one frequency land on the limit exactly. The section's actual
+> claim — that the broadcast schedule does not have to change in order to hop —
+> still holds.
+
 At 1 Hz with ~138.5 ms airtime, a 20 s window contains 20 transmissions. Spread
 over ≥50 channels, no single frequency is visited more than once per window, so
 occupancy per frequency is ≤138.5 ms against the 0.4 s limit — a margin of about
@@ -360,6 +368,60 @@ conditions where a locator matters most.
 **Deliberately not decided here.** Which route survives measurement; whether the
 receiver gains GPS; the hop sequence generation itself, if 1b is taken.
 Featherweight does not publish theirs and it was not possible to determine.
+
+**The occupancy margin was computed from the wrong frame, and the conclusion
+survives with half of it (2026-08-30).** Found while correcting the same error in
+the two apps' code comments. [ADR-0019](0019-channel-interference-detection.md)
+and [ADR-0029](0029-locator-search-candidate-channels.md) were corrected on
+2026-08-30; this ADR was not reached, and it is the one where the number does
+regulatory work.
+
+**~138.5 ms is `TelemetryData` — 77 bytes, the frame an *armed* locator sends.** A
+**disarmed** locator sends `PreLaunchData`, 118 bytes, which at SF7 / 125 kHz /
+CR 4/5 is **199.9 ms**. The same time-on-air model reproduces ADR-0006's own
+138.5 ms for the 77-byte frame exactly, which is what makes the 200 ms figure
+trustworthy rather than another assumption.
+
+**And the disarmed frame is the one that binds.** A rocket sits on the pad
+disarmed for far longer than it flies armed, so the frame a per-frequency
+occupancy rule meets most of the time is the 200 ms one. This ADR computed with
+the flight frame and applied the result to the whole schedule.
+
+**The conclusion holds; the margin does not.** One visit per frequency per 20 s
+window is 200 ms against the 0.4 s limit — a margin of **2.0×**, not the 2.9×
+stated above. Route 1b remains viable and the broadcast schedule still does not
+have to change in order to hop, which is what that section was actually arguing.
+
+**What changes is the standing of an assumption.** *"Spread over ≥50 channels, no
+single frequency is visited more than once per window"* was written as an
+observation about the arithmetic. Two visits at 138.5 ms is 277 ms, comfortably
+inside 0.4 s. **Two visits at 199.9 ms is 399.9 ms against a 400 ms limit.** So
+the hop sequence must **guarantee** at most one visit to any frequency per 20 s
+window rather than merely tend to — and the sequence generation is listed above
+as *deliberately not decided here*, so this is now a constraint it has to be
+designed against rather than a property it will probably have. A sequence that
+revisits is not marginally worse than one that does not; it sits on the limit with
+0.1 ms in hand, before clock error, cadence jitter, or any retransmission.
+
+**Per-locator duty cycle is 20%, not 13.9%.** That figure is ADR-0006's and is
+also a `TelemetryData` number. It is not itself a 15.247 limit — the rule
+constrains per-frequency occupancy, not aggregate duty cycle — but it is the
+number reached for when reasoning about how much air one locator takes, including
+in this ADR's own displacement argument, where understating it by a third
+understates how badly two locators on one channel interfere.
+
+**None of this touches route 1a.** The digital-modulation route has no dwell limit
+at all, and BW500 would cut symbol time fourfold regardless. The correction bites
+only on 1b — which means it nudges the unresolved 1a/1b trade, by adding a design
+constraint to the expensive route and none to the cheap one. Not enough to decide
+it; the choice still turns on flight-line density.
+
+**Still a reading of the rule text, not a compliance opinion**, exactly as the
+Context says of everything here. The averaging basis in *"average time of
+occupancy"* is precisely the kind of thing a test lab has to settle, and if it
+averages over anything other than a single 20 s window these numbers move again.
+Airtime is computed from the standard LoRa model; **nothing here was measured on
+hardware**, and the 0.1 ms result above is a number that deserves to be.
 
 **Revisit if:** the 6 dB bandwidth measurement rules out route 1a; the expected
 flight-line density changes, which moves the 1a/1b preference directly; a

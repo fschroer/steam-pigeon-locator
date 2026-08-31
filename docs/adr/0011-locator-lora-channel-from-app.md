@@ -63,6 +63,89 @@ The name and last-heard channel of a suppressed frame are still recorded. They a
 
 Fixed on Android 2026-08-30 as `LocatorConnection.isFromChannelBeingLeft`, pure and pinned in `LocatorConnectionTest`, and **confirmed on hardware the same day (fschroer)**: connecting to a different locator from a search result now raises the password prompt consistently, across the four-locator rig that produced the report. The unstamped-frame branch — a receiver move while the connected locator is **armed** — is unexercised. **iOS has the same defect** — `admit`'s `.accepted` branch clears `awaitingChannelRecognition` and takes the connection with no test on which channel the frame was relayed from — and owes the port.
 
+**Recovery fires on the absence of confirmation, not on evidence of failure — so a slow success is repaired into a real split (2026-08-30).** Raised as a question rather than a bug report — *what happens if the locator moves and the acknowledgement is lost?* — and the answer is worse than the question assumed. Invariant 4 is written for one failure, the locator missing the command while the receiver moves anyway. It runs on a condition that does not distinguish that failure from its opposite.
+
+**There is no acknowledgement to lose, which is the root of it.** Invariant 3 confirms by inference: the app rebuilds a `LocatorConfig` from the next relayed `PreLaunchData` and requires whole-object equality with what it sent, within 5 s (`waitForLocatorConfig`, 50 × 100 ms). What can be lost is not an ack but a *broadcast*, and the app cannot tell a lost broadcast from a command that never arrived.
+
+The two states it cannot separate:
+
+- **The locator missed the command.** It stayed put; the receiver followed anyway, because `ServicePendingTx` arms the deferred switch off its own `Send()` and applies it on TxDone plus `kPostTxRxGuardMs`, with no dependence on hearing the locator. The link is split. This is the case invariant 4 was written for, and reverting the receiver is right.
+- **Everything moved and the confirmation was merely late.** The locator saved to flash and retuned; the receiver followed; both are on the new channel and correctly aligned. Reverting the receiver **creates** the split that the first case merely reports — and creates it in the direction that strands the rocket, since the locator's move is persisted and a power cycle will not bring it back.
+
+**The clock is spent on the channel being left.** The 5 s budget starts at the BLE write, but the forward cannot leave the receiver until it sees a `PreLaunchData` and is 50–700 ms past it (the invariant-2 window). On a channel dropping broadcasts — the channel that motivated the move — every missed one costs a second of the budget before the command is even transmitted, and only then does the locator save, retune, and try to answer on the clean channel. **The noise that justifies the move is what starves its confirmation**, which makes this the ordinary case on a bad channel rather than an unlucky one.
+
+**And the retry cannot land, by either route.** `recoverLocatorChannel` pulls the receiver back with a `ReceiverCfgChgRequest` (applied locally and immediately) and then waits for the link to resume, testing `_remoteReceiverConfig.channel == oldChannel && _remoteLocatorConfig.loraChannel == oldChannel`:
+
+- If no stamped frame got through — the premise of the whole path — both readings are *still* the old channel, because the frame whose absence triggered recovery is the only thing that would have updated either. The test passes on the first 100 ms poll having verified nothing, and the retried `LocatorCfgChgRequest` sits in the receiver's `pending_tx_` waiting for a forwarding window that the now-empty old channel will never open.
+- If a stamped frame did arrive and only the config comparison failed, the receiver reading is the *new* channel — receiver metadata is updated outside the recognized-locator gate — the test never passes, and the retry is not attempted at all.
+
+Both end at *"Update not acknowledged"*, naming the new channel, with the receiver parked on the old one and the locator alone on the new one.
+
+> ⚠️ **Corrected the same day.** This paragraph originally read *"The discriminator already exists and is not being sent"*, and proposed that invariant 4 test **"the receiver moved and the locator did not"**. That test is empty. The receiver follows whether or not the locator heard the command — that is invariant 2 — so "the receiver moved" is true in both failures and separates nothing. The error mattered because it pointed at a whole class of fix that cannot work.
+
+**There is no discriminator, and that is the finding.** The only evidence that the locator moved is hearing it on the new channel, and hearing it on the new channel *is* the confirmation. **"Moved but silent" and "never moved" are the same observation.** No test taken at the timeout can separate them, so the fix cannot be a better test — it has to be a better response to uncertainty. That is the [amendment](#amendment-2026-08-30--revert-on-evidence-not-on-silence) below.
+
+**`ReceiverInfo` is still worth sending, as a transmit receipt rather than a discriminator.** MsgType 16 carries the receiver's own channel over BLE with no locator involved, built from persisted settings on the main loop, so it is immune to the noisy channel entirely. The receiver already volunteers one unprompted after a `ReceiverCfgChgRequest` and sends nothing when it moves under invariant 2 — **it announces the move it is told to make and stays silent about the one it makes on its own.** Emitting it from the deferred-apply block buys two things the app currently lacks: proof that **the forward actually transmitted** (the switch is armed after `Send()` and applied after TxDone, so the message cannot exist otherwise), and a **truthful reading of the app's own receiver channel**, which is what makes the relink check test evidence instead of the absence of an update. The first is what lets the confirm window start when the command goes on air rather than at the BLE write, which is the whole of the starvation problem above. No wire-format change; the message, the app's parser, and the flow it writes into all exist.
+
+**Neither firmware is wrong here.** The locator applied and persisted the channel it was told to; the receiver followed after its forward completed, exactly as invariant 2 requires. The defect is entirely in what invariant 4 infers from silence, and it is shared: Android `RocketViewModel.recoverLocatorChannel`, iOS `LinkViewModel.recoverLocatorChannel`.
+
+**The way out is ADR-0029's search, and one tap removes it.** `searchCandidates` puts the staged-but-unconfirmed channel in the list, so *Find a locator* checks it first and a hit applies a receiver-only move — seconds, not a band sweep. But `_pendingChannelMove` is cleared by the **Dismiss** button on the very banner reporting the failure, so a user who clears the error message drops the one channel worth searching and is left with the whole band.
+
+**Nothing here is fixed and none of it is bench-measured** — it is read out of the three codebases, and it is the same path issue #20 already holds open as unvalidated. What #20 asks is whether recovery works when it fires; this adds the prior question of whether it should have fired at all, and the measurement to take with it: force the confirmation loss on a healthy move and record where both devices end up.
+
+### Amendment (2026-08-30) — revert on evidence, not on silence
+
+> ✅ **ACCEPTED and IMPLEMENTED 2026-08-30 (fschroer). NOT bench-measured.** It changes what invariant 4 means. Firmware and Android have landed; **iOS owes the port**. The measurement that would falsify it is still outstanding and is the first added criterion on [#20](https://github.com/fschroer/steam-pigeon-locator/issues/20).
+
+**Invariant 4 treated silence as a diagnosis.** It fired on "no `PreLaunchData` carrying the new channel within the poll window" and responded by reverting the receiver — a response that is correct in one of the two states that produce that silence and destructive in the other. Since no test at the timeout can tell those states apart, the trigger had to stop being a diagnosis and start being a question.
+
+**The principle: when you cannot tell which of two states you are in, do not act as though you can.** Reverting is the only available action that can **manufacture** a split link, and it does so in the direction that strands the rocket, because the locator's move is flash-persistent and the channel it is stranded on is the one the receiver has just been pulled off. So the timeout stops being the moment of decision and becomes the moment the app goes and looks. **Both failures stay automatic** — what changes is that the repair is now conditioned on evidence rather than fired on silence.
+
+**Invariant 4 becomes:**
+
+> **4. Recovery is app-driven, and reverts only on evidence.** If the locator does not confirm the new channel within the poll window, the app does **not** assume the locator stayed behind. It asks: one `LocatorSearchRequest` ([ADR-0029](0029-locator-search-candidate-channels.md)) carrying exactly two channels — the new one first, then the old — as a **census** (`target_locator_id = 0`), so **both** dwells always run. ~2.8 s, fixed.
+>
+> - **Best hit on the new channel** — the move succeeded and the confirmation was late. Report success.
+> - **Best hit on the old channel** — the locator genuinely missed the command. *Now* revert the receiver and retry once, as before, justified by a measurement rather than an inference.
+> - **No hit on either** — report "not acknowledged" and **stay on the new channel**, which is where the search's own home-restore leaves it. The user's remedy is *Find a locator*, one tap, already carrying the staged-but-unconfirmed channel in its candidates.
+>
+> Recovery is still skipped when the initial BLE send failed, and the probe inherits the search's own refusals (armed, in flight).
+
+**A census, not a targeted run, and the reason is the near-field artifact.** The obvious form is to set `target_locator_id` and let the receiver stop on the first frame carrying it — usually one dwell instead of two. That would rest the whole decision on a **single** hit, and [ADR-0029](0029-locator-search-candidate-channels.md) established on hardware (2026-08-28) that a locator a few feet from the receiver decodes on channels it is nowhere near, **and that the artifact reads as strong** — so RSSI cannot separate it. The mitigation that ADR landed on is comparative: rank by `rssi + snr` and distrust all but the best. **That comparison needs both dwells.** Stopping early throws away the only instrument there is.
+
+It bites harder here than in an ordinary search, because this probe runs when the user is *configuring* a locator — which is to say with the locator in their hands, at the range that produces the artifact. A false hit on the new channel would report success and leave the receiver where the locator is not; a false hit on the old channel would fire the revert this amendment exists to prevent. The fixed ~2.8 s is the price of a decision the artifact cannot silently flip.
+
+**Two things fall out of the census form for free.** With no target the run reports *every* hit on the listed channels, so **a different locator sitting on the new channel** is surfaced rather than discarded — the "you just moved onto occupied ground" case, which a targeted run would have thrown away. And `FinishLocatorSearch` restores `search_home_channel_`, captured at `BeginLocatorSearch` from persisted receiver settings, which at that moment is the **new** channel because the receiver has already followed. So "no hit → stay on the new channel" needed no code at all; it is what the search already does when it ends.
+
+**The receipt re-bases the window and deliberately does not short-circuit anything.** It is tempting to read its *absence* as "the forward never transmitted" and skip the probe — case 0, where no forwarding window ever opened, nothing moved, and there is no split to repair. That reading is refused, because absence is ambiguous: **a receiver predating this change never sends one**, and treating its silence as "nothing moved" would leave a genuine split unrepaired on exactly the firmware pairing most likely to produce one. The same trap ADR-0016's session hit from the other side, where a receiver-info poll was rejected by older firmware and failed invisibly.
+
+Case 0 needs no special handling in any case: the probe resolves it correctly by hearing the locator on the old channel, and the resulting "revert" points the receiver at the channel it never left, followed by a retry — which is precisely the right action for a command that never went out.
+
+**The confirm window is re-based first, and that is a prerequisite rather than a companion.** The receiver emits `ReceiverInfo` from its deferred-apply block, and the app starts counting from that receipt instead of from the BLE write. Without it the probe fires on timeouts that were never failures at all — the command still sitting in `pending_tx_` waiting for a forwarding window — and the system spends 2.8 s of deafness answering a question that had not yet been asked. With it, the probe runs only when the command is known to have gone on air.
+
+**What this gives up, narrowly — an earlier draft of this paragraph oversold it.** It said case 1 "loses its automatic repair", which is wrong, and would have argued against the amendment for a cost it does not have. **Both failures remain fully automatic**; the user's only action in either is the original tap on a channel. Three things actually change:
+
+- **~2.8 s of added latency** before the case-1 repair fires, spent establishing that there is something to repair.
+- **The repair stops firing unconditionally.** That is the point rather than a cost — unconditional firing is precisely what damages the case where everything worked.
+- **One genuine loss, and it is narrow:** a locator on the old channel too quiet for a 1400 ms dwell to catch — broadcasting sparser than 1 Hz, or on a link marginal enough to drop the burst. Today's blind revert might recover that by luck; now it is reported as unacknowledged with the receiver left on the new channel. ADR-0029 says it plainly — **zero frames proves nothing** — and this is the sub-case, the only one, that moves from *auto-healed by luck* to *one tap*.
+
+The trade is worth making because the blind revert has **never been validated** — that is exactly what [#20](https://github.com/fschroer/steam-pigeon-locator/issues/20) has been open for — while the search it now defers to has been, and because the failure it prevents (a rocket alone on a channel the receiver was deliberately pointed away from) is worse than the one it introduces (a tap, in a sub-case where the locator was barely audible anyway).
+
+**Acting on an unauthenticated id, and why the exposure is not new.** ADR-0029 decision 5 labels search identity as *claimed*, and its consequences warn that a feature which wants to **act** on "this is my locator" must authenticate. This probe acts on it. But decision 6 already lets a search hit steer the receiver on that same cleartext id, with [ADR-0006](0006-locator-connect-password.md) recognition doing the authenticating once the receiver is tuned — so the exposure is the one that shipped, and what is new is that it happens automatically rather than on a tap. The worst a spoof achieves is pointing the receiver at a channel the real locator is not on, which is not a safety action and which the existing search undoes. **ADR-0029 needs a cross-reference either way**, so that the "nothing is gated on it" claim is not left standing unqualified.
+
+**Three companion fixes, none of which need this decision:**
+
+- **`_pendingChannelMove` must survive the failure banner's Dismiss.** Dismissing an error message should not discard the one channel worth searching. Let it expire with the screen, or when a locator is admitted.
+- **`pending_tx_` needs a staleness timeout in the receiver**, so a command that never found a forwarding window cannot fire minutes later, out of the flow that queued it.
+- **The relink check must test evidence, not the absence of an update**, pinned by a test that fails on stale readings — it currently passes on the first 100 ms poll having verified nothing.
+
+**Sequencing.** The `ReceiverInfo` receipt and the three companion fixes first; they are unambiguous, need no decision, and the receipt alone likely removes most real occurrences by ending the starvation. The probe second, once this amendment is accepted. Android first per the standing rule, then iOS — both apps carry the defect identically (`RocketViewModel.recoverLocatorChannel`, `LinkViewModel.recoverLocatorChannel`).
+
+**What would falsify this.** If the bench shows the confirm window, once re-based on the transmit receipt, essentially never expires on a successful move, then case 2 is rare enough that the probe is not worth 2.8 s of deafness and the existing revert can stand. **That measurement should be taken before the probe is built** — it is the first of the criteria added to #20.
+
+**Revisit if:** an explicit locator↔receiver channel handshake is adopted (this whole path exists because confirmation is inferred), or the search's dwell arithmetic changes materially enough to move the ~2.8 s probe cost.
+
+
 ## Alternatives considered
 
 - **App sends both changes (locator, then receiver) with a fixed inter-message delay.** Fragile: correctness depends on the receiver's forward firing within the delay; a missed forwarding window flips the order and the receiver moves before the locator hears the command.

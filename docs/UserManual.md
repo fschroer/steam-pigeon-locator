@@ -390,8 +390,40 @@ A few things to know about the result:
 - **It scans where the receiver is standing.** A channel that's quiet at the flight line may be busier a mile up, where the rocket can hear far more of the world. Use it to pick a good starting channel, not as a forecast.
 - **If it says every channel is loud, believe it.** That almost always means a transmitter is within a few feet — usually a spare locator someone left switched on. Changing channel won't help; moving the transmitter will.
 - **It won't run while the locator is armed.** Scanning stops the receiver hearing your rocket for about a second, and you can't change channel while armed anyway. Disarm first.
+- **If the move doesn't confirm, the app checks before it does anything.** See *When a channel move isn't confirmed*, next.
 
 💡 The natural time to do this is during bench prep or when you arrive at the field — before you power up on the pad.
+
+### When a channel move isn't confirmed
+
+Moving a locator is the one setting the app cannot confirm by asking. There is no *"got it"*
+reply from the rocket — the app knows the move worked because your locator's next status
+broadcast arrives on the new channel. On a noisy channel, which is usually *why* you are
+moving, those broadcasts are the very thing going missing. So a move that actually worked can
+sit unconfirmed for a few seconds.
+
+**If nothing arrives, the app goes and looks rather than guessing.** You will see it start a
+short search on its own — the new channel, then the old one, about three seconds. **That is
+not a fault and you did not press anything.** It is the app finding out which channel your
+rocket is really on before it does anything about it. Then one of three things:
+
+- **Heard on the new channel** — the move worked and the confirmation was just late. The app
+  says so, and nothing else happens.
+- **Heard on the old channel** — your rocket never got the message. The app brings the
+  receiver back to the old channel and tries the move once more.
+- **Heard on neither** — the app reports *"not acknowledged"* and leaves the receiver on the
+  new channel.
+
+⚠️ **If it says not acknowledged, don't assume your rocket stayed put.** It may well have
+moved and simply be too quiet to hear — switched off, out of range, or a weak link at that
+moment. The app remembers the channel it was trying to reach, so **Find a locator** looks
+there first, and dismissing the message does not throw that away.
+
+💡 **Why the receiver is left on the new channel instead of being put back.** Because putting
+it back is the one action that can strand your rocket. If the move *did* work, dragging the
+receiver to the old channel points it away from where the rocket now is — and the rocket keeps
+its new channel even through a power cycle. Leaving the receiver where it is costs you nothing
+that a search will not fix.
 
 ### Finding a locator when you've lost its channel
 
