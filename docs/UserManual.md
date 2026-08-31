@@ -1104,6 +1104,8 @@ With **Enable Speech** on (§2.8), the app announces:
 
 🔆 **The screen stays on** for as long as the app is in the foreground, so a flight spent watching the sky doesn't end with a blanked phone. It also means the app will not let the display sleep — back out of it, or lock the phone, when you're done.
 
+📝 **Every callout above is written down with the time it was spoken**, in the app flight log (§10.7), alongside the signal readings from the same moment. Nothing needs switching on. If speech is off, nothing is spoken and nothing is logged — the log records what you actually heard.
+
 ## 8.3 The live screens
 
 **Portrait — the flight map.** Your position, the rocket's position, and its track. Distance and bearing to the rocket. The flight state and altitude readouts. The status pill at the top shows the receiver and locator status.
@@ -1331,7 +1333,7 @@ And per channel:
 
 ## 10.3 Export flight path
 
-> ⚠️ **WORK IN PROGRESS.** Flight-path export is not currently reachable from the app's menu. Use the USB-C CSV export (§10.4) for now.
+> ⚠️ **WORK IN PROGRESS.** Flight-path export is not currently reachable from the app's menu. Use the USB-C CSV export (§10.4) for the locator's own record, or the app flight log (§10.7) for what the phone received and announced — the two hold different things.
 
 ## 10.4 Full CSV export over USB-C
 
@@ -1383,10 +1385,65 @@ They are exported in that order.
 
 ## 10.6 What the timestamps mean
 
+**In the locator's record** (§10.1, §10.4):
+
 - **`time_ms = 0` is thrust onset.** The record starts at launch.
 - Time is measured on a **GPS-disciplined clock**, so it is real elapsed time, not an assumed sample rate. Durations you measure from the data are trustworthy.
 - Data is recorded at **20 samples per second**.
 - A record is capped at **8 minutes** and includes about **2 seconds of settled data after landing**.
+
+**In the app flight log** (§10.7), which is a different clock and a weaker one:
+
+- Rows are stamped **when the message reached the phone**, using the phone's own clock — not the locator's. Bluetooth delivery adds a little jitter on top.
+- `elapsed_s` counts from launch detection, so the pre-launch rows are negative.
+- Good enough for *"the app said `telemetry lost` nine seconds before it said `landing`"*, which is what it is for. **Not** a substitute for `time_ms` when you want real flight timing — use the locator's record for that.
+
+## 10.7 App flight logs
+
+This is the other half of your data, and it answers different questions from the locator's record.
+
+The locator archives what the **rocket** did. The app flight log records what the **phone** saw: the same one-per-second messages, plus the signal strength, signal-to-noise ratio and channel noise the receiver measured for each one, plus what the app decided and announced about them. **None of that is stored anywhere else** — the RSSI and SNR are measured on your side of the radio, so the locator never knows them, and the spoken callouts left no trace at all once the words had gone past.
+
+Open the menu → **App Flight Logs**. It is available whether or not anything is connected — the logs are files on the phone, which is the state you are in when you sit down to read them.
+
+**Recording is automatic.** There is nothing to switch on and nothing to remember at the pad:
+
+- A log starts when the app sees a rocket leave the pad, and includes the **two seconds before** launch detection — so the last on-pad signal readings are in the file.
+- Nothing is written unless a launch happens. A session spent connecting, arming, changing channels and disarming again leaves **no file at all**, so the list never fills with sessions that never flew.
+- A log ends when the locator is **disarmed**, when you change the receiver's channel or connect to a **different locator**, when the app is closed, or when the **next launch** starts a new one.
+
+⚡ **Landing does not end the log**, on purpose. The walk-in to find the rocket is when signal strength matters most and is exactly when you cannot watch it, so the log keeps running through recovery. **Disarming the locator is what closes it** — which is the last thing you do to the rocket anyway.
+
+⚡ **A flight the app was not already receiving is not logged.** The app has to have been hearing the locator before the launch to recognize one; starting the app with the rocket already in the air gives you telemetry on screen but no log for that flight.
+
+**Each log is named for the locator, the date and the time** — `Kestrel_2026-08-31_141955.csv` — so the list identifies the airframe and the flight months later.
+
+**What you can do with one:**
+
+| Action | What happens |
+|---|---|
+| **View** | Reads the log on the phone, as the raw CSV. Long logs are truncated on screen; the file itself is complete, and the screen says so when it is showing only part of one. |
+| **Share** | Hands the whole file to Android's share sheet — Bluetooth to a paired laptop, Quick Share, Drive, or mail. Nothing needs installing on the computer. Choosing *Save a copy* instead writes it into Downloads, where a USB-C cable finds it. |
+| **Delete** | Removes it from the phone. Anything you already shared or saved elsewhere is untouched. |
+
+A log still being written says so on its row, and can be shared while it is open — you just get the rows recorded so far.
+
+💡 **Logs are not pruned automatically.** Nothing deletes a flight you have not looked at, which also means they accumulate until you delete them. Each one is small — a few tens of kB for a typical flight and recovery.
+
+**The columns** are one wide schema shared by every row. Telemetry rows fill the flight columns and leave `event` and `detail` blank; app events do the reverse. **A blank is not a zero** — it means the message on that row does not carry that field, and 0 m AGL is a real reading.
+
+| Column | Meaning |
+|---|---|
+| `timestamp`, `elapsed_s` | When, on the phone's clock, and seconds from launch detection (negative before it) — see §10.6. |
+| `source` | `prelaunch`, `telemetry`, `receiver_info`, or `app` for something the app did. |
+| `event`, `detail` | Blank on telemetry rows. Otherwise the app event and its text — including the exact words of every spoken callout. |
+| `rssi_dbm`, `snr_db`, `noise_floor_dbm`, `bad_frames` | **The receiver's measurement of that message.** The reason this log exists. |
+| `link_quality` | The app's interference verdict for that moment (§2.5). |
+| `flight_state`, `lat`, `lon`, `agl_m`, velocity, attitude, `satellites`, `hacc_m` | What the message carried. |
+| `armed`, deployment masks, `drogue_detected`, `main_detected`, `pad_alert` | Arm state, which channels were armed and which had fired, and whether deployment was physically detected. |
+| battery, `receiver_channel`, `locator_id` | Locator and receiver battery, the channel it arrived on, and which locator sent it. |
+
+💡 **`receiver_info` rows are the useful ones during a dropout.** They arrive when nothing else does — the receiver measuring the channel with the locator silent. A gap in the telemetry with these still ticking through it tells you whether the channel was quiet or whether something else was on it, which is the difference between a range problem and an interference one (§2.5).
 
 ---
 
@@ -1395,6 +1452,8 @@ They are exported in that order.
 | Symptom | Look at |
 |---|---|
 | Locator won't power on / no power-on tone | Battery flat (§1.6). Wrong magnet pole or wrong spot (§1.2). |
+| "I couldn't follow the signal readings / callouts during the flight" | You aren't meant to — they're recorded for you. Menu → **App Flight Logs** (§10.7). |
+| App Flight Logs is empty after a flight | A log is only created for a launch the app was already receiving telemetry for, and only a launch creates one (§10.7). A session that never flew leaves nothing by design. |
 | App never finds the receiver | Receiver powered? Bluetooth on? Phone permissions granted? (§3.8) |
 | Status panel says "Searching…" or "Scanning…" | A scan is running and the receiver is parked on other channels, so your locator cannot be heard until it finishes. Arm and Disarm still work throughout — pressing either stops the scan so the command gets through (§2.5). |
 | Status panel says "No Locator" but the receiver is connected | Normal when the locator is off (§3.8). Otherwise: locator off, out of range, or on a different channel — **Find a locator** answers the channel question directly (§2.5). If an interference note appears under it, the channel is occupied and that may be why you are hearing nothing. |
