@@ -131,45 +131,55 @@ of `kParityGroupSize`.
      **Criterion 5** — added 2026-08-30, and the case with the least margin, because a
      locator that never moved is now on a channel the receiver is not listening to.
      Recover with *Find a locator*, which carries the attempted channel.
-7. **Criterion 4 — a BLE-send failure must not cause a spurious revert.**
-   ⚠️ **NOT REACHABLE FROM THE UI. Do not try to stage it by disconnecting** — two
-   procedures were written for this and both were wrong (fschroer found the second on
-   the bench, 2026-08-30).
+7. **Criterion 4 — RETIRED 2026-08-30, not failed.** It asked for a BLE-send failure
+   that does not cause a spurious revert, and that turns out not to be reachable from
+   the UI: **the condition causing the send failure is the condition removing the
+   control.** `sendMessage` refuses a locator-directed command when
+   `connectedLocatorId` is null ([ADR-0020](adr/0020-targeted-locator-commands.md)),
+   and the Locator channel section is gated on `locatorConnected`, which is *defined*
+   as `connectedLocatorId != null`; a BLE drop nulls it via
+   `releaseLocatorOnLinkLoss()`, so both go in the same instant. Two procedures were
+   written for this before that was understood — one powering the receiver off (which
+   leaves the GATT link up until its supervision timeout, so the write is queued and
+   the command is recorded as **Sent**, a different case) and one claiming a ~5 s
+   window that does not exist (it confused `locatorConnected` with `hearingLocator`,
+   the 5 s broadcast rule that gates *Find a clean channel*).
 
-   **The condition that causes the send failure is the same condition that removes the
-   control.** `sendMessage` refuses a locator-directed command when `connectedLocatorId`
-   is null ([ADR-0020](adr/0020-targeted-locator-commands.md)), and the Locator channel
-   section is gated on `locatorConnected`, which is *defined* as
-   `connectedLocatorId != null`. A BLE drop calls `releaseLocatorOnLinkLoss()`, which
-   nulls it — so the section and the send die in the same instant. There is no window,
-   and the earlier claim of a ~5 s one confused `locatorConnected` with
-   **`hearingLocator`**, a different local in the same composable that carries the 5 s
-   broadcast rule and gates *Find a clean channel*, not this.
+   What that leaves is the finding worth keeping: **the gating closed the exposure
+   structurally.** A channel move cannot be started while the app has no connected
+   locator, so the `SendFailure` branch is defensive rather than load-bearing, and the
+   only remaining trigger is a transient GATT write rejection that cannot be staged by
+   hand. Retired rather than carried as permanently blocked.
 
-   Powering the **receiver** off is wrong for a separate reason: an abrupt cut sends no
-   clean disconnect, so the GATT link stays up until its supervision timeout,
-   `writeCharacteristic` queues the write and returns success, and the command is
-   recorded as **Sent**. That is "transmitted into nothing", a different case.
+8. **Criterion 5 — the `NoEvidence` branch.** Same setup as criterion 2, but power the
+   locator **off** before the probe runs. Expect no revert: the receiver stays on the
+   **new** channel and the app says it cannot confirm where the locator is.
 
-   **What is left is genuinely narrow, and that is the finding.** With disconnects
-   ruled out, the only way `changeLocatorConfig` returns false while the control is on
-   screen is a transient GATT write rejection — `ERROR_GATT_WRITE_REQUEST_BUSY` against
-   a write already in flight (the app polls `ReceiverInfoRequest` every 2 s while the
-   locator is silent) or `ERROR_DEVICE_NOT_CONNECTED` in the moment before the stack
-   reports the drop. Neither can be staged by hand.
+   ⚠️ **Read this before running it.** The obvious way to stage this — move, then power
+   the locator off — makes the receiver refuse the probe rather than run it, and until
+   2026-08-30 the app read that refusal as *"heard nothing"*. The move queues a
+   `LocatorCfgChgRequest`; `IsOperatorCommand` counts it as an operator command; the
+   receiver refuses a `LocatorSearchRequest` while one is pending; and with the locator
+   silent the forward can never leave, because the forwarding window needs a recent
+   `PreLaunchData`. **So the undelivered command blocks the very probe that would
+   explain why it was undeliverable**, until `kPendingTxStaleMs` (10 s) drops it. The
+   first probe lands ~5 s after the move, well inside that.
 
-   So the criterion needs **an app-side injection hook** — the equivalent of `&` on this
-   side of the link: a debug-only toggle forcing the next `changeLocatorConfig` to
-   return false without sending. Until that exists this criterion is **blocked, not
-   failed**, and the UI gating above is the reason the exposure is small: a channel move
-   cannot be started at all while the app has no connected locator, so the `SendFailure`
-   branch is defensive rather than load-bearing.
+   That is a fifth instance of the rule ADR-0029 named — *a rule about the link must be
+   able to tell a gap the app created from a gap the world created* — and it is now
+   handled: a refused probe returns `NotChecked`, not `NoEvidence`, and is re-asked
+   once after `CHANNEL_PROBE_REFUSED_RETRY_MS` (6 s), which puts the retry past the
+   receiver's stale-drop.
 
-   When it can be run, the expectation is unchanged: the *send* failure message —
-   *"Could not send the channel change. Check the receiver connection."* — and **no
-   search at all**, with the receiver's channel unchanged. The search section is the
-   real assertion, because a spurious recovery is now directly observable as a
-   two-channel search starting rather than something to be inferred.
+   So the run has **two** valid outcomes and they say different things:
+   - *"Could not confirm where the locator is"* — the probe ran and heard nothing.
+     This is criterion 5 proper.
+   - *"Could not check where the locator is — the receiver was busy"* — the probe was
+     refused twice. Not a pass; it means the retry did not outlast whatever was
+     blocking, and the receiver console's `[search]` trace will say what.
+
+   The **"The receiver is busy…"** note under *Search N channels* is the same refusal
+   surfacing on the manual path, where pressing Search again is the retry.
 
 ## Safety
 
