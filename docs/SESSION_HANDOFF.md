@@ -150,7 +150,12 @@ as of 2026-08-30 (`.claude/commands/`, CLAUDE.md points at them). They had been 
 `~/.claude/commands/`, so every rule they encode travelled with one machine rather than with
 the code; the string-resources requirement was added and landed immediately in the least
 durable place in the system. Home copies removed, so there is one definition rather than two
-that can diverge. Three of the six defects were sentences left
+that can diverge. The Receiver (`96afaf3`) and app (`1dd3f62`) carry **pointer stubs** —
+project commands resolve from the working directory, so they stopped resolving there once
+the definitions moved. Stubs rather than copies for the same reason the move happened at
+all; `sp-commit` and `sp-handoff` act on this repo's own files and their stubs say to run
+them from here. The app's CLAUDE.md also names the one gate rule specific to it: **Gate 2
+covers `strings.xml`.** Three of the six defects were sentences left
 behind when behaviour changed under them, and the gate caught none of them because the manual
 and the summary were checked and `strings.xml` was not. The gate carries the rule and all
 three examples, and the Report section now asks explicitly whether the strings were opened.
