@@ -2,6 +2,45 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-08-30 (bench 5) — connecting mid-scan splits the receiver's radio from its own settings — DIAGNOSED, NOT FIXED — [#40](https://github.com/fschroer/steam-pigeon-locator/issues/40)
+
+Found while exercising the Communication screen, **unrelated to the ADR-0011 amendment** and
+predating it.
+
+**A `ReceiverCfgChgRequest` is applied immediately with no scan guard**, so tapping Connect on
+a search hit mid-run saves the new channel and retunes — and then the running scan overwrites
+the radio, and `FinishLocatorSearch` restores `search_home_channel_`, the channel captured
+*before* the scan. **End state: persisted settings say B, the radio listens on A.**
+
+⚠️ **The app cannot see this, which is what makes it nasty.** Both `ReceiverInfo` and the
+`receiver_lora_channel` stamped on every relayed frame are read from **settings**, never from
+the live radio, so the app is confidently wrong about where its own receiver points and
+nothing in the protocol can contradict it. **The survey has the identical hole**
+(`survey_home_channel_`), so any fix must cover both scans.
+
+All seven reported symptoms follow from that one split, including the two that look like
+separate bugs: *"messages are still arriving"* (the radio is on A, where the **original**
+locator still is) and the red *"another locator is on the air"* (the truthful part of the
+screen — those frames carry the old locator's id while the app believes it connected to the
+one on B). The short search that returned one result was building candidates from a receiver
+channel that was false.
+
+**Draft decision in the issue: the operator's command ends the scan, then applies.** Not a new
+rule — [ADR-0029](adr/0029-locator-search-candidate-channels.md) already reached it from the
+other direction, where `ServicePendingTx` ends a sweep for a queued operator command rather
+than letting it wait. A Connect tap is an operator command by every test that rule applies; it
+just arrives receiver-local over BLE instead of through `pending_tx_`, and so missed the guard.
+Deferring instead would leave a tap silently pending for up to ~90 s, which is the failure this
+screen was reorganised to eliminate.
+
+**The app half is the part still open:** `canConnect` is gated on the receiver config state and
+not on `run.running`. Either let the tap through and be honest that it ends the scan, or refuse
+mid-run with the reason on screen. Leaning to the first.
+
+**Diagnosis is from code reading only** — the mechanism accounts for every symptom, but the
+state split has not been observed directly. The receiver console's `[search] restored channel`
+trace against the settings value would confirm it in one run.
+
 ## 2026-08-30 (coverage) — the channel-move sequence is testable now — APP + iOS BRIEF, NOT RE-RUN ON HARDWARE
 
 The gap the close-out named, closed. `ChannelMove` pinned the individual decisions;
