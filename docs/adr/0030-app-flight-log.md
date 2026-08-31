@@ -35,10 +35,10 @@ could ever have recorded it.
 `rocket_service_count` at `SAMPLES_PER_SECOND`, and `Factory.cpp`'s `case 2` is the only
 branch that reaches the radio — one frame per second, `PreLaunchData` or
 `TelemetryData`, armed or not. So "log every received frame" and "log at 1 Hz" are the
-same instruction, and there is nothing to downsample. (Two comments in
-`RocketViewModel.kt` claiming ~5 Hz are wrong and are being corrected; the handoff of
-2026-08-30 already recorded the correction after a 5× path duplication was
-misattributed to the wire rate.)
+same instruction, and there is nothing to downsample. (The handoff of 2026-08-30
+already recorded this after a 5× path duplication was misattributed to the wire rate;
+the six comments across both apps that still claimed ~5 Hz were corrected immediately
+afterwards — Android `d56b13f`, iOS `grep "transmits once per second"`.)
 
 ## Decision
 
