@@ -171,6 +171,16 @@ of `kParityGroupSize`.
    once after `CHANNEL_PROBE_REFUSED_RETRY_MS` (6 s), which puts the retry past the
    receiver's stale-drop.
 
+   **Bench result 2026-08-30: PASSES.** *"Could not confirm where the locator is"*, the
+   receiver left on the **old** channel, and powering the locator up resumed the link
+   with no user action. The receiver is on the old channel rather than the new one
+   because with the locator already silent no forwarding window ever opened, so the
+   forward never transmitted and the receiver never followed — case 0 in ADR-0011,
+   resolving through `NoEvidence` and doing nothing, which is correct. The same run
+   showed the message naming the *attempted* channel as the receiver's, which was
+   false; both no-answer messages now report the receiver's actual channel, and the
+   "nothing moved" case says so without alarm.
+
    So the run has **two** valid outcomes and they say different things:
    - *"Could not confirm where the locator is"* — the probe ran and heard nothing.
      This is criterion 5 proper.
