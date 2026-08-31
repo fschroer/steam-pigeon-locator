@@ -70,8 +70,18 @@ covered end to end.
 outside — a queued operator command in `ServicePendingTx`, and a receiver channel change. Both
 sites now name themselves, carrying the msg_type and the requested channel respectively.
 
-⚠️ **Reflash before the next #40 run.** `text 117108`. The earlier build also printed the survey
-restore twice, which `65344ca` fixed.
+✅ **#40 CLOSED 2026-08-30 — all six criteria pass**, the survey variant confirmed once the
+diagnostics could show it: `cancelled for receiver channel change 56`, `restored channel /
+setting 55 55`, `[cfg] channel applied 56`. Receiver `text 117108`.
+
+**Checked and cleared while reading that trace:** `[cfg] channel applied` prints right after
+`SetChannel`, which in this path is the **last** radio call — `FinishChannelSurvey` has already
+re-armed RX on the *old* channel, and `SetChannel` only writes the frequency without re-entering
+RX. That is exactly the shape [ADR-0019](adr/0019-channel-interference-detection.md) Decision 6
+warns about. It is fine: `subghz_phy_app.c` re-arms `Radio.Rx(3000)` on RxDone, RxTimeout,
+RxError and TxDone, so worst case is ≤3 s before it listens on the new channel — identical to an
+ordinary channel change, which has always been a bare `SetChannel` too. **Verified in the driver
+rather than assumed**, per the standing rule about this peripheral.
 
 ## 2026-08-30 (coverage) — the channel-move sequence is testable now — APP + iOS BRIEF, NOT RE-RUN ON HARDWARE
 
