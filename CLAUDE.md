@@ -37,6 +37,17 @@ All system docs live **here**, under `docs/`. The other two repos carry only a s
   load-bearing, and reflected in `SteamPigeon_SystemSummary.md`. Don't edit the summary to
   contradict a decided issue without a new decision.
 
+## The `/sp-*` commands live in this repo
+
+`.claude/commands/` holds `sp-spec`, `sp-docs`, `sp-commit` and `sp-handoff`. They are
+**versioned here on purpose.** They encode rules this project learned the hard way — the
+docs gates, the cross-repo commit discipline, the secret scan — and while they sat in
+`~/.claude/commands/` those rules travelled with one machine rather than with the code.
+A rule that only exists on one laptop is not a rule the project has.
+
+They are Locator-rooted: run them from this repo, which is where `Scripts/sp-status.sh`
+and the docs they gate on live.
+
 ## Cross-repo commits
 
 When one logical change spans repos (a wire-format change, a coordinated protocol change),
