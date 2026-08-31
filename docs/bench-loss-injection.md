@@ -131,14 +131,45 @@ of `kParityGroupSize`.
      **Criterion 5** — added 2026-08-30, and the case with the least margin, because a
      locator that never moved is now on a channel the receiver is not listening to.
      Recover with *Find a locator*, which carries the attempted channel.
-7. **Criterion 4 — a BLE-send failure must not cause a spurious revert.** Type a new
-   channel into Communication → Locator channel without tapping Update; power the
-   receiver off; tap Update within ~5 s (the locator section hides on the 5 s liveness
-   rule, but the Update button itself has no BLE gate). Expect the *send* failure
-   message — *"Could not send the channel change"* — **no search at all**, and the
-   receiver's channel unchanged when it is powered back up. A spurious recovery is now
-   directly observable as a search starting, which it was not when this criterion was
-   written.
+7. **Criterion 4 — a BLE-send failure must not cause a spurious revert.**
+
+   **Turn the phone's Bluetooth off. Do NOT power the receiver off** — that is the
+   obvious move and it tests something else entirely. An abrupt power cut sends no
+   clean BLE disconnect, so the phone's GATT link stays up until its supervision
+   timeout (seconds to ~20 s); `writeCharacteristic` queues the write and returns
+   success, and the app records the command as **Sent**. That exercises "transmitted
+   into nothing", not a send *failure*, and it will not reach this criterion's code
+   path at all.
+
+   Turning the adapter off works because of a state split that makes it deterministic
+   rather than a race:
+
+   - `bluetoothConnectionState` goes `Disconnected` at once, and `connectionJob` calls
+     `releaseLocatorOnLinkLoss()`, which nulls `connectedLocatorId`.
+   - `BluetoothService.sendMessage` refuses any **locator-directed** command when it
+     cannot say which locator it is for ([ADR-0020](adr/0020-targeted-locator-commands.md))
+     and returns false **before touching the BLE stack**.
+   - Meanwhile the UI's `locatorConnected` is the **5 s LoRa-broadcast** rule, not the
+     BLE state, so the Locator channel section stays on screen for up to 5 s after the
+     last `PreLaunchData` — and the Update button has no BLE gate of its own.
+
+   So there is a ~5 s window in which the control is live and the send is guaranteed to
+   fail from app state alone. Missing the window is a non-event: the section simply
+   hides and there is nothing to tap.
+
+   Steps: with the link healthy and the Communication screen open, type a new channel
+   into **Locator channel** and do **not** tap Update; turn the phone's Bluetooth off;
+   tap **Update** within ~5 s.
+
+   Expected: the *send* failure message — *"Could not send the channel change. Check
+   the receiver connection."* — and **no search at all**. Turn Bluetooth back on,
+   reconnect, and confirm the receiver's channel is unchanged.
+
+   **The search section is the real assertion here.** A spurious recovery is now
+   directly observable as a two-channel search starting, which it was not when this
+   criterion was written — so "nothing happened" is something you can see rather than
+   infer. If a search runs, or the receiver comes back on a different channel, the
+   criterion has failed.
 
 ## Safety
 
