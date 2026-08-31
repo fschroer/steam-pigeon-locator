@@ -145,12 +145,17 @@ frame test is the load-bearing half), and `message` (which sentence is earned, d
 place instead of inline in a composable). **The orchestration itself is still uncovered** —
 ordering, timeouts, service calls — and that is where the next one will be.
 
-**`sp-docs` Gate 2 now names string resources.** Three of the six defects were sentences left
+**`sp-docs` Gate 2 now names string resources** — and the commands are versioned in the repo
+as of 2026-08-30 (`.claude/commands/`, CLAUDE.md points at them). They had been in
+`~/.claude/commands/`, so every rule they encode travelled with one machine rather than with
+the code; the string-resources requirement was added and landed immediately in the least
+durable place in the system. Home copies removed, so there is one definition rather than two
+that can diverge. Three of the six defects were sentences left
 behind when behaviour changed under them, and the gate caught none of them because the manual
 and the summary were checked and `strings.xml` was not. The gate carries the rule and all
 three examples, and the Report section now asks explicitly whether the strings were opened.
-`~/.claude/commands/sp-docs.md`, outside all four repos — **not covered by any of these
-commits.**
+`~/.claude/commands/sp-docs.md` at the time, outside all four repos and **not covered by
+those commits** — since moved into `.claude/commands/` here and versioned.
 
 ➡️ **The iOS entry was rewritten wholesale** (iOS `e8c0463`). The previous one described the
 first cut, and porting it would have reproduced the defects rather than the fix — four
