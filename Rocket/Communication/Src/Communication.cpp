@@ -335,6 +335,7 @@ void Communication::OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
 			// recovery path must detect and repair.
 			if (dbg_drop_next_cfg_chg_) {
 				dbg_drop_next_cfg_chg_ = false;   // one-shot
+				dbg_cfg_chg_dropped_ = true;      // Process() reports it
 				break;
 			}
 #endif

@@ -321,9 +321,25 @@ private:
 	// dbg_dropped_ makes the drop one-shot so a retransmit gets through, modeling
 	// a transient RF loss.  Reset each transfer in BeginTransfer().
 	bool     dbg_drop_next_cfg_chg_ = false;   // #20: forced miss of next config change
+	// Set when the drop above actually FIRES, so Process() can say so on the console
+	// in main-loop context.  Arming printed and firing did not, which left a bench
+	// run unable to tell "the drop worked" from "the drop was never armed" — three
+	// runs of #20 on 2026-08-30 gave three outcomes with no way to attribute any of
+	// them.  volatile: written from the radio RX path, read from the main loop.
+	volatile bool dbg_cfg_chg_dropped_ = false;
 	uint8_t  dbg_txdrop_per_group_  = 0;       // #18: 0/1/2 packets dropped per group
 	bool     dbg_dropped_[kMaxPackets] = {};
 	bool     DbgConsumeTxDrop(uint16_t packet_index);
+public:
+	// True once per forced miss that actually FIRED, cleared by the read.  Polled
+	// from Factory's loop because the drop happens in the radio RX path, where the
+	// console must not be touched, and because UartSend lives there and not here.
+	bool     DbgTakeCfgChgDropped() {
+		if (!dbg_cfg_chg_dropped_) return false;
+		dbg_cfg_chg_dropped_ = false;
+		return true;
+	}
+private:
 #endif
 
 	// -----------------------------------------------------------------------

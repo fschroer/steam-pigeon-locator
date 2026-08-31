@@ -48,6 +48,14 @@ python ../Tools/serial/sp_capture.py monitor --port COM7
 | `#` | cycle flight-data **drop-per-group** 0 → 1 → 2 → 0 (#18); prints the new value |
 | `&` | arm a one-shot **forced miss** of the next `LocatorCfgChgRequest` (#20) |
 
+Arming prints `DIAG|LOSS: next LocatorCfgChgRequest will be dropped`, and **firing**
+prints `DIAG|LOSS: LocatorCfgChgRequest DROPPED (forced miss fired)`. The second line
+was added 2026-08-30 after three runs of the #20 procedure produced three different
+outcomes with no way to tell which of them had actually dropped anything — arming
+announced itself and firing did not, so a run whose one-shot had been consumed
+earlier was indistinguishable from a run where the recovery simply worked. **If that
+second line does not appear, the run is not testing what you think it is.**
+
 Both are hidden keys handled before the normal menu parser. Unlike the `/` fault
 dump they are not gated on an idle console — they answer in any state, menu open
 or not, which is safe only because they are bench-only and never shipped. In a
@@ -80,25 +88,56 @@ of `kParityGroupSize`.
 
 ## #20 procedure — channel-change recovery
 
-1. Locator + receiver both linked, app connected, PreLaunchData flowing.
-2. On the locator console, press `&` (`DIAG|LOSS: next LocatorCfgChgRequest will
-   be dropped`).
-3. In the app, change the locator LoRa channel from Locator Settings. The app
-   forwards the request; the receiver follows to the new channel, but the locator
-   drops it and stays on the old one — the link is split.
-4. Expected app behavior (ADR-0011 invariant 4): it detects the timeout (no
-   PreLaunchData on the new channel), reverts the receiver to the **old** channel,
-   waits for the link to resume, retries the change once, and — since `&` is
-   one-shot, the retry is **not** dropped — the change now succeeds. Confirm both
-   devices end up on the new channel with the link intact.
-5. To test the unrecoverable case, arm `&` again right before the single retry
-   would land (or hold the locator off): the app should leave **both** devices on
-   the old channel and report "update not acknowledged" (no split link).
-6. Confirm a BLE-send failure (no forward transmitted) does **not** trigger a
-   spurious receiver revert.
+> ⚠️ **Rewritten 2026-08-30.** Read [ADR-0011](adr/0011-locator-lora-channel-from-app.md)'s
+> amendment *"revert on evidence, not on silence"* first. The app now **probes both
+> channels before it reverts**, so the middle of this run looks nothing like it used
+> to, and step 5's two alternatives are no longer interchangeable.
+
+1. Locator + receiver both linked, app connected, PreLaunchData flowing. Locator on
+   USB-C with `sp_capture monitor`.
+2. On the locator console, press `&` (`DIAG|LOSS: next LocatorCfgChgRequest will be
+   dropped`).
+3. **Leave the locator powered and in range for the whole run.** The probe has to be
+   able to hear it; powering it off is a *different* test — see step 6.
+4. In the app, change the locator LoRa channel (Communication → Locator channel, or a
+   survey pick). Note the old and new channel numbers.
+5. Expected sequence, in order:
+   1. banner *"Moving to channel N…"*;
+   2. locator console prints `DIAG|LOSS: LocatorCfgChgRequest DROPPED (forced miss
+      fired)` — **the run is only valid if this appears**;
+   3. the receiver follows to N (Receiver channel field / receiver console);
+   4. ~5 s of nothing;
+   5. **a two-channel search appears in the search section** — channel N with no hit,
+      then the old channel with a hit carrying your locator's name, RSSI and SNR.
+      *This hit is what authorises the revert.* A revert without it is a bug;
+   6. the receiver returns to the old channel and the link resumes;
+   7. the retry goes out and is **not** dropped (`&` is one-shot);
+   8. banner *"Now on channel N"*, both devices on N. **Criterion 2 passes.**
+6. The two ways it can end instead. **Both are correct, and they are different tests
+   — the previous version of this procedure offered them as interchangeable:**
+   - **Arm `&` again before the retry lands.** The retry is dropped too, and the app
+     reports *"did not confirm channel N — left on its previous channel"* with **both
+     devices on the OLD channel**, link intact. **Criterion 3.**
+   - **Power the locator off before the probe runs.** The probe hears nothing on
+     either channel, returns `NoEvidence`, and **does not revert**: the receiver stays
+     on the **NEW** channel and the app says it cannot confirm where the locator is.
+     **Criterion 5** — added 2026-08-30, and the case with the least margin, because a
+     locator that never moved is now on a channel the receiver is not listening to.
+     Recover with *Find a locator*, which carries the attempted channel.
+7. **Criterion 4 — a BLE-send failure must not cause a spurious revert.** Type a new
+   channel into Communication → Locator channel without tapping Update; power the
+   receiver off; tap Update within ~5 s (the locator section hides on the 5 s liveness
+   rule, but the Update button itself has no BLE gate). Expect the *send* failure
+   message — *"Could not send the channel change"* — **no search at all**, and the
+   receiver's channel unchanged when it is powered back up. A spurious recovery is now
+   directly observable as a search starting, which it was not when this criterion was
+   written.
 
 ## Safety
 
-- Ship production/flight builds with `SP_LOSS_INJECT == 0` (the default).
+- Ship production/flight builds with `SP_LOSS_INJECT == 0`. That **is** the committed
+  value, but a bench session flips it to 1 in the working tree and it is easy to commit
+  by accident — the same hazard `SP_BENCH_REPLAY` carries in `Navigation.hpp`. Check
+  `git diff` for this line before every firmware commit.
 - The drops only affect the locator's own transmit/receive bookkeeping on the
   bench; they are compiled out otherwise. The receiver firmware is unchanged.

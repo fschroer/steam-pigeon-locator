@@ -184,6 +184,14 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 	// regardless of device state, before the per-state switch below.
 	const uint16_t t_comm = Diag::Now();
 	comm_.Process(device_state_);
+#if SP_LOSS_INJECT
+	// Say so when a forced miss actually fires (#20).  Arming printed and firing
+	// did not, so a bench run could not tell a dropped config change from one that
+	// was never armed — three runs of #20 on 2026-08-30 produced three outcomes and
+	// no way to attribute any of them.
+	if (comm_.DbgTakeCfgChgDropped())
+		UartSend("\r\nDIAG|LOSS: LocatorCfgChgRequest DROPPED (forced miss fired)\r\n");
+#endif
 	Diag::mark(Diag::Seg::Comm, t_comm);
 
 	// Expire any bench hold on the battery divider.  Above the per-state switch

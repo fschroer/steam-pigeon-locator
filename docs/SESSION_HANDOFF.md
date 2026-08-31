@@ -2,6 +2,65 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-08-30 (bench) — #20 run on hardware: criteria 1 and 3 PASS, and criterion 2 found a hang that loses the locator — FIXED, UNCOMMITTED-CLEAN, NOT RE-RUN
+
+First hardware exercise of ADR-0011's amendment, via the `SP_LOSS_INJECT` `&` harness.
+**Criteria 1 and 3 pass.** Criterion 2 gave three different outcomes across three runs,
+and the cause was mine.
+
+**The defect, and it is the one the amendment exists to prevent.** The app re-based its
+confirm window on **every** `ReceiverInfo` whose channel matched the move in flight — but
+`ReceiverInfo` is not only the receiver's unsolicited transmit receipt. `channelWatchJob`
+polls for one **every 2 s** once the locator has been silent for 5 s, which is exactly the
+state an unconfirmed move is in. Every reply matched and pushed the deadline out 5 s.
+**2 s < 5 s, so the window never closed**: banner stuck on *"Moving to channel N…"*, probe
+never ran, nothing resolved, receiver left on the new channel with the locator on the old
+one. **A lost locator, reintroduced by the fix for lost locators.**
+
+Fixed twice over, deliberately: the receipt is **latched** (first match only), and the wait
+carries an **absolute ceiling** of `2 × CONFIG_CONFIRM_WINDOW_MS` so no future re-base
+source can hang it again. App `99f4d91`.
+
+**The rule this is a fresh instance of** — the one ADR-0029 already named and the
+2026-08-29/30 session recorded as generating a fourth: *a rule about the link must be able
+to tell a gap the app created from a gap the world created.* Here it is one message type
+serving two purposes, and the app could not tell the receiver's spontaneous receipt from
+its own poll's reply. Expect a fifth.
+
+**A message that became false under a behaviour change.**
+`channel_move_not_acknowledged` said *"It has been left on its previous channel"* — true
+after an evidenced revert, false on `NoEvidence`, where the receiver is deliberately left
+on the **new** channel. Both endings share `NotAcknowledged` and leave the hardware in
+opposite places. Now split, via a `channelMoveOutcome` flow. **The docs gate missed this
+because I checked the manual and the summary and never opened `strings.xml`** — worth
+adding to the gate's Gate-2 checklist.
+
+**Observability was the reason run 1 was unfalsifiable.** The `&` harness announced
+*arming* and said nothing when the drop *fired*, so a run whose one-shot had been consumed
+earlier looked identical to one where recovery simply worked. The locator now prints
+`DIAG|LOSS: LocatorCfgChgRequest DROPPED (forced miss fired)`, from `Factory`'s main loop
+rather than the radio RX path.
+
+⚠️ **`NoEvidence` is a coin-flip, and ADR-0011 now says so.** Staying on the new channel is
+harmless only if the locator actually moved; if it never moved and the probe missed it,
+staying loses it exactly as reverting would lose a locator that did move. The two readings
+are symmetric. Staying is kept as the tiebreak — a locator that moved is audible on the new
+channel at 1 Hz, so hearing nothing weakly argues against case 2 — but it is a **chosen
+default under ambiguity, not a safety**, and the amendment's original wording overstated it.
+It is now **criterion 5** on #20 and is the least-tested branch.
+
+📋 **[bench-loss-injection.md](bench-loss-injection.md) §#20 is rewritten.** The old step 4
+omitted the probe entirely, and step 5 offered *"arm `&` again"* and *"hold the locator
+off"* as interchangeable. **They are not** — the first is criterion 3 (both devices end on
+the old channel), the second is criterion 5 (receiver stays on the new one). Anyone
+following the old text would have recorded one as a failure of the other.
+
+⚠️ **`SP_LOSS_INJECT` is 1 in the working tree and 0 in the commit.** Same standing hazard
+as `SP_BENCH_REPLAY` in `Navigation.hpp`: check `git diff` for that line before every
+firmware commit. The bench setting was preserved locally after committing.
+
+**Nothing here is re-measured.** Criterion 2 has still not passed; 4 and 5 are untested.
+
 ## 2026-08-30 (last) — the wrong-frame dwell figures had two more homes, and one of them does regulatory work — DOCS + COMMENTS ONLY, UNCOMMITTED, NOT MEASURED
 
 The 2026-08-29/30 session corrected `kSurveyConfirmDwellMs` and the two ADRs that reason
@@ -780,7 +839,7 @@ The app's earlier run is the 3D flight-path work, `3cabbb3`..`7a4d48e` — curta
 
 - **`master` = this handoff commit** — **clean, committed, NOT PUSHED**. It carries the [ADR-0011](adr/0011-locator-lora-channel-from-app.md) addendum and amendment, the [ADR-0025](adr/0025-lora-channel-plan-and-part-15-compliance.md) occupancy correction, the ADR-0029 qualification, the summary's corrected recovery sentence and the user-manual section on an unconfirmed move. **One logical change across four repos — grep `channel move evidence v1`:** receiver **`d7ec833`**, app **`56d77c2`**, iOS **`cbed91c`**, and this commit. None of the four is pushed. Beneath it, `9552846` (fix(scripts): sp-status finds the iOS repo, and says so when it cannot), and beneath that `5de767c`, which carries the 2026-08-29/30 doc set: the corrected ADR-0029 dwell arithmetic, ADR-0019's confirm-phase note, the ADR-0006/0011 connection fixes, the armed-lock-in decision, three new bench procedures, and the user-manual pass. The newest **code** commit in this repo is still `e551970`, which only reserves MsgTypes 23/24 for the locator search and needs no reflash; everything else on top is docs (ADR-0029 and the user manual). Beneath that, `9c3d7e7` (docs: refresh SESSION_HANDOFF app state for the map camera commits) — **clean, pushed**. The two commits above the newest firmware change are docs-only refreshes of this file (`9c3d7e7`, `0e74131`); the newest **code** commit remains `6bb9ed8` (fix(time): hold or recover the PPS tick rate across dropouts — [#30](https://github.com/fschroer/steam-pigeon-locator/issues/30)). On top of `708aedc` (docs: flight-2026-07-17 validation, EKF seed finding, replay harness), `662a783` (fix(nav): seed EKF attitude from NEGATED accel, matching the strapdown, [#28](https://github.com/fschroer/steam-pigeon-locator/issues/28)), `901a766` (offline EKF replay harness + shared flight-CSV reader), `121de3b` (propagate inertial position during powered flight, [#27](https://github.com/fschroer/steam-pigeon-locator/issues/27)), the docs commit carrying the previous handoff refresh, and `41e8a4b` (feat(comm): FlightEvents message (MsgType 19) + raw-baro profile altitude). Further back: `4fff4e1` (ADR-0015 drop-rejection launch gate), `bb4ff1f`/`bb57942` (ADR-0014 + map/summary docs), `e5b61b4` (log ~2 s of Landed samples), `c137a39` (Release config buildable), `a5337e4` (ADR-0013 live EKF), `71c8f7e` (cycle profiler), `2bc988e` (ITM/SPI/covariance perf), `4758b01` (UART2 921600 baud, IWDG init, radio RX CRC handling), `390f9bf` (pre-launch ring + monotonic clock + re-arm reset, ADR-0007), `942ab15` (`Unused` deploy mode), `9bad55b` (connect-password), `cb11f95` (runtime LoRa channel apply), and the ADR-0009 commits (`d2c1808`, `47fd7ed`, `2446fa5`). The archival/reliability code (`FlightManager`/`Factory`/`usart.c`/`radio_driver.c`/`Locator.ioc`/`FlightArchive.hpp` + the `FaultLog` module from `7c325c7`) is all committed; the `.ld` `.noinit` section is present. Firmware builds clean; archive host suite 638/638, FlightReplay **97/97** (44/44 through `662a783`; Part D added by `6bb9ed8`). **No firmware is flight-validated.** The FlightEvents/raw-baro change (`41e8a4b`), the three nav commits (`121de3b`, `901a766`, `662a783`), and the PPS clock fix (`6bb9ed8`) are **host-verified only — not bench- or flight-tested.** Earlier line — orientation display bench-verified `8f61a1e`.
 - **Receiver repo** (`steam-pigeon-receiver`) `master` = **`d7ec833`** (feat(comm): report the channel follow, and drop a forward nobody is waiting on) — **clean, NOT PUSHED**. ⚠️ **Reflash for any ADR-0011 bench work**: the transmit receipt and the `pending_tx_` staleness drop are both in this build and neither is exercised. No wire change; `text 116500` (+96 B). Beneath it, `5498391` (fix(comm): size the dwell for the frame a scan actually hunts) — **clean, pushed**. Builds clean, `text 116404`. ⚠️ **Reflash before trusting any bench result**: no wire change, but the dwell went 1200 → 1400 ms, a search dwell now ends early on a hit, `kSearchDeadlineMs` went 90 → 105 s, and a sweep neither starts on nor is ended by anything but an operator command. **All seven procedures in [bench-locator-search.md](bench-locator-search.md) now pass on hardware** — the four that predate this session were re-run against the new constants. Beneath it, `aa9edc6`/`0bc99c0` (the locator search itself, ADR-0029, `locator search wire v1`), whose census case was bench-validated with three locators. Beneath it, `08a0fb0` (feat(comm): relay FlightEvents (MsgType 19) to the app — counterpart to locator `41e8a4b`) — **clean, pushed**. On top of `5128130` (UART2 921600 baud + radio RX CRC-discard removal, counterpart to locator `4758b01`), `6a00e89` (mirror PreLaunchData `locator_id`+`auth_tag`), `b49d1f7`/`9d74b7e` (follow locator LoRa channel change), and `8f416d2` (flight-profile-mode command forwarding). `version.h`/`language.settings.xml` gitignored. Firmware links clean; `08a0fb0` is **not bench-validated**.
-- **App repo** (`rocket-flight-manager`) `main` = **`56d77c2`** (fix(comm): revert a channel move on evidence, not on silence) — **clean, NOT PUSHED**. **341 unit tests pass, 27 suites, 0 failures.** Not verified on a device: the probe populates the ordinary search section, so a failed move now shows search results and a widen offer the user did not ask for. Beneath it, `cbb3cd3` (fix(comm): nine defects from two days at the bench, and the rule they share) — **clean, pushed**, where **330 unit tests passed** (`assembleDebug` + `testDebugUnitTest`, 0 failures, 26 suites). **Not verified on a device:** both `ChannelOccupancy` changes, the in-flight pick gating, deterministic candidate ordering (not observable below ~14 remembered locators; unit test only), and two armed-locator branches — a password changed while armed, and a receiver move while the connected locator is armed. Beneath it, `e9f93d7`/`f372b6c` (feat(app): the app can say which build it is), where 309 tests passed. The locator-search run sits beneath it: `0a391c0` (the search, survey identity and the Communication screen), then `612d5af`, `62a44f2`, `def347e`, `d647fb4` — three of those are fixes to bugs the bench found in the two before them. **Not verified on a device:** the icon's appearance, the menu order as rendered, the version line's placement, and the occupancy hint after its fix. Beneath that, `7a4d48e` (fix(map): stop sensor noise coarsening the 3D path's steps) — **clean, pushed**. The 3D flight-path run, oldest first: `3cabbb3` (curtain subdivision by altitude change + cyan one-second markers), `0c56dfc` (keep pre-timestamp paths), `339916e` (record one point per distinct fix), `c8e6dc3` (cancel prior inbound collectors), `20a4358` + `9b3a5e1` (archived flight path), `ea9e18b` (shape-preserving spline), `8274695` + `7a4d48e` (opacity experiment reverted; riser fixed).
+- **App repo** (`rocket-flight-manager`) `main` = **`99f4d91`** (fix(comm): latch the channel-move receipt once — a repeat re-base hung the move) — **clean, NOT PUSHED**. **341 unit tests pass, 27 suites, 0 failures.** Beneath it, `56d77c2` (fix(comm): revert a channel move on evidence, not on silence). Not verified on a device: the probe populates the ordinary search section, so a failed move now shows search results and a widen offer the user did not ask for. Beneath it, `cbb3cd3` (fix(comm): nine defects from two days at the bench, and the rule they share) — **clean, pushed**, where **330 unit tests passed** (`assembleDebug` + `testDebugUnitTest`, 0 failures, 26 suites). **Not verified on a device:** both `ChannelOccupancy` changes, the in-flight pick gating, deterministic candidate ordering (not observable below ~14 remembered locators; unit test only), and two armed-locator branches — a password changed while armed, and a receiver move while the connected locator is armed. Beneath it, `e9f93d7`/`f372b6c` (feat(app): the app can say which build it is), where 309 tests passed. The locator-search run sits beneath it: `0a391c0` (the search, survey identity and the Communication screen), then `612d5af`, `62a44f2`, `def347e`, `d647fb4` — three of those are fixes to bugs the bench found in the two before them. **Not verified on a device:** the icon's appearance, the menu order as rendered, the version line's placement, and the occupancy hint after its fix. Beneath that, `7a4d48e` (fix(map): stop sensor noise coarsening the 3D path's steps) — **clean, pushed**. The 3D flight-path run, oldest first: `3cabbb3` (curtain subdivision by altitude change + cyan one-second markers), `0c56dfc` (keep pre-timestamp paths), `339916e` (record one point per distinct fix), `c8e6dc3` (cancel prior inbound collectors), `20a4358` + `9b3a5e1` (archived flight path), `ea9e18b` (shape-preserving spline), `8274695` + `7a4d48e` (opacity experiment reverted; riser fixed).
 
 - **iOS repo** (`steam-pigeon-ios`) `main` = **`cbed91c`** (docs(parity): iOS owes the evidence-based channel move; correct the dwell figures) — **clean, NOT PUSHED**, and **NOT COMPILED** (no Mac; comment text and markdown only). **iOS now owes five items**, the new one being ADR-0011's evidence-based channel move. Beneath it, `f61768e` (docs(parity): follow the receiver's new timings, and four items iOS owes) — **clean, pushed**. ⚠️ **NOT COMPILED** — no Mac in that session; the Swift changes are string edits reviewed by eye only. Beneath it, `8cb92fc` (the ADR-0029 port). **iOS owes four items**, each written up in that repo's `docs/UI_PARITY.md` with the reasoning a port needs: the channel being left reclaiming the connection mid-move, the status panel reading a scan as a missing locator, the survey section hiding its own scan, and `ChannelOccupancy`.
 
