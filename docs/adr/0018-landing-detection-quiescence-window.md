@@ -25,6 +25,15 @@ Measuring the longest run of `|raw baro vel| < 1.0 m/s` across the three flights
 | Frank Tomach 2026-08-01 (real landing, 108843 ms) | **28 samples (1.40 s)** | Yes |
 | Shane Swizzle Stick 2026-08-02 (real landing, 97853 ms) | **79 samples (3.95 s)** | Yes |
 
+> ⚠️ **Evidence caveat added 2026-08-31 ([#42](https://github.com/fschroer/steam-pigeon-locator/issues/42)).** The Swizzle Stick CSV in the flight
+> archive contains **9,669 rows for only 1,997 distinct timestamps** — roughly 4.8x duplication,
+> plus 14 backwards time steps. If the row above was computed from that file, consecutive
+> duplicates inflate every run length by the duplication factor and the true quiet run is nearer
+> **16 samples (0.8 s)**. That still clears the 13-sample lower bound, so the choice of
+> `kLandedConfirmSamples = 20` most likely stands — but the "8 samples clear of the tightest
+> real landing" margin argued below would **not**. Recompute against a clean load before relying
+> on that margin. Found during the [#41](https://github.com/fschroer/steam-pigeon-locator/issues/41) / [ADR-0032](0032-baro-outlier-filtering.md) sweep.
+
 Sweeping the confirm count at a 1.0 m/s threshold:
 
 | Confirm samples | Mike (must not fire) | Frank (must fire) | Shane (must fire) |

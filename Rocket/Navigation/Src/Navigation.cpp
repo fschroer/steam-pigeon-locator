@@ -497,6 +497,19 @@ bool Navigation::Update() {
     // Must happen after the raw-accumulation above and before EKF use below.
     if (imu_new) applyMountingFrame(imu);
 
+#if SP_VACUUM_SIM
+    // Vacuum-chamber flight sim: overwrite the body-frame accel with the
+    // synthetic boost while one is running.  Deliberately AFTER
+    // applyMountingFrame, so the injected vector is already in the body frame
+    // and is not remapped a second time — the double-transform that makes
+    // SP_BENCH_REPLAY useless for anything mounting-related (bench-replay.md).
+    //
+    // Called unconditionally rather than under `imu_new`: when no new IMU
+    // sample arrived, `imu` is a stale local that nothing downstream consumes,
+    // but the pulse still has to be able to time out.
+    applyVacuumSimBoost(imu, baro);
+#endif
+
     if (imu_new) {
         const uint16_t t_ekf = Diag::Now();
         // Health flags are per-cycle (#38): clear before driving the filter so what
@@ -853,5 +866,53 @@ void Navigation::injectTestSample(ImuSample&  imu,  BaroSample& baro,
 }
 
 #endif // SP_BENCH_REPLAY
+
+// ============================================================================
+// Vacuum-chamber flight simulation
+// ============================================================================
+#if SP_VACUUM_SIM
+
+// The pulse is injected into the SELECTED accel channel only.  The alternate
+// channel (archived as accel_alt_cg) keeps reading the real ~1 g, which is what
+// makes a simulated record identifiable after the fact without an archive
+// format change: a real 2 g boost moves both channels, this moves one.
+//
+// Body +X is the nose axis (see MountingFrame / the 'm' diagnostic), and an
+// accelerometer measures specific force — a rocket at rest nose-up reads +1 g
+// on +X, and one under thrust reads more.  DetectLaunch and DetectBurnout both
+// key on the NORM, so the direction is not what makes the gates fire; it is
+// what keeps the EKF, the strapdown and the archived record self-consistent
+// instead of showing a rocket accelerating sideways.
+void Navigation::applyVacuumSimBoost(ImuSample& imu, const BaroSample& baro) {
+    const uint32_t now = HAL_GetTick();
+
+    // End an in-progress pulse.  Burnout then follows on its own: the locator is
+    // sitting still, so the real accel is ~1 g, under the 1.5 g burnout bar, and
+    // DetectBurnout confirms it 3 samples (150 ms) later.
+    if (m_vac_boost_active_ && (now - m_vac_boost_start_) >= kVacSimBoostMs)
+        m_vac_boost_active_ = false;
+
+    // Trigger: the chamber has lifted REAL raw baro AGL past the locator's own
+    // launch_detect_altitude, so the dual-sensor path's altitude term is already
+    // satisfied by the real sensor and only its thrust term is missing.
+    //
+    // Deliberately RE-TRIGGERABLE for as long as the harness stays staged.  A
+    // slow evacuation can sit near the gate and drop back below it mid-pulse,
+    // which would leave the 80 ms dual-sensor hold unmet; a one-shot trigger
+    // would then have spent itself and the run would stall in WaitingLaunch with
+    // nothing to say why.  Factory un-stages the harness as soon as the flight
+    // state leaves WaitingLaunch, so this cannot re-fire in flight.
+    if (!m_vac_boost_active_ && m_vac_staged_
+            && baro.valid && m_baro.aglReferenceReady()
+            && baro.altitude_m_agl >= m_vac_trigger_agl_m_) {
+        m_vac_boost_start_  = now;
+        m_vac_boost_active_ = true;
+    }
+
+    if (m_vac_boost_active_)
+        imu.accel_selected_mps2 = { kVacSimThrustG * G0_F, 0.0f, 0.0f };
+}
+
+#endif // SP_VACUUM_SIM
 
 } // namespace RocketNav

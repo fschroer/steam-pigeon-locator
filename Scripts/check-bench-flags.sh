@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # check-bench-flags.sh — compile-check the bench harnesses that ship DISABLED.
 #
-# The locator carries three bench-only harnesses, each behind a compile flag that
+# The locator carries four bench-only harnesses, each behind a compile flag that
 # defaults to 0 and must stay 0 in any flight build:
 #
 #   SP_BENCH_REPLAY  archived-flight replay through the live state machine (#35/#36)
 #   SP_FAULT_INJECT  deliberate crashes to validate FaultLog / IWDG (#17)
 #   SP_LOSS_INJECT   deterministic RF loss for transfer + channel recovery (#18/#20)
+#   SP_VACUUM_SIM    synthetic boost so a vacuum chamber can fly a whole flight
 #
 # Because they are compiled OUT of every build anyone actually makes, the code
 # inside them rots silently: it is never parsed, so a rename in a struct it reads
@@ -74,7 +75,7 @@ INC="-ICore/Inc -ISubGHz_Phy/App -ISubGHz_Phy/Target
      -IRocket/Archive/Inc -IRocket/Common/Inc -IRocket/Navigation/Inc
      -IRocket/Communication/Inc"
 
-ALL_FLAGS="SP_BENCH_REPLAY SP_FAULT_INJECT SP_LOSS_INJECT"
+ALL_FLAGS="SP_BENCH_REPLAY SP_FAULT_INJECT SP_LOSS_INJECT SP_VACUUM_SIM"
 FLAGS="${*:-$ALL_FLAGS}"
 
 failures=0

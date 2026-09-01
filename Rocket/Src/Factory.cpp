@@ -141,9 +141,27 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			flight_.PrepareForArm();
 			datestamp_saved_ = false;   // re-write FlightTimestampS for the new flight
 			archive_.StartOpenNewFlight();
+#if SP_VACUUM_SIM
+			// Vacuum-chamber flight sim: the arm edge IS the staging gesture, so
+			// the whole procedure runs on a sealed jar with no cable.  Everything
+			// this harness needs from an arm has already happened three lines up
+			// (state reset, record opened) — it only has to say "now watch the
+			// barometer".  See docs/bench-vacuum-sim.md.
+			//
+			// The trigger is the locator's OWN launch_detect_altitude, not a
+			// threshold of the harness's own, so the two cannot drift apart.
+			ArmVacuumSim();
+#endif
 		} else if (prev_device_state_ == DeviceState::Armed) {
 			BuzzerReset();
 			buzzer_phase_ = BuzzerPhase::Disarming;
+#if SP_VACUUM_SIM
+			// Disarming un-stages it.  Without this a disarm/re-arm cycle would
+			// leave a stale stage behind, and the pyro-bus drop that disarming
+			// performs would be the only half of the abort that took effect.
+			navigation_.disarmVacuumSim();
+			vac_sim_running_ = false;
+#endif
 		}
 		// Every buzzer sequence is driven from the Disarmed/Armed case of the
 		// switch below, so entering Config, Test, MetadataRequested or
@@ -266,6 +284,66 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			// whether the ARMED path behaved, and would fire a disarm
 			// transition the operator never asked for.
 			navigation_.stopTestReplay();
+		}
+#endif
+#if SP_VACUUM_SIM
+		// Un-stage as soon as the flight leaves WaitingLaunch.  The trigger is
+		// deliberately re-triggerable while staged (a slow evacuation can sit on
+		// the gate and fall back below it mid-pulse, and a one-shot trigger would
+		// spend itself and stall the run with nothing to say why) — so something
+		// has to close it, and the flight state is the honest signal.  Navigation
+		// does not track flight state; Factory already does.
+		if (navigation_.isVacuumSimStaged()
+				&& flight_.GetFlightState() != FlightStates::WaitingLaunch) {
+			navigation_.disarmVacuumSim();
+			vac_sim_running_ = true;
+			vac_sim_tick_    = 0;
+			UartSend("\r\nDIAG|VACSIM: triggered - launch declared\r\n");
+		}
+		// Progress trace.  Same reasoning as the replay's: this drives real
+		// subsystems from a mix of real and synthetic data, so any one of them
+		// declining leaves no other trace.  The two columns printed are the ones
+		// every gate here reads - raw baro AGL and raw baro velocity.  If the
+		// state stops advancing, read those before suspecting the detectors.
+		if (vac_sim_running_) {
+			if ((vac_sim_tick_++ % (SAMPLES_PER_SECOND * 5u)) == 0u) {
+				char b[176];
+				const Vec3f a = navigation_.getFused().body_accel_mps2;
+				const float g = std::sqrt(a.x * a.x + a.y * a.y + a.z * a.z) / G0_F;
+				const BaroSample br = navigation_.getRawBaro();
+				snprintf(b, sizeof(b),
+						"\r\nDIAG|VACSIM: state=%u accel=%d.%02u g  RAW agl=%d m vel=%d m/s valid=%u\r\n",
+						static_cast<unsigned>(flight_.GetFlightState()),
+						static_cast<int>(g),
+						static_cast<unsigned>(static_cast<int>(g * 100.0f) % 100),
+						static_cast<int>(br.altitude_m_agl),
+						static_cast<int>(br.velocity),
+						static_cast<unsigned>(br.valid ? 1u : 0u));
+				UartSend(b);
+				// The line that actually matters.  Apogee, drogue and main do NOT read
+				// the RAW row above - they read the ADR-0003 ladder's output, and when
+				// that leaves the `raw` rung the raw row keeps looking perfectly healthy
+				// while the detectors are fed a coasted or held value instead.  A run
+				// that stops advancing with a healthy RAW row and a non-raw rung here is
+				// a SOURCE problem, not a detector problem - which is the distinction
+				// the first version of this trace could not make.
+				static const char* const kRung[] = { "raw", "coast", "fused", "TERMINAL", "RESEED" };
+				const FlightManager::DeployDebug d = flight_.GetDeployDebug();
+				snprintf(b, sizeof(b),
+						"DIAG|VACSIM:   DETECTOR SEES agl=%d m [%s] vel=%d m/s [%s]"
+						"  peak=%d m  no-new-max=%lu ms (needs >500)\r\n",
+						static_cast<int>(d.agl_m),
+						kRung[static_cast<unsigned>(d.alt_rung) % 5u],
+						static_cast<int>(d.vspeed_mps),
+						kRung[static_cast<unsigned>(d.vel_rung) % 5u],
+						static_cast<int>(d.peak_agl_m),
+						static_cast<unsigned long>(d.since_new_max_ms));
+				UartSend(b);
+			}
+			if (flight_.GetFlightState() == FlightStates::Landed) {
+				vac_sim_running_ = false;
+				UartSend("\r\nDIAG|VACSIM: landed - flight complete\r\n");
+			}
 		}
 #endif
 		Diag::begin(Diag::Seg::NavUpdate);
@@ -978,6 +1056,63 @@ void Factory::HandleConsoleChar(uint8_t uart_char) {
     }
 }
 
+#if SP_VACUUM_SIM
+// ---------------------------------------------------------------------------
+// ArmVacuumSim — stage the vacuum-chamber flight sim on the arm edge.
+//
+// Reports rather than refuses.  Arming is a safety gesture with its own meaning
+// (ADR-0021), and a harness must never be able to make an arm request fail; if
+// the preconditions are not met the operator gets told and the arm still stands.
+// ---------------------------------------------------------------------------
+void Factory::ArmVacuumSim() {
+	const RocketPersistentSettings cfg = archive_.GetLocatorSettings();
+	const float trigger_m = static_cast<float>(cfg.launch_detect_altitude);
+	navigation_.armVacuumSim(trigger_m);
+	vac_sim_running_ = false;
+
+	char b[192];
+	// Everything from apogee onward is raw baro and nothing else, and now the
+	// LAUNCH trigger is too — so an unzeroed reference means the run cannot even
+	// start, not merely that it stalls later.  Say so at arm, which is the last
+	// moment the operator can still do something about it.
+	if (!navigation_.baroAglReferenceReady() || !navigation_.getRawBaro().valid) {
+		UartSend("\r\nDIAG|VACSIM: staged, but raw baro AGL reference is NOT ready"
+				 " - it will not trigger. Let the locator settle at ambient.\r\n");
+	}
+	snprintf(b, sizeof(b),
+			 "\r\nDIAG|VACSIM: staged on arm -> record %u, PYRO LIVE."
+			 " Evacuate; triggers at %u m.\r\n",
+			 static_cast<unsigned>(archive_.GetOpenRecordId()),
+			 static_cast<unsigned>(cfg.launch_detect_altitude));
+	UartSend(b);
+	// The chamber has to out-climb the main gate: main primary fires on
+	// `deploy_agl <= main_primary_deploy_altitude` with NO descent term, so a
+	// chamber that never gets above it fires main the instant noseover is
+	// declared and proves nothing about the ladder.  Printed rather than
+	// enforced - the firmware cannot know what the chamber can pull.
+	snprintf(b, sizeof(b),
+			 "DIAG|VACSIM: climb to %u-%u m, then vent. main %u m, backup %u m.\r\n",
+			 static_cast<unsigned>(cfg.main_primary_deploy_altitude + 20u),
+			 static_cast<unsigned>(cfg.main_primary_deploy_altitude + 170u),
+			 static_cast<unsigned>(cfg.main_primary_deploy_altitude),
+			 static_cast<unsigned>(cfg.main_backup_deploy_altitude));
+	UartSend(b);
+	// The ceiling is not politeness, it is the failure found on the first real
+	// chamber run (2026-08-31).  Raw baro velocity CLIPS at 200 m/s.  While
+	// clipped, consecutive samples differ by 0 so SelectDeployVspeed keeps
+	// accepting them and pins m_last_raw_vspeed_ to the ceiling while the true
+	// velocity falls away underneath; on exit the reading must step by however
+	// far reality already dropped, which exceeded kDeployVelDistrustMps (20) and
+	// latched the velocity channel at +197.7 m/s for the remaining 213 s.
+	// descending (vz < -1) then never came true and apogee never fired.
+	// A pump at constant volumetric rate decays pressure exponentially, which in
+	// ALTITUDE terms is an ACCELERATING climb - that run passed 31 m/s at 5 s and
+	// 186 m/s at 8 s - so the ceiling has to be stated, not left to judgement.
+	UartSend("DIAG|VACSIM: keep the climb under ~100 m/s. Raw baro velocity clips"
+			 " at 200 and the deploy source latches there - apogee then cannot fire.\r\n");
+}
+#endif
+
 // ---------------------------------------------------------------------------
 // ServiceDeployTrace — 'p' console key
 //
@@ -1081,6 +1216,14 @@ void Factory::PrintConsoleHelp() {
 	UartSend("\r\nBench replay (no menu open, current arm state):\r\n"
 			 "  0-9      select the archive record to replay\r\n"
 			 "  B        start the replay\r\n");
+#endif
+#if SP_VACUUM_SIM
+	// No key: the arm edge stages it and the chamber triggers it.  Listed anyway,
+	// because a build that can fly itself on an arm MUST say so out loud - this
+	// line is the only warning an operator holding an unfamiliar board gets.
+	UartSend("\r\nVacuum-chamber flight sim: COMPILED IN (no key)\r\n"
+			 "  ARMING stages it; the chamber triggers launch. PYRO LIVE.\r\n"
+			 "  No e-match in the chamber. Reflash clean before flying.\r\n");
 #endif
 
 	// Keys that answer in any state, menu open or not.  Every one of them is

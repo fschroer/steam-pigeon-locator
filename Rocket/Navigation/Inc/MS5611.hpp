@@ -3,6 +3,7 @@
 #include "SpiDevice.hpp"
 #include "SpiBus.hpp"
 #include "Velocity.tpp"
+#include "MedianFilter.hpp"
 
 namespace RocketNav {
 
@@ -107,12 +108,29 @@ private:
 	VelocityEstimator<10> velocity_estimator_ { };
 	float velocity_ = 0;
 
+	// ── Pressure conditioning: median-5, THEN the IIR (ADR-0032) ────────────
+	// Order is load-bearing and was measured, not assumed.  Deconvolving the IIR
+	// out of the 2026 flight archive (it is exactly invertible) recovers 188
+	// outlier events, predominantly SINGLE-sample at the sensor.  Running the IIR
+	// first — as this chain did until 2026-08-31 — smears each one into a ~4
+	// sample decaying tail, which is why the record appeared to contain
+	// multi-sample outliers and why every downstream rejector had to be wider
+	// than the physics required.  Residual outlier events across the archive:
+	//
+	//     IIR alone (as shipped)   59 events / 123 outlier samples
+	//     IIR then median-3        41 / 104
+	//     median-3 then IIR        38 /  79
+	//     median-5 then IIR        25 /  46      <- this chain
+	//
+	// The median does the job the IIR cannot: it DISCARDS an outlier rather than
+	// attenuating it, and it is rate-agnostic, so unlike the +/-200 m/s clamp it
+	// removed (Velocity.tpp) it puts no ceiling on ascent rate.
+	MedianFilter<5>        m_pressure_median_ { };
+
 	// IIR pressure filter — software equivalent of the BMP280 hardware IIR.
-	// The MS5611 has no output-level inter-sample filter; under high rotation
-	// or mechanical vibration it produces single-sample pressure transients
-	// that translate to apparent altitude jumps of 10–165 m.  Filtering the
-	// raw pressure with a first-order IIR (kIirCoeff=4) attenuates each spike
-	// to 25% in one step, 6% in two steps — matching the BMP280 IIR-4 response.
+	// Kept, and still earning its place: it is the right tool for the Gaussian
+	// noise the median does not address, and on the archive it alone takes 188
+	// pre-filter events down to 59.  It is simply not an outlier rejector.
 	static constexpr float kIirCoeff          = 4.0f;
 	float                  m_iir_pressure_pa_ = 0.0f;
 	bool                   m_iir_initialized_ = false;

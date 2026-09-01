@@ -249,6 +249,71 @@ static void A5_TerminalDeployBias() {
     CHECK_MSG(nearf(s1.vspeed_mps, -0.2f, 0.5f), "velocity did not hold last good: vz=%.2f", s1.vspeed_mps);
 }
 
+// A8: the velocity channel must not LATCH.  Regression for the ADR-0003
+// amendment of 2026-08-31 (bench flight Testy_McTestface 205322).
+//
+// Raw baro velocity CLIPS at 200 m/s.  While clipped, consecutive samples differ
+// by 0, so the spike guard keeps accepting them and pins m_last_raw_vspeed_ to the
+// ceiling while true velocity falls away underneath.  The step off the plateau then
+// exceeds kDeployVelDistrustMps and is rejected -- and because the baseline only
+// updates on ACCEPTANCE, it froze there permanently: 0 of the next 4264 samples
+// re-entered the band.  The channel held +197.7 m/s for 213 s, so `descending`
+// (vz < -1) was structurally impossible and apogee never fired.  Every deployment
+// is gated on apogee, so the flight recorded nothing after Burnout.
+//
+// This fails on the pre-amendment code and passes after it.
+static void A8_VelocityChannelCannotLatch() {
+    printf("\n--- A8: clipped-then-falling velocity must not latch the channel ---\n");
+    RocketNav::Navigation nav; Archive ar; PowerManagement pw(nullptr);
+    FlightManager fm(nav, ar, pw);
+
+    uint32_t t = 0;
+    float agl = 600.0f;
+    // 1) Climb, clipped hard at the estimator ceiling for 2 s.
+    for (int i = 0; i < 40; ++i, t += 50) {
+        agl += 200.0f * 0.05f;
+        Cycle c; c.t_ms = t; c.raw_agl = agl; c.raw_vel = 200.0f; c.raw_valid = true;
+        c.fused_agl = agl; c.fused_vspeed = 200.0f; selectDirect(fm, c);
+    }
+    // 2) Come off the plateau faster than the per-cycle bound, exactly as the
+    //    bench flight did (197.7 -> 165.8 -> 137.1 -> ... in 50 ms steps), then
+    //    settle into a steady real descent.
+    const float fall[] = { 165.8f, 137.1f, 116.1f, 95.9f, 60.0f, 20.0f, -5.0f, -20.0f };
+    for (float v : fall) {
+        agl += v * 0.05f;
+        Cycle c; c.t_ms = t; c.raw_agl = agl; c.raw_vel = v; c.raw_valid = true;
+        c.fused_agl = agl; c.fused_vspeed = v; selectDirect(fm, c); t += 50;
+    }
+    // 3) Steady descent.  The channel must be reporting a NEGATIVE velocity that
+    //    tracks raw -- not the stale positive plateau value.
+    FlightManager::DeploySource s{};
+    for (int i = 0; i < 60; ++i, t += 50) {
+        agl -= 25.0f * 0.05f;
+        Cycle c; c.t_ms = t; c.raw_agl = agl; c.raw_vel = -25.0f; c.raw_valid = true;
+        c.fused_agl = agl; c.fused_vspeed = -25.0f; s = selectDirect(fm, c);
+    }
+    CHECK_MSG(s.vspeed_mps < -1.0f,
+              "velocity latched: reported %.1f m/s while raw was -25.0 m/s", s.vspeed_mps);
+    CHECK_MSG(nearf(s.vspeed_mps, -25.0f, 2.0f),
+              "velocity did not re-acquire raw: %.1f m/s", s.vspeed_mps);
+    printf("       recovered to %.1f m/s (raw -25.0)\n", s.vspeed_mps);
+
+    // 4) The healthy path must be untouched: one cycle of outage still enforces
+    //    exactly kDeployVelDistrustMps, so a genuine single-cycle spike is still
+    //    rejected rather than waved through by the widened bound.
+    RocketNav::Navigation nav2; Archive ar2; PowerManagement pw2(nullptr);
+    FlightManager fm2(nav2, ar2, pw2);
+    uint32_t t2 = 0;
+    for (int i = 0; i < 10; ++i, t2 += 50) {
+        Cycle c; c.t_ms = t2; c.raw_agl = 100.0f; c.raw_vel = -10.0f; c.raw_valid = true;
+        c.fused_agl = 100.0f; c.fused_vspeed = -10.0f; selectDirect(fm2, c);
+    }
+    Cycle spike; spike.t_ms = t2; spike.raw_agl = 100.0f; spike.raw_vel = 150.0f;
+    spike.raw_valid = true; spike.fused_agl = 100.0f; spike.fused_vspeed = -10.0f;
+    const FlightManager::DeploySource sp = selectDirect(fm2, spike);
+    CHECK_MSG(nearf(sp.vspeed_mps, -10.0f, 0.5f),
+              "single-cycle spike was accepted: %.1f m/s", sp.vspeed_mps);
+}
 // A7: apogee detection shares the source selector, so a diverged fused velocity
 // cannot stick the detector — raw drives it.  ADR-0003 acceptance bullet 4.
 static void A7_ApogeeSharesSource() {
@@ -858,6 +923,7 @@ int main(int argc, char** argv) {
     A4_GatedFused();
     A5_TerminalDeployBias();
     A7_ApogeeSharesSource();
+    A8_VelocityChannelCannotLatch();
 
     B1_NominalFlight();
     B2_SpikeNearMainRejected();

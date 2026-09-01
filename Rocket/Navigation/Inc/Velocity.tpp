@@ -41,25 +41,24 @@ private:
 template<size_t N>
 class VelocityEstimator {
 public:
-    // Maximum altitude change per 50 ms sample permitted before clamping.
-    // At 200 m/s (well above any real rocket baro ascent rate) a 50 ms step
-    // is 10 m.  Pyro shock transients produce 20-40 m single-step jumps that
-    // exceed this limit and are clamped, preventing ±100+ m/s spikes from
-    // appearing in the logged raw_baro_vel diagnostic.  Normal flight steps
-    // (~5 m at 20 Hz during boost) are well within the limit.
-    static constexpr float kMaxStepMps = 200.0f;
-
+    // ── The +/-200 m/s step clamp was REMOVED here (ADR-0032, issue #41) ─────
+    // It capped the altitude step at kMaxStepMps*dt, which capped reported
+    // velocity at 200 m/s — engaging from about Mach 0.6, so it truncated four
+    // of the eighteen 2026 flights and would saturate for the whole fast phase
+    // of a Mach 3-4 airframe.  Its own comment claimed 200 m/s was "well above
+    // any real rocket baro ascent rate"; the archive disproves that.
+    //
+    // Worse, it clamped the sample pushed INTO the ring rather than the output,
+    // so while saturated it fed the estimator a fictitious fixed step and its
+    // internal altitude lagged reality cumulatively.  The resulting flat 200 m/s
+    // plateau is what pinned SelectDeployVspeed's baseline to a ceiling and
+    // latched the deployment velocity channel for 213 s on bench flight
+    // 2026-08-31 205322 (ADR-0003 amendment).
+    //
+    // Spike rejection now happens where it belongs and where it is rate-agnostic:
+    // a median-5 on PRESSURE ahead of the IIR, inside MS5611.  This class is once
+    // again just a differentiator over a ring — it filters nothing.
     void addSample(float altitude_m, uint32_t timestamp_ms) {
-        if (ring_.size() > 0) {
-            auto prev = ring_.newest();
-            float dt = (timestamp_ms - prev.t) * 0.001f;
-            if (dt > 0.0f) {
-                float max_step = kMaxStepMps * dt;
-                float delta = altitude_m - prev.alt;
-                if (std::fabs(delta) > max_step)
-                    altitude_m = prev.alt + (delta > 0.0f ? max_step : -max_step);
-            }
-        }
         ring_.push(altitude_m, timestamp_ms);
     }
 

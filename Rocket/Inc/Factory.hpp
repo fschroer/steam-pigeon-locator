@@ -94,6 +94,12 @@ private:
 	// Called every cycle in EVERY device state, because the edges worth catching
 	// happen inside DeviceState::Test.
 	void ServiceDeployTrace();
+#if SP_VACUUM_SIM
+	// Stage the vacuum-chamber flight sim on the disarmed->armed edge
+	// (SP_VACUUM_SIM).  There is no console key; the arm edge is the
+	// only thing that stages it.
+	void ArmVacuumSim();
+#endif
 	// 'h' console key: how long the load switch stays latched on for metering.
 	// Long enough to find the probe points and read a settled value, short
 	// enough that walking away cannot leave the divider drawing current.
@@ -217,4 +223,11 @@ private:
 	bool       nav_test_requested_ = false;
 	// Archive slot the bench replay reads from ('0'..'9' console keys, #35/#36).
 	uint8_t    bench_replay_record_ = 0;
+	// Vacuum-chamber flight sim (SP_VACUUM_SIM) — staged by the arm edge, with
+	// no console key at all.  Left unguarded, like nav_test_requested_ above: a
+	// bool and a counter cost nothing, and a header that changes shape with a
+	// bench flag is a header that stops compiling in exactly the build nobody
+	// makes.
+	bool       vac_sim_running_   = false;
+	uint32_t   vac_sim_tick_      = 0;
 };

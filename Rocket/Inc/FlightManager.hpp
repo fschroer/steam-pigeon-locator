@@ -269,6 +269,37 @@ private:
     // deploy-bias, never withholds).  Velocity terminal = hold last good.
     // DRAFT for PR #9; the tunables below are placeholders to be set in #10.
     struct DeploySource { float agl_m; float vspeed_mps; };
+
+#if SP_VACUUM_SIM
+public:
+    // ── Bench diagnostic: what the detectors ACTUALLY consumed ───────────────
+    // Apogee, drogue and main do NOT read raw baro.  They read the output of
+    // SelectDeploymentSource(), which validates, coasts and (as a last resort)
+    // substitutes.  When that ladder leaves the raw rung, the console's raw baro
+    // columns keep looking perfectly healthy while the detectors are being fed
+    // something else entirely — and a stalled flight then reads as a detector
+    // bug.  This exposes the rung, so the two can be told apart in one line.
+    enum class SourceRung : uint8_t { Raw = 0, Coast = 1, Fused = 2, Terminal = 3,
+                                     Reseed = 4 };
+    struct DeployDebug {
+        float       agl_m;             // what DetectApogee saw as altitude
+        float       vspeed_mps;        // what DetectApogee saw as velocity
+        float       peak_agl_m;        // m_apogee_peak_agl_m_
+        uint32_t    since_new_max_ms;  // vs. kNoIncreaseWindowMs (500)
+        SourceRung  alt_rung;
+        SourceRung  vel_rung;
+    };
+    DeployDebug GetDeployDebug() const {
+        return { m_dbg_agl_m_, m_dbg_vspeed_mps_, m_apogee_peak_agl_m_,
+                 m_dbg_since_new_max_ms_, m_dbg_alt_rung_, m_dbg_vel_rung_ };
+    }
+private:
+    float      m_dbg_agl_m_             = 0.0f;
+    float      m_dbg_vspeed_mps_        = 0.0f;
+    uint32_t   m_dbg_since_new_max_ms_  = 0;
+    SourceRung m_dbg_alt_rung_          = SourceRung::Raw;
+    SourceRung m_dbg_vel_rung_          = SourceRung::Raw;
+#endif
     DeploySource SelectDeploymentSource(const NavSolution& sol, const BaroSample& baro_raw);
     float SelectDeployVspeed(const NavSolution& sol, const BaroSample& baro_raw);
     float SelectDeployAgl(const NavSolution& sol, const BaroSample& baro_raw, float vspeed_est);
@@ -282,6 +313,9 @@ private:
 
     // Tunables — TUNE against archived flights and record in ADR-0003 (see #10).
     static constexpr float    kDeployAltDistrustM   = 30.0f;  // max raw-alt deviation from projection (m)
+    // PER-CYCLE allowance.  Applied as a FIXED bound it latched the velocity
+    // channel permanently (ADR-0003 amendment 2026-08-31); SelectDeployVspeed now
+    // scales it by the number of unaccepted cycles.  See that function.
     static constexpr float    kDeployVelDistrustMps = 20.0f;  // max raw-vel jump/cycle (m/s) — keep loose
                                                               // so real chute-opening decel passes
     static constexpr uint32_t kDeployCoastMs        = 300u;   // hold window before fused considered (ms)

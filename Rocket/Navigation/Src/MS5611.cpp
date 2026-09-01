@@ -69,6 +69,7 @@ bool MS5611::init(float sample_rate_hz) {
 
 	m_state = State::Idle;
 	m_iir_initialized_ = false;   // reset IIR; readSampleBlocking() below warms it up
+	m_pressure_median_.reset();   // and its median, so pre-reset pressure cannot leak
 	RearmCC1ForD2();
 
 	BaroSample baro { }; // Pre-read baro to ensure valid subsequent reads
@@ -184,18 +185,30 @@ bool MS5611::readSample(BaroSample &out) {
 		out.pressure_pa = p_pa;
 		out.temperature_c = t_c;
 
-		// IIR pressure filter (equivalent to BMP280 hardware IIR coeff=4).
-		// Applied to the raw compensated pressure before converting to altitude
-		// so both altitude_m_msl and altitude_m_agl are filtered consistently.
-		// A single-sample spike of 165 m is attenuated to ~41 m after one step,
-		// ~10 m after two steps, and < 1 m after four steps (~200 ms recovery).
-		// On first valid sample the filter is seeded directly so there is no
-		// step transient at startup.
+		// Pressure conditioning: MEDIAN, then IIR (ADR-0032).  Both act on the
+		// compensated pressure before the altitude conversion, so altitude_m_msl
+		// and altitude_m_agl are conditioned consistently.  out.pressure_pa above
+		// stays the UNfiltered compensated value, so the raw reading is still
+		// observable.
+		//
+		// The median runs FIRST because it is the only one of the two that can
+		// actually remove an outlier: a single-sample spike is DISCARDED here.
+		// Left to the IIR alone the same spike was merely attenuated (a 165 m
+		// transient to ~41 m after one step, ~10 m after two, < 1 m after four) and
+		// smeared across ~4 samples — which is what made single-sample sensor
+		// spikes look like multi-sample events in the archive, and forced every
+		// downstream rejector wider than the physics required.
+		//
+		// The IIR still runs, on the now outlier-free stream, doing the job it is
+		// actually for: Gaussian noise.  On first valid sample it is seeded
+		// directly so there is no step transient at startup.
+		const float p_med = m_pressure_median_.push(p_pa);
+
 		if (!m_iir_initialized_) {
-			m_iir_pressure_pa_ = p_pa;
+			m_iir_pressure_pa_ = p_med;
 			m_iir_initialized_ = true;
 		} else {
-			m_iir_pressure_pa_ += (p_pa - m_iir_pressure_pa_) * (1.0f / kIirCoeff);
+			m_iir_pressure_pa_ += (p_med - m_iir_pressure_pa_) * (1.0f / kIirCoeff);
 		}
 		const float p_filt = m_iir_pressure_pa_;
 

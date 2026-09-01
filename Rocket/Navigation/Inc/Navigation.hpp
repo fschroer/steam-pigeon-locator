@@ -34,6 +34,40 @@
 #include "FlightArchive.hpp"
 #endif
 
+// ---------------------------------------------------------------------------
+// Vacuum-chamber flight simulation (#SP_VACUUM_SIM) — DISABLED by default.
+// Set to 1 here (or build with -DSP_VACUUM_SIM=1) to fly a whole flight in a
+// vacuum chamber: REAL chamber pressure drives everything from apogee onward,
+// and a synthetic accelerometer boost is injected across the ONE window the
+// chamber cannot produce.  MUST remain 0 in any production/flight build.
+//
+// Which gates actually need accel, and which do not, is the whole design:
+//
+//   Launch   NEEDS it — the dual-sensor path is 1.5 g AND raw baro AGL past
+//            launch_detect_altitude, held 80 ms (ADR-0015).  The chamber
+//            supplies the ALTITUDE half for real; only the thrust half is
+//            synthetic.
+//   Burnout  NEEDS a boost to have preceded it — accel < 1.5 g for 3 samples.
+//   Apogee   Uses accel only as a CEILING (<= 1.3 g).  A locator sitting still
+//            in a chamber reads 1 g and passes; the descent itself comes from
+//            raw baro.
+//   Drogue / main / landing  Do not read accel at all — raw baro only.
+//
+// So the injection is a single ~kVacSimBoostMs pulse and then it stops.
+// Everything after burnout runs on genuinely real sensor data, which is the
+// reason to use a chamber rather than SP_BENCH_REPLAY in the first place: a
+// replay proves the state machine, a chamber proves the MS5611 signal path
+// feeding it, and it needs no previously-flown record to replay from.
+//
+// THERE IS NO CONSOLE KEY.  The harness is staged by the disarmed->armed edge
+// and triggered by the chamber itself, so the whole procedure works on a sealed
+// jar with no cable: arm from the app, then start the pump.  See armVacuumSim().
+// Procedure: docs/bench-vacuum-sim.md.
+// ---------------------------------------------------------------------------
+#ifndef SP_VACUUM_SIM
+#define SP_VACUUM_SIM 0
+#endif
+
 namespace RocketNav {
 
 class Navigation {
@@ -219,6 +253,46 @@ public:
     void stopTestReplay();
 #endif
 
+#if SP_VACUUM_SIM
+    // Synthetic thrust.  2.0 g clears ADR-0015's 1.5 g DUAL-SENSOR bar with
+    // margin while staying well under the 5 g accel-only bar — this harness
+    // deliberately fires the dual-sensor path, because that path's ALTITUDE
+    // half is exactly what a chamber can supply for real.  300 ms clears the
+    // 80 ms dual-sensor hold nearly four times over.
+    static constexpr float    kVacSimThrustG = 2.0f;
+    static constexpr uint32_t kVacSimBoostMs = 300u;
+
+    // Stage the harness.  Called on the disarmed->armed edge, which is the only
+    // thing that stages it — there is no console key, so the whole procedure
+    // runs on a sealed jar over the air.
+    //
+    // trigger_agl_m is the locator's OWN launch_detect_altitude, deliberately
+    // not a threshold of this harness's own: the trigger and the gate it is
+    // trying to satisfy then cannot drift apart when the setting changes.
+    //
+    // Why a pressure trigger works here, when it does not work for a keypress-
+    // started boost: while in WaitingLaunch the AGL reference is re-zeroed every
+    // stationary cycle through an LPF with alpha 0.02 (~2.5 s at 20 Hz), so a
+    // constant climb rate R settles at a reported AGL of only R * 2.5 s.
+    // Reaching a 30 m gate therefore needs ~12 m/s — about 1.4 mbar/s — which
+    // any real pump exceeds by one to two orders of magnitude at the start of an
+    // evacuation.  The reference is outrun, not defeated.  And the first
+    // injected sample takes accel outside pad_stationary_accel_tol_g, so
+    // IsStationary goes false and the zeroing stops there and then.
+    void armVacuumSim(float trigger_agl_m) {
+        m_vac_trigger_agl_m_ = trigger_agl_m;
+        m_vac_staged_        = true;
+    }
+
+    // Stop NEW triggers; an in-progress pulse still runs to completion.  Called
+    // on disarm, and once the flight state leaves WaitingLaunch so the harness
+    // cannot re-fire mid-flight.
+    void disarmVacuumSim() { m_vac_staged_ = false; }
+
+    bool isVacuumSimStaged()   const { return m_vac_staged_; }
+    bool isVacuumSimBoosting() const { return m_vac_boost_active_; }
+#endif
+
 private:
     // IsStationary is private — used only by CalibrateOnPadAndZeroAglUntilLaunch.
     // Launch/burnout/apogee/landing detection is owned by FlightManager.
@@ -386,6 +460,18 @@ private:
     ImuSample  m_test_imu_sample_{};
     BaroSample m_test_baro_sample_{};
     GpsSample  m_test_gps_sample_{};
+#endif
+
+#if SP_VACUUM_SIM
+    bool     m_vac_staged_        = false;
+    bool     m_vac_boost_active_  = false;
+    uint32_t m_vac_boost_start_   = 0;
+    float    m_vac_trigger_agl_m_ = 0.0f;
+
+    // Fire the synthetic thrust pulse when the chamber lifts REAL raw baro AGL
+    // past the trigger, end it once kVacSimBoostMs has elapsed, and overwrite
+    // the body-frame accel while it runs.  No-op when not staged.
+    void applyVacuumSimBoost(ImuSample& imu, const BaroSample& baro);
 #endif
 };
 

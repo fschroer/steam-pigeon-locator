@@ -2,6 +2,219 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-08-31 (analysis) — baro filtering rebuilt from the 2026 archive: median-5 ahead of the IIR, ±200 m/s clamp REMOVED — [ADR-0032](adr/0032-baro-outlier-filtering.md), closes [#41](https://github.com/fschroer/steam-pigeon-locator/issues/41)
+
+Swept every 2026 (MS5611) recording — earlier years are BMP280 and not comparable hardware.
+**20 recordings, 3 excluded as corrupt loads, 17 analysed.**
+
+🔧 **The chain is now `median-5 on pressure → IIR(4) → altitude`, and `VelocityEstimator` filters
+nothing.** New `MedianFilter<N>` in `Rocket/Common/Inc` — HAL-free and header-only so it is
+unit-testable. Cost **+200 B flash, +32 B RAM, 100 ms group delay** (~2 m at main-deploy descent
+rates; well inside apogee's 500 ms no-new-max window).
+
+**Why a rank filter.** A linear filter cannot reject an outlier — the IIR attenuates a spike 25 %
+per step and smears the residue, which is why a second, cruder rate clamp got bolted on
+downstream, and why that clamp had to cap velocity. A median **discards** the outlier and is
+**rate-agnostic**, so it imposes no ceiling on ascent rate.
+
+📋 **Measured, not assumed.** The IIR is exactly invertible (`x[n]=4y[n]−3y[n−1]`), so the
+pre-filter signal was recovered from the archive: **188 pre-IIR events, predominantly
+single-sample.** Running the IIR first *creates* the multi-sample outliers — visible directly as
+`[318, 317, 328, **461**, 426, 400, 381]`, one bad sample plus a decaying tail.
+
+| chain | residual events | outlier samples |
+|---|---|---|
+| IIR alone (shipped) | 59 | 123 |
+| IIR → median-3 | 41 | 104 |
+| median-3 → IIR | 38 | 79 |
+| **median-5 → IIR** | **25** | **46** |
+
+Ordering matters modestly for event count, clearly for smearing; **window width is the bigger
+lever** — an honest correction to the initial "the order is wrong" framing.
+
+📋 **The clamp was already truncating real flights.** On spike-free references **4 of 18 flights
+exceed 200 m/s**, peaking at **393 m/s (Mach 1.15)** on `Shane Mach2` at 2439 m — no Mach 3–4
+airframe required. Descent dominates the noise population: **50 of 78 events (64 %)**, median 35 m,
+p90 119 m, max 214 m — confirming the descent noise observed on the bench.
+
+❌ **Rejected:** raising `kMaxStepMps` (keeps a magnitude test; every observed spike is 8–214 m, so
+all of them slip under any usable ceiling); keeping the clamp as a backstop (its failure is
+structural — it rewrites the sample pushed INTO the ring and desynchronises silently); **Hampel**
+(underperforms a plain median — the MAD inflates during a clustered excursion and loosens its own
+threshold); a **jerk bound** (accumulates 98 m RMS offset). **No Mach lockout added** — per
+fschroer, spurious transonic descent signals occur *under thrust* for ~0.5 s, which
+`kApogeeMaxThrustG = 1.3 g` already inhibits.
+
+⚠️ **3 of 20 recordings are corrupt LOADS, not noisy sensors — [#42](https://github.com/fschroer/steam-pigeon-locator/issues/42).**
+`Shane Swizzle Stick 2026-08-02` has **9,669 rows for 1,997 distinct timestamps** (4.8×
+duplication, 14 backwards steps) and is **not labelled as bad**. It alone contributed 206 of an
+initial 394 events and would have badly skewed the filter sizing. **It is also one of
+[ADR-0018](adr/0018-landing-detection-quiescence-window.md)'s three landing-validation flights** —
+its quoted 79-sample quiet run is nearer 16 true samples, which still clears the 13 lower bound but
+voids the "8 samples clear" margin argument. A caveat block is now in ADR-0018. **Filtering is the
+wrong fix for a transport defect and must not paper over one.**
+
+📋 **REVISIT AS MORE FLIGHT DATA ARRIVES.** ADR-0032 carries an explicit revisit section; the
+short version: the sizing rests on **17 flights from one season with exactly ONE past Mach 1**, and
+the pre-IIR signal was **reconstructed by deconvolution, not logged**. Re-run
+`Tests/BaroFilter` and the offline sweep when new MS5611 flights land (especially supersonic ones),
+if raw pressure logging is ever added, or if a descent outlier survives the median-5 and reaches a
+deployment decision.
+
+✅ **Coverage.** New `Tests/BaroFilter` (48 assertions: warm-up, single-sample and two-sample spike
+rejection, a Mach 4 ramp passing unattenuated, the un-capped velocity estimator, and the
+ordering comparison — median→IIR leaves **0.00 m** excursion vs **56.25 m** for IIR→median).
+Full host suites: **FlightReplay 100/100, ArchiveRoundTrip 636/636, BaroFilter 48/48 = 784.**
+Firmware builds clean. **Host-validated only — has not flown.**
+
+## 2026-08-31 (bench 1) — FIRST CHAMBER RUN found a real FLIGHT-PATH defect: `SelectDeployVspeed` could latch permanently — **FIXED**, ADR-0003 amended
+
+Run `Testy_McTestface_..._2026-08-31_205322`. **The harness did its job**: launch declared at
+150 ms, burnout at 450 ms, the 2.0 g pulse is visible in `accel_x_g` with `accel_alt_x_g` still
+reading real (the intended signature). **Apogee, both deployments and landing never fired.** The
+flight sat in `Burnout` for 227 s at −3 m AGL.
+
+⚠️ **Root cause is in the ADR-0003 deployment source, not in the harness or the detectors.**
+Replaying `SelectDeployVspeed`/`SelectDeployAgl`/`DetectApogee` against the exported CSV
+reproduces the stall exactly:
+
+- Raw baro velocity **clips at ±200 m/s**. While clipped, consecutive samples differ by 0, so the
+  spike guard keeps accepting them and pins `m_last_raw_vspeed_` **to the ceiling** while true
+  velocity falls away underneath.
+- **t = 13693 ms:** raw stepped 197.7 → 165.8 m/s in one 50 ms cycle — a **31.9 m/s** jump past
+  `kDeployVelDistrustMps` (20) — and was rejected as a spike.
+- `m_last_raw_vspeed_` updates **only on acceptance**, so the comparison baseline froze at
+  +197.7. **0 of the remaining 4264 samples** re-entered the ±20 band.
+- The velocity channel held **+197.7 m/s for 213 s**, through the whole 20.6 s real descent.
+  `descending` (`vz < −1.0`) was **structurally impossible** → apogee could never fire → every
+  downstream event is gated behind it. `no_new_max` was satisfied for 215 s; velocity was the sole
+  blocker. Altitude was fine — `raw` rung for all 4535 samples, ending correctly at −3.1 m.
+
+✅ **FIXED — [ADR-0003 amendment 2026-08-31](adr/0003-priority1-deployment-raw-baro.md).** Two
+changes to `SelectDeployVspeed`, velocity channel only:
+1. **The bound scales with unaccepted cycles** — `kDeployVelDistrustMps × max(1, dt·SAMPLES_PER_SECOND)`.
+   It is a PER-CYCLE allowance and was being applied as a fixed one. **One cycle of outage
+   reproduces the original bound exactly, so the healthy path is bit-for-bit unchanged**; this only
+   loosens a bound that is already failing.
+2. **The terminal rung re-seeds from raw** instead of holding last good forever. Past
+   `kDeployRefLostMs` the held value has outlived its reference by 1.5 s and is not a measurement.
+   Worst case is one wrong value for 1.5 s. Matches what the altitude channel already does in
+   spirit — it refuses to freeze because a withheld deployment is the worse failure.
+
+📋 **Validation.** `Tests/FlightReplay` **A8** is the regression guard: it reproduces the
+clipped-plateau exit, **fails on the pre-amendment code** ("velocity latched: reported 200.0 m/s
+while raw was −25.0 m/s") and passes after — verified by reverting the fix and re-running. Its
+third assertion pins the healthy path (a single-cycle spike is still rejected). Suites after the
+change: **FlightReplay 100/100**, **ArchiveRoundTrip 636/636** (note: an older handoff line claims
+638 — 636 is what the suite reports now, 0 failed; unrelated to this change). Replaying the failing
+bench CSV through the **real** `FlightManager` now yields the full ladder: apogee 14142, drogue-P
+14142, drogue-B 16141, main-P 29284, main-B 30184, landing 38179 ms — all four channels fired.
+
+⚠️ **The ±200 m/s clamp in the baro velocity estimator is UNTOUCHED — filed as [#41](https://github.com/fschroer/steam-pigeon-locator/issues/41).**
+It is what pins the baseline to a ceiling in the first place (while saturated, consecutive samples
+differ by 0, so the guard keeps accepting them). It clamps the **altitude sample pushed into the
+ring**, not the output, so the estimator's internal altitude lags reality for the whole saturated
+window (reported `altitude_m_agl` is unaffected). Its premise — "200 m/s, well above any real
+rocket baro ascent rate" — engages at **~Mach 0.6**; a Mach 3–4 flight is 1030–1370 m/s.
+Deployment is not endangered today (every charge is gated on a subsonic baro apogee + descent), but
+the **record**, **FR-P13 air-start** (which gates on ascent rate) and NFR-1's "proven source" all
+are. Open question in the issue: above ~Mach 1 the baro is aerodynamically compromised anyway, so
+the honest fix may be to mark it *untrustworthy* rather than report a bigger number.
+
+🔧 **The asymmetry that caused it.** `SelectDeployAgl` survived the identical excursion because its
+bound **widens with outage** (`bound = 30 + |v|·dt`). `SelectDeployVspeed`'s bound is a **fixed
+20 m/s forever with no re-seed**, and its terminal rung is documented as "hold last good" — with
+no path back. **This is reachable in flight:**
+[ADR-0018](adr/0018-landing-detection-quiescence-window.md) already records the same signature on
+a REAL flight (Frank Tomach 2026-08-01, "velocity clipping at 200 m/s on an already-landed
+rocket"). There it happened after landing and cost nothing; **before apogee it loses every
+deployment.** Needs a decision + ADR-0003 amendment — candidate fixes: widen the velocity bound
+with outage as altitude does, and/or re-seed from raw after `kDeployRefLostMs`. **NOT changed —
+this is the safety-critical deployment path.**
+
+📋 **Rate control turned out NOT to be required.** The rig is a Ball jar with a hole in the lid and
+a **shop vac** tilted over it — no fine pressure control exists, so the "keep it under 100 m/s"
+guidance I first wrote was unactionable. With the ADR-0003 amendment it is also unnecessary: the
+same recording replays to a complete flight. The doc now says depth is not worth chasing (~150 m is
+enough) and to let it settle at ambient rather than snatching the seal off. Context on the run: it
+went to **1818 m at ~200 m/s** when the gates need ~150 m. A pump at constant volumetric rate decays
+pressure exponentially, which in ALTITUDE terms is an **accelerating** climb: 31 m/s at 5 s,
+92 at 6 s, 186 at 8 s, clipped by 9 s. My guidance said "take it ABOVE 150 m" and gave **no
+ceiling** — now it says climb to a few hundred metres, keep it under ~100 m/s, and close the
+valve rather than leaving it open.
+
+🔧 **New diagnostic (`SP_VACUUM_SIM`).** The trace printed RAW baro, which looked healthy the whole
+time while the detectors were fed a held value — it could not distinguish a source failure from a
+detector failure. It now prints a second line, `DETECTOR SEES ... [rung]`, exposing which rung of
+the ADR-0003 ladder each channel used (`raw`/`coast`/`fused`/`TERMINAL`) plus the peak and the
+no-new-max timer. `FlightManager::GetDeployDebug()`, guarded by the flag. **Worth promoting out
+of the flag** — "the state machine stalled and raw baro looks fine" is a whole class of bug that
+is otherwise invisible.
+
+## 2026-08-31 — `SP_VACUUM_SIM`: a vacuum chamber flies a whole flight, staged by ARMING — COMMITTED, NOT BENCH-TESTED
+
+New fourth bench flag ([bench-vacuum-sim.md](bench-vacuum-sim.md),
+[ADR-0031](adr/0031-vacuum-chamber-flight-simulation.md)). **There is no console key.**
+The **disarmed->armed edge stages** the harness; the **chamber triggers launch** when real raw
+baro AGL crosses the locator's own `launch_detect_altitude`, at which point a **2.0 g / 300 ms**
+pulse supplies the missing thrust term. Defaults to 0, registered in
+`Scripts/check-bench-flags.sh`. Cost at `-O0`: **+3864 B flash, +24 B RAM** (257148 -> 261012
+text; bss 41432 -> 41456) — re-measured after the detector-rung trace landed; the first figure of
++1960 B predated it. Both configurations link clean, no new warnings.
+
+**The launch it produces is a real dual-sensor launch.** ADR-0015's dual-sensor path is 1.5 g
+**and** AGL past the gate held 80 ms — and the chamber satisfies the **altitude half for real**.
+Only the thrust term is synthetic, for 300 ms. Everything after burnout is real pressure:
+apogee, drogue, main and landing read no acceleration at all. **No gate was relaxed or
+bypassed** — every threshold runs at its flight value.
+
+⚠️ **Correction to this ADR's own first draft, worth reading.** The first cut used a console key
+and *rejected* a pressure trigger because "the AGL reference tracks the evacuation out." That
+objection was asserted qualitatively and is **wrong by two orders of magnitude**:
+`zeroAglReference` is an LPF with alpha 0.02 at 20 Hz (tau 2.5 s), so a constant climb rate R
+settles at `R x 2.5 s` and a 30 m gate needs only ~12 m/s — about **1.4 mbar/s**, where a 5 L jar
+on a 20 L/min pump starts near **67 mbar/s**. The qualitative argument was right and still gave
+the wrong design, because the magnitude was never checked. **A rate objection needs a number.**
+
+⚠️ **Arming is the trigger, so every chamber run is armed and the pyro channels are live inside a
+sealed vessel.** The mitigation is procedural: **no e-match, igniter or charge in the chamber.**
+Nothing here writes `DARM` ([ADR-0021](adr/0021-arming-gates-pyro-only.md) intact). Abort =
+disarm from the app, which drops `DARM` next cycle **and** un-stages the harness; the sim enters
+no quiet mode, so the receiver's command path stays open
+([ADR-0027](adr/0027-deployment-test-is-app-only.md)'s rule, checked not assumed).
+**There is no disarmed chamber run** — that is the price of the arm edge, and `SP_BENCH_REPLAY`
+already covers #36's disarmed criteria.
+
+✅ **An escaped build is nearly inert on a real pad, by design.** Arming stages it, but the rocket
+sits at AGL~0 so nothing triggers; real launch declares on the accel-only path within ~200 ms;
+Factory un-stages on the next cycle; the rocket reaches 30 m at ~1 s, ~750 ms after un-staging.
+**It never fires.** Only a weak motor that misses the 5 g bar reaches the injector, costing
+~300 ms of overwritten accel. This is *not* a licence to fly the flag — reflash clean, as with
+`SP_LOSS_INJECT`.
+
+📋 **Reported altitudes are offset, and ADR-0018's "no AGL ceiling" is now load-bearing here.**
+The reference freezes at pulse start while lagging by `R x 2.5 s`, so the flight "launches" from
+tens of metres and **reported AGL goes negative** on venting back to ambient. Landing still
+detects only because [ADR-0018](adr/0018-landing-detection-quiescence-window.md) Decision 2
+refuses an absolute AGL gate. Re-introducing one would break chamber runs as well as uphill
+landing sites.
+
+📋 **Evacuate briskly but not violently.** Too slow never crosses the gate (the trigger re-arms
+every cycle while staged, so it retries — but it cannot fire if the gate is never reached). Too
+fast can exceed `SelectDeployVspeed`'s 20 m/s-per-cycle spike bound and put the velocity channel
+into coast. The chamber must also out-climb the main gate: `main_primary` fires on
+`deploy_agl <= main_primary_deploy_altitude` with **no descent term**. The arm line prints the
+target; printed, not enforced.
+
+📋 **A sim record is NOT marked in the archive** (deliberate — no `ARCHIVE_VERSION` break for a
+bench-only concern). Three tells: the pulse is a **300 ms rectangle at exactly 2.0 g**; it injects
+the *selected* accel channel only, so `accel` and `accel_alt_cg` **disagree** where a real boost
+moves both; and the flight starts at tens of metres AGL. **Revisit if a sim record is ever
+mistaken for flight evidence** — ADR-0018's window rests on three flights.
+
+📋 **Not yet run in an actual chamber.** Build- and analysis-verified only. On the first run,
+watch the AGL/velocity columns in the 5-second progress trace before trusting any transition.
+
 ## 2026-08-30 (bench 5) — connecting mid-scan splits the receiver's radio from its own settings — DIAGNOSED, NOT FIXED — [#40](https://github.com/fschroer/steam-pigeon-locator/issues/40)
 
 Found while exercising the Communication screen, **unrelated to the ADR-0011 amendment** and

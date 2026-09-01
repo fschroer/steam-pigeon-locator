@@ -207,6 +207,17 @@ bool FlightManager::DetectLanded(const NavSolution& sol, const BaroSample& baro_
     return m_landed_count_ >= kLandedConfirmSamples;
 }
 
+#if SP_VACUUM_SIM
+// Bench-only rung markers (SP_VACUUM_SIM).  Record which rung of the ADR-0003
+// ladder each channel actually used this cycle, so a stalled flight can be told
+// apart from a stalled DETECTOR at the console.  Compiled out otherwise.
+#define VacDbgAltRung(r) (m_dbg_alt_rung_ = (r))
+#define VacDbgVelRung(r) (m_dbg_vel_rung_ = (r))
+#else
+#define VacDbgAltRung(r) ((void)0)
+#define VacDbgVelRung(r) ((void)0)
+#endif
+
 // ---------------------------------------------------------------------------
 // Priority-1 deployment source selection (ADR-0003 Decision 2) — DRAFT, see #10
 // Altitude and velocity are validated and coasted INDEPENDENTLY (per channel).
@@ -228,26 +239,78 @@ float FlightManager::SelectDeployVspeed(const NavSolution& sol, const BaroSample
             m_last_raw_vspeed_    = baro_raw.velocity;
             m_last_raw_vspeed_ms_ = now_ms;
             m_have_raw_vspeed_    = true;
+            VacDbgVelRung(SourceRung::Raw);
             return baro_raw.velocity;
         }
+        VacDbgVelRung(SourceRung::Fused);
         return sol.vertical_speed_mps;          // no proven raw velocity yet
     }
 
+    // ── Outage-scaled spike bound (ADR-0003 amendment, 2026-08-31) ───────────
+    // kDeployVelDistrustMps is a PER-CYCLE allowance, but it used to be applied
+    // as a FIXED bound against m_last_raw_vspeed_ — which only updates on
+    // ACCEPTANCE.  Once raw diverged past it and stayed diverged, the comparison
+    // baseline froze while reality walked away, and the channel could never
+    // re-accept: a self-reinforcing latch with no exit.  Bench flight
+    // 2026-08-31 205322 hit it exactly — raw baro velocity CLIPS at 200 m/s, the
+    // clipped plateau pinned the baseline to the ceiling (consecutive samples
+    // differ by 0, so they keep being accepted), and the step off the plateau was
+    // 197.7 -> 165.8 m/s in one cycle.  The channel then held +197.7 m/s for 213
+    // seconds, through the entire real descent, so `descending` was structurally
+    // impossible and apogee never fired.  Every downstream event is gated on
+    // apogee, so the flight recorded nothing after Burnout.
+    //
+    // Scaling the bound by the number of unaccepted cycles lets N rejected cycles
+    // permit exactly what N accepted cycles would have.  This is the same widening
+    // the ALTITUDE channel has always had (bound = kDeployAltDistrustM + |v|*dt),
+    // and that asymmetry is precisely why altitude rode out the same excursion on
+    // the raw rung for all 4535 samples while velocity was stranded.
+    //
+    // One cycle of outage reproduces the original bound EXACTLY, so the healthy
+    // path is unchanged — this only ever loosens a bound that was already failing.
+    const uint32_t outage_ms = now_ms - m_last_raw_vspeed_ms_;
+    const float    cycles    = (outage_ms * 0.001f) * static_cast<float>(SAMPLES_PER_SECOND);
+    const float    bound     = kDeployVelDistrustMps * (cycles > 1.0f ? cycles : 1.0f);
+
     // Accept raw if self-consistent with the last good raw velocity.
     if (baro_raw.valid
-            && std::fabs(baro_raw.velocity - m_last_raw_vspeed_) <= kDeployVelDistrustMps) {
+            && std::fabs(baro_raw.velocity - m_last_raw_vspeed_) <= bound) {
         m_last_raw_vspeed_    = baro_raw.velocity;
         m_last_raw_vspeed_ms_ = now_ms;
+        VacDbgVelRung(SourceRung::Raw);
         return baro_raw.velocity;
     }
 
-    const uint32_t outage_ms = now_ms - m_last_raw_vspeed_ms_;
-    if (outage_ms <= kDeployCoastMs)
+    if (outage_ms <= kDeployCoastMs) {
+        VacDbgVelRung(SourceRung::Coast);
         return m_last_raw_vspeed_;              // hold (zero-order)
+    }
     if (outage_ms <= kDeployRefLostMs
-            && std::fabs(sol.vertical_speed_mps - m_last_raw_vspeed_) <= kDeployVelDistrustMps)
+            && std::fabs(sol.vertical_speed_mps - m_last_raw_vspeed_) <= bound) {
+        VacDbgVelRung(SourceRung::Fused);
         return sol.vertical_speed_mps;          // gated fused
-    return m_last_raw_vspeed_;                  // terminal: hold last good
+    }
+
+    // ── Terminal: RE-SEED from raw, do not hold last good forever ────────────
+    // "Hold last good" is only defensible while the hold is TEMPORARY.  Past
+    // kDeployRefLostMs the old value is not a measurement any more, it is a stale
+    // number that has already outlived its reference by 1.5 s — and holding it
+    // forever is what turned a transient baro excursion into a permanently dead
+    // deployment path.  Re-anchoring to the sensor is also what ADR-0003 already
+    // does on the altitude channel, which refuses to freeze and instead keeps a
+    // conservative descending projection: a withheld deployment is the worse
+    // failure, so neither channel may go inert.
+    //
+    // Bounded by construction: the worst case is one wrong value for
+    // kDeployRefLostMs, after which the channel is back on the real sensor.
+    if (baro_raw.valid) {
+        m_last_raw_vspeed_    = baro_raw.velocity;
+        m_last_raw_vspeed_ms_ = now_ms;
+        VacDbgVelRung(SourceRung::Reseed);
+        return baro_raw.velocity;
+    }
+    VacDbgVelRung(SourceRung::Terminal);
+    return m_last_raw_vspeed_;                  // raw unusable: nothing to re-seed from
 }
 
 // Altitude channel: first-order hold (coasts on the best current velocity); a raw
@@ -262,8 +325,10 @@ float FlightManager::SelectDeployAgl(const NavSolution& sol, const BaroSample& b
             m_last_raw_agl_m_  = baro_raw.altitude_m_agl;
             m_last_raw_agl_ms_ = now_ms;
             m_have_raw_agl_    = true;
+            VacDbgAltRung(SourceRung::Raw);
             return baro_raw.altitude_m_agl;
         }
+        VacDbgAltRung(SourceRung::Fused);
         return sol.altitude_agl_m;              // no proven raw altitude yet
     }
 
@@ -276,13 +341,19 @@ float FlightManager::SelectDeployAgl(const NavSolution& sol, const BaroSample& b
     if (baro_raw.valid && std::fabs(baro_raw.altitude_m_agl - coast) <= bound) {
         m_last_raw_agl_m_  = baro_raw.altitude_m_agl;
         m_last_raw_agl_ms_ = now_ms;
+        VacDbgAltRung(SourceRung::Raw);
         return baro_raw.altitude_m_agl;
     }
 
-    if (outage_ms <= kDeployCoastMs)
+    if (outage_ms <= kDeployCoastMs) {
+        VacDbgAltRung(SourceRung::Coast);
         return coast;                           // brief outage / single spike
-    if (outage_ms <= kDeployRefLostMs && std::fabs(sol.altitude_agl_m - coast) <= bound)
+    }
+    if (outage_ms <= kDeployRefLostMs && std::fabs(sol.altitude_agl_m - coast) <= bound) {
+        VacDbgAltRung(SourceRung::Fused);
         return sol.altitude_agl_m;              // gated fused
+    }
+    VacDbgAltRung(SourceRung::Terminal);
 
     // Terminal: conservative deploy-bias — keep coasting a descending projection,
     // floored so a reference lost near apogee still trends down toward main.
@@ -294,6 +365,11 @@ FlightManager::DeploySource
 FlightManager::SelectDeploymentSource(const NavSolution& sol, const BaroSample& baro_raw) {
     const float vspeed = SelectDeployVspeed(sol, baro_raw);        // velocity first
     const float agl    = SelectDeployAgl(sol, baro_raw, vspeed);   // altitude coasts on it
+#if SP_VACUUM_SIM
+    m_dbg_vspeed_mps_ = vspeed;
+    m_dbg_agl_m_      = agl;
+    m_dbg_since_new_max_ms_ = sol.timestamp_ms - m_apogee_last_increase_ms_;
+#endif
     return { agl, vspeed };
 }
 
