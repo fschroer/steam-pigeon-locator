@@ -47,5 +47,6 @@ Write an ADR for a decision that is costly to reverse, or that future work must 
 | [0030](0030-app-flight-log.md) | The app records its own flight log — link quality and spoken callouts, which exist nowhere but the phone | Accepted |
 | [0031](0031-vacuum-chamber-flight-simulation.md) | A vacuum chamber can fly a whole flight — arming stages it, the chamber triggers it, and only the thrust term is synthetic | Accepted |
 | [0032](0032-baro-outlier-filtering.md) | Reject baro outliers with a rank filter ahead of the IIR, and stop capping the ascent rate | Accepted |
+| [0033](0033-serialized-ble-writes.md) | Outbound BLE writes are serialized by the app — a busy transport is not a device failure | Accepted |
 
 > **Numbering note (resolved 2026-08-03):** the iOS-port ADR and the launch-detection ADR were both filed as **0015**. Launch detection was filed first (2026-07-17) and keeps the number; the iOS port moved to **0016**. Commit `4b6bb45` and any external reference calling the iOS port "ADR-0015" mean [0016](0016-ios-port-corebluetooth-and-platform-parity.md) — a note in that file records the change. When picking the next number, check this table rather than the highest number you remember.
