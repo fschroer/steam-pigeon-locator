@@ -215,6 +215,18 @@ a main-inflation plateau a vacuum pump does not reproduce. A clean chamber landi
 says the detector runs; it says nothing about the false-landing case that ADR is
 actually about.
 
+**Exercised on hardware three times** (2026-08-31 `205322`, 2026-09-01 `134123` and
+`134309`). The `134309` run produced a **complete, correctly sequenced flight** — launch
+at 31 m, burnout +300 ms, apogee 500 ms after the 1937 m peak, drogue backup at exactly
++2.0 s, main at 128.7 m and backup at 99.6 m against their 130/100 m gates, landing at
+−2.6 m. The harness does what this ADR claims.
+
+**The failure mode it exposes is operator technique, not firmware.** Run `134123`
+false-triggered apogee at 117 m because the vacuum was eased off for ~0.5 s mid-climb —
+a genuine apogee by every criterion the detector has, with the 1.3 g thrust ceiling long
+since released. The climb must be **monotonic**; bench-vacuum-sim.md now says so, with
+the trace.
+
 **Cost:** +3864 bytes flash, +24 bytes RAM at `-O0` (257148 → 261012 text) — still smaller than the console-key
 design it replaced, because reusing the arm edge deleted the state reset, record
 open and key handler that version had to duplicate.

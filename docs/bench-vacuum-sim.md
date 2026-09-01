@@ -103,6 +103,70 @@ What this does mean:
     **−1.0 m/s**, and landing needs `|vel| < 1.0 m/s` for a full second, so let
     it settle at ambient rather than snatching the seal off.
 
+## Do not pause the climb — a pause IS an apogee
+
+**This is the one that will bite you, and it already has.** Once launch is
+declared, the climb must be **monotonic** until you actually want apogee. Apogee
+needs only two things:
+
+- raw baro velocity below **−1.0 m/s**, and
+- **~500 ms** with no new altitude maximum.
+
+Nothing else gates it. In a coasting airframe `kApogeeMaxThrustG = 1.3 g`
+inhibits apogee under thrust, but by this point the synthetic pulse is long over
+and the locator is sitting at 1 g — so **the gate is wide open**. Take the vacuum
+off for half a second and the reading retreats a couple of metres; that is a
+textbook apogee and the detector will take it. Correctly.
+
+### Worked example — bench flight 2026-09-01 134123
+
+The operator eased off at about 120 m, four seconds into the climb:
+
+```
+ t_ms      AGL      vel   accel
+ 5349    120.4    +93.4    0.99   <- peak, still climbing hard
+ 5399    120.0    +89.3           vacuum eased off here
+ 5499    118.9    +57.7
+ 5599    117.8    +26.8
+ 5699    117.2     +6.2
+ 5749    117.2     -1.2           crosses the -1.0 m/s bar
+ 5849    117.1     -6.3    0.99   <- APOGEE + MAIN PRIMARY, same cycle
+ ...
+ 6449    121.8    +10.2           vacuum resumed; climbed on to 1460 m
+```
+
+A **3.4 m retreat over ~0.5 s** was enough. The flight then ran its whole ladder
+from a false apogee at 117 m.
+
+### Why it cascaded straight to main
+
+`main_primary` fires on `deploy_agl <= main_primary_deploy_altitude` with **no
+descent term**. At 117 m the airframe was *already below the 130 m gate*, so main
+fired in the **same cycle** noseover was declared — hence `Apogee time`,
+`Noseover time`, `Drogue primary time` and `Main primary time` all reading
+`5849` in that record.
+
+So the damage depends on where the pause happens:
+
+- **Below the main gate** — apogee, drogue and main all fire at once. The run is
+  finished before it started.
+- **Above the main gate** — you still get a false apogee and drogue, but main
+  waits for the genuine descent.
+
+Neither is a test worth keeping. **If the climb stalls, abandon the run** (disarm,
+which un-stages the harness and drops the pyro bus) and start again.
+
+### This is not a detector fault
+
+Worth being explicit, because the record looks alarming: the detector did exactly
+what it is specified to do, on an input that genuinely met its criteria. The
+real-flight analogue — a transonic shock artefact reading as descent — occurs
+**under thrust**, which the 1.3 g ceiling already inhibits. A coasting rocket does
+not produce half a second of sustained 1 m/s descent before apogee. Do not
+"fix" this by tightening the apogee window; that would move it outside
+[ADR-0018](adr/0018-landing-detection-quiescence-window.md)'s validated territory
+for no flight benefit.
+
 ## Reported altitudes are offset, and that is expected
 
 The AGL reference freezes when the pulse starts, and at that moment it is lagging
@@ -243,10 +307,13 @@ almost always one of those two, not a detector.
    them fire.
 3. Seal the chamber.
 4. **Arm from the app.** The harness stages; nothing has happened yet.
-5. **Apply the vacuum** and take it up into the band the arm line named. Launch
-   declares as it crosses the trigger; burnout ~450 ms later. A few hundred
-   metres is plenty — a shop vac held over the lid hole will pass the trigger in
-   the first second or two.
+5. **Apply the vacuum** and take it up into the band the arm line named,
+   **without pausing**. Launch declares as it crosses the trigger; burnout
+   ~450 ms later. A few hundred metres is plenty — a shop vac held over the lid
+   hole will pass the trigger in the first second or two. ⚠️ **If the climb
+   stalls for even half a second the locator will declare apogee** — see
+   "Do not pause the climb" above. Abandon the run and restart rather than
+   pressing on.
 6. Hold briefly at the top, then vent at better than 1 m/s equivalent
    (≈ 0.12 mbar/s). Apogee declares on the way down, then drogue, then main.
 7. Return to ambient and leave it still. Landing declares after 1.0 s of
@@ -278,6 +345,15 @@ Beyond the pulse every column is real, which is the point.
   so this does not affect the test, but the position columns will be empty or
   latched and the app's map will not move.
 - **A record slot is consumed per run**, like a real flight and like a replay.
+- **The app's spoken apogee is not the apogee.** It announces the AGL from the
+  telemetry packet at the state change — up to ~1.5 s after the true peak. On
+  2026-09-01 134309 it said *"Apogee, 1710 meters"* where the peak was **1937 m**,
+  because the chamber was descending at 121 m/s by then. Harmless in flight
+  (vertical speed near apogee is ~0, so the gap is metres); badly wrong here. The
+  locator archives the true `MaxAltitudeM` — trust the record, not the callout.
+- **Physical drogue/main detections mean nothing in a chamber.** There is no
+  canopy; the velocity-change test just catches the ambient rate change. On
+  2026-09-01 134309 it flagged main 100 ms after the charge fired.
 - **The EKF integrates the synthetic pulse** into a velocity that never
   physically happened. It is retired from the real-time path
   ([ADR-0005](adr/0005-retire-ekf-raw-primary.md)) so nothing downstream depends

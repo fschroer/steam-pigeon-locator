@@ -148,8 +148,19 @@ transport/export defect and must not be used to paper over one.**
 concentrated** — a handful of flights contribute most of the events. That is thin
 for a decision about the deployment-critical sensor path. **See "Revisit" below.**
 
-**Not validated on hardware.** The sweep is offline against recorded flights; the
-firmware change builds and passes 784 host tests but has not flown.
+**Validated in a vacuum chamber 2026-09-01; still not flown.** Two chamber runs
+(`134123`, `134309`) on the real MS5611 produced **212 samples beyond 200 m/s**, peaking
+at **+633 and −604 m/s** — every one of which the removed clamp would have reported as
+exactly `200.0` — with **zero samples pinned at ±200** and **zero outlier events** in
+either record (the 2026 archive averages ~4.6 per flight). The velocity channel tracked
+straight through the apogee transition, `+2.6 → −0.2 → … → −121 m/s`, with no plateau
+and no latch.
+
+⚠️ **The half that motivated the clamp is still untested on hardware.** The clamp
+existed to suppress **pyro-shock** transients, and a chamber cannot produce one — no
+e-match goes in the jar. That the median-5 rejects such a spike rests on the archive
+analysis and `Tests/BaroFilter` M2/M3, not on a live charge. **The first flight with
+charges is the test that closes it.**
 
 ## Revisit when more flight data exists
 

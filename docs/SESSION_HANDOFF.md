@@ -2,6 +2,48 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-09-01 (bench 2) — two chamber flights: the fixes are HARDWARE-VALIDATED; one run lost to operator technique
+
+Records `Testy_McTestface_..._2026-09-01_134123` and `_134309` (locator + app).
+
+✅ **`134309` is a complete, correctly sequenced flight.** Launch at 31.2 m (the
+`launch_detect_altitude` trigger), burnout +300 ms, **apogee exactly 500 ms after the
+1937.4 m peak** (= `kNoIncreaseWindowMs`), drogue backup at **exactly +2000 ms** (the
+configured 2.0 s), main primary at **128.7 m** and backup at **99.6 m** against their
+130/100 m gates, landing at −2.6 m. Every gate fired where it should.
+
+✅ **[ADR-0032](adr/0032-baro-outlier-filtering.md) / [#41](https://github.com/fschroer/steam-pigeon-locator/issues/41) confirmed on real hardware — first such evidence.**
+**212 samples beyond 200 m/s** across the two runs, peaking at **+633 and −604 m/s**; every
+one would have read exactly `200.0` under the old clamp. **Zero samples pinned at ±200**
+and **zero outlier events** in either record (the 2026 archive averages ~4.6/flight). The
+velocity channel tracked straight through the apogee transition — `+2.6 → −0.2 → … →
+−121 m/s` — with **no plateau and no latch**, which is precisely the failure that stranded
+it at +197.7 m/s on 2026-08-31. **#41 CLOSED.**
+
+⚠️ **But the half that motivated the clamp is still untested.** The clamp existed to
+suppress **pyro-shock** transients and a chamber cannot make one — no e-match goes in the
+jar. Median-5 spike rejection rests on the archive analysis plus `Tests/BaroFilter` M2/M3,
+not on a live charge. **The first flight with charges is the test that closes that half.**
+
+⚠️ **`134123` false-triggered apogee at 117 m — operator technique, not firmware.** The
+vacuum was eased off ~4 s into the climb; the reading retreated **3.4 m over ~0.5 s** and sat
+at −1 to −7 m/s with accel at 0.99 g (the 1.3 g thrust ceiling long since released). That is
+a **genuine apogee by every criterion the detector has**, and it took it. It then cascaded
+straight to main in the *same cycle*, because `main_primary` fires on
+`deploy_agl <= 130` with **no descent term** and 117 m was already below the gate — hence
+`Apogee`/`Noseover`/`Drogue primary`/`Main primary` all stamped `5849` in that record.
+**Do not tighten the apogee window over this:** the real-flight analogue (transonic shock
+reading as descent) happens *under thrust*, which the 1.3 g ceiling already inhibits.
+[bench-vacuum-sim.md](bench-vacuum-sim.md) now carries a "Do not pause the climb" section
+with the trace — that gap in the procedure doc is what cost the run.
+
+📋 **Two chamber artefacts worth knowing.** The app's spoken apogee is the AGL in the
+telemetry packet at the state change, **not the peak** — it said *"Apogee, 1710 meters"*
+where the peak was **1937 m**, because the chamber was descending at 121 m/s by then
+(harmless in flight, where vertical speed near apogee is ~0; the locator archives the true
+`MaxAltitudeM`). And **physical drogue/main detections are meaningless in a chamber** —
+there is no canopy, so the velocity-change test just catches the ambient rate change.
+
 ## 2026-08-31 (analysis) — baro filtering rebuilt from the 2026 archive: median-5 ahead of the IIR, ±200 m/s clamp REMOVED — [ADR-0032](adr/0032-baro-outlier-filtering.md), closes [#41](https://github.com/fschroer/steam-pigeon-locator/issues/41)
 
 Swept every 2026 (MS5611) recording — earlier years are BMP280 and not comparable hardware.
@@ -65,7 +107,7 @@ deployment decision.
 rejection, a Mach 4 ramp passing unattenuated, the un-capped velocity estimator, and the
 ordering comparison — median→IIR leaves **0.00 m** excursion vs **56.25 m** for IIR→median).
 Full host suites: **FlightReplay 100/100, ArchiveRoundTrip 636/636, BaroFilter 48/48 = 784.**
-Firmware builds clean. **Host-validated only — has not flown.**
+Firmware builds clean. **Host-validated at the time of writing; chamber-validated 2026-09-01 — see the newest section above. Still not flown.**
 
 ## 2026-08-31 (bench 1) — FIRST CHAMBER RUN found a real FLIGHT-PATH defect: `SelectDeployVspeed` could latch permanently — **FIXED**, ADR-0003 amended
 
@@ -212,7 +254,7 @@ the *selected* accel channel only, so `accel` and `accel_alt_cg` **disagree** wh
 moves both; and the flight starts at tens of metres AGL. **Revisit if a sim record is ever
 mistaken for flight evidence** — ADR-0018's window rests on three flights.
 
-📋 **Not yet run in an actual chamber.** Build- and analysis-verified only. On the first run,
+✅ **Run in a chamber three times since** (2026-08-31 `205322`, 2026-09-01 `134123`/`134309`); the last produced a complete correctly-sequenced flight. Superseded text follows. On the first run,
 watch the AGL/velocity columns in the 5-second progress trace before trusting any transition.
 
 ## 2026-08-30 (bench 5) — connecting mid-scan splits the receiver's radio from its own settings — DIAGNOSED, NOT FIXED — [#40](https://github.com/fschroer/steam-pigeon-locator/issues/40)
@@ -1362,7 +1404,7 @@ The app's earlier run is the 3D flight-path work, `3cabbb3`..`7a4d48e` — curta
 - **Closed 2026-08-06:** **[#32](https://github.com/fschroer/steam-pigeon-locator/issues/32)** (interference detection tiers 1+2 — SNR + noise floor, bench-validated both directions: a deliberate interferer reports, a distant locator stays silent) and **[#34](https://github.com/fschroer/steam-pigeon-locator/issues/34)** (unaddressed locator commands — all four criteria confirmed, including that an older app can no longer arm or configure a new locator at all).
 - **Opened and closed 2026-08-06:** **[#33](https://github.com/fschroer/steam-pigeon-locator/issues/33)** (tier-3 channel survey) — all four criteria confirmed on hardware. The sweep completes and restores its channel, refuses while armed, and reports near-field saturation correctly. The last item's wording was superseded rather than met as written: it asked for the interferer to show as "that channel's **peak**", which assumes power can answer the question, and it cannot — a locator within a few feet raises every channel at once. It is answered instead by **counting decoded frames** per confirm dwell (receiver `2fefdc6` + app `7c9dd3c`), since a locator on the dwelt channel decodes while off-channel bleed does not. Two further fixes were needed before that could even fire: ties at the noise floor were broken by channel number, so the shortlist came from one corner of the band every run (`f445595` spreads them), and the count could only fire on a coincidence until confirm slot 0 was reserved for the **home channel** (`71eba58` + app `262d449`), which our own locator occupies. That also answers "is the channel I am on contested?", which the survey previously could not. The mid-scan relay untidiness is fixed in the same set — frames are counted and the packet dropped.
 - **Closed earlier:** #1, #2 (raw-baro deploy), #11 (launch raw gate), #12 (EKF velocity guard), **#13 (EKF role → ADR-0005)**, #4 (wire cross-check), #5 (enum align).
-- **Open:** **#10** (Priority-1 raw-baro robustness-layer tunables; needs flight data + bench-replay validation); **#14** (ISM6HG256X BDR==ODR half-rate mechanism); **#15** (FR-P13 air-start gate thresholds); **#16** (radio-layer CRC discard removed — verify no corrupt frames admitted); **#17** (IWDG timeout + `.noinit` presence); **#18** (bench-validate flight-data transfer under loss — window-8/parity/retransmit; ADR-0009); **#19** (bench-validate archive/flash robustness — boot reset / unclosed-record recovery / re-arm reuse / maintenance erase; ADR-0010); **#20** (bench-validate locator channel-change recovery path — forced miss → receiver revert + retry; ADR-0011) — **widened 2026-08-30** with the prior question of whether recovery should fire at all, four added criteria, and the note that criterion 3 is unreachable as written; see the top section of this file. **Added 2026-08-31:** **#41** (raw baro velocity clamped at ±200 m/s, saturating from ~Mach 0.6 — clamp removed by [ADR-0032](adr/0032-baro-outlier-filtering.md), open because the fix is host-verified only and the archive holds one flight past Mach 1); **#42** (archive export duplicates samples — 9,669 rows for 1,997 timestamps; a transport defect, and the affected record is one of [ADR-0018](adr/0018-landing-detection-quiescence-window.md)'s three landing-validation flights).
+- **Open:** **#10** (Priority-1 raw-baro robustness-layer tunables; needs flight data + bench-replay validation); **#14** (ISM6HG256X BDR==ODR half-rate mechanism); **#15** (FR-P13 air-start gate thresholds); **#16** (radio-layer CRC discard removed — verify no corrupt frames admitted); **#17** (IWDG timeout + `.noinit` presence); **#18** (bench-validate flight-data transfer under loss — window-8/parity/retransmit; ADR-0009); **#19** (bench-validate archive/flash robustness — boot reset / unclosed-record recovery / re-arm reuse / maintenance erase; ADR-0010); **#20** (bench-validate locator channel-change recovery path — forced miss → receiver revert + retry; ADR-0011) — **widened 2026-08-30** with the prior question of whether recovery should fire at all, four added criteria, and the note that criterion 3 is unreachable as written; see the top section of this file. **Added 2026-08-31:** ~~**#41**~~ (raw baro velocity clamp — **CLOSED 2026-09-01**, [ADR-0032](adr/0032-baro-outlier-filtering.md), confirmed over two chamber runs at +633/−604 m/s with zero pinned samples; the pyro-shock half still awaits a flight with charges); **#42** (archive export duplicates samples — 9,669 rows for 1,997 timestamps; a transport defect, and the affected record is one of [ADR-0018](adr/0018-landing-detection-quiescence-window.md)'s three landing-validation flights).
 - **Opened 2026-07-18 from the flight-2026-07-17 data:** **#27** (fused altitude gated by a flag named/documented horizontal-only — FIXED `121de3b`, awaiting flight); **#28** (fused vertical speed diverges ~+8 g through boost — attitude seed bug found and fixed `662a783`, but NOT fully explained; see below); **#29** (raw-baro oscillates near the roll frequency — hypothesis WEAKENED, the nose cone has two opposed ports which should cancel the first harmonic; hold for more flights); **#30** (monotonic clock loses ~1 s when a PPS edge is missed — `elapsed` assigned outside its own sanity band in `main.c`; NOT yet fixed, one-line change identified).
 
 ## Architecture (ADR-0005) — raw-primary
