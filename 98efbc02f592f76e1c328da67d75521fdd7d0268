@@ -1,0 +1,7 @@
+This message says "Parity matrix row flips to ported on both", and the diff
+does not show it: that hunk of docs/SteamPigeon_SystemSummary.md was swept
+into 1d25783, the firmware commit made while it sat in the working tree.
+
+The claim is accurate about the state of the tree, wrong about this commit's
+contents. See the note on 1d25783 for the specific lines. Not corrected by
+rewriting, because both commits were already pushed.
