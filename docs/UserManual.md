@@ -186,7 +186,7 @@ Both the locator and the receiver charge over USB-C at up to 1 A.
 
 Locator and receiver battery levels appear in the app on the flight map while the locator is powered, in range, and **not yet flying** (§4.6). Check the locator before every flight; one that has been sitting switched on in your range box since last month will not make it through a flight.
 
-⚡ **The battery gauges disappear at launch, and that is correct.** Battery level is only carried by the pre-launch message, which the locator stops sending the moment it detects launch — everything after that is telemetry, which has no room for it. A gauge left on screen during the flight would be showing you the charge from the pad, frozen, for the rest of the day. They come back when the locator returns to its pre-launch message, which it does after landing and re-arming (§9.7). **Check the battery on the ground; there is no reading in the air.**
+⚡ **The battery gauges disappear at launch, and that is correct.** Battery level is only carried by the pre-launch message, which the locator stops sending the moment it detects launch — everything after that is telemetry, which has no room for it. A gauge left on screen during the flight would be showing you the charge from the pad, frozen, for the rest of the day. They come back when the locator returns to its pre-launch message, which it does **as soon as you disarm after landing** (§9.7). Until you disarm, the rocket is still on the air as though it were flying, so the gauges stay dark — which matters, because recovery is exactly when remaining charge decides whether you find it. *(Before 2026-09-01 only a re-arm brought them back, which nobody does to a rocket lying in a field; the gauges were dark for the whole walk.)* **Check the battery on the ground; there is no reading in the air.**
 
 ## 1.7 Mounting the locator in the rocket
 
@@ -799,7 +799,7 @@ It comes in two pieces.
 |---|---|
 | **Receiver / locator names** | Both present. **No Locator** means the locator is off, out of range, or on another channel — **Communication → Find a locator** settles the last of those in a few seconds (§2.5, §3.8). **While a scan is running the same line reads *Searching…* or *Scanning…* instead**: the receiver is listening elsewhere on your instruction, so the locator being quiet is expected rather than a fault. A locator that was already **armed** when you opened the app is named too, from the name the app remembers for it — see §3.8. |
 | **Satellites** | The small number beside the rocket icon. More is better; watch it climb after power-on. |
-| **Battery, ×2** | Bar gauges — receiver on top, locator below. Don't fly a locator showing one bar. **This is your only chance to read it**; the gauges go away at launch (§1.6). An *empty* gauge on a battery you know is charged is a different problem — see Part 11. |
+| **Battery, ×2** | Bar gauges — receiver on top, locator below. Don't fly a locator showing one bar. The gauges go away at launch and return when you disarm after landing (§1.6) — so read it **before** you fly, and again on the walk out. An *empty* gauge on a battery you know is charged is a different problem — see Part 11. |
 | **dBm / SNR** | How loud and how clean the link is (§8.4). |
 
 **The statistics panel at the bottom right** is where the flight-critical readings are. ⚡ **It has no separate "health" or "continuity" indicators — the readings themselves change color.** A line in the normal text color is a healthy one; **a line in red is the failure**, and which line is red tells you which sensor or channel.
@@ -826,6 +826,8 @@ It comes in two pieces.
 ⚡ **Continuity absent on a channel you have wired** means a broken igniter, a loose terminal, or a lead that isn't making contact. Fix it before the black powder goes in.
 
 **The panel switches layout when the rocket flies, not when you arm it.** Arming alone already swaps it: an armed locator waiting on the pad shows `Spd`, `Inc`/`Hdg` and *Waiting For Launch* in place of `Accl`, `Gyro` and the channel list — so **the continuity check above is something you do before you arm, not after.** A rocket that launches *disarmed* gets the flight layout too (§7.1), which is the part that changed: it used to key off the arm state alone, leaving a disarmed flight showing frozen pad readings all the way up.
+
+**It switches back when you disarm after landing**, not when the rocket touches down — the flight readings stay up through recovery, which is when you still want speed, attitude and *Landed* on screen. Disarming is how you tell it the flight is over; the panel then returns to `Accl`, `Gyro` and the channel list, with the battery gauges alongside (§1.6). *(Before 2026-09-01 it never switched back at all: the locator went on sending flight telemetry until it was power-cycled, so the panel showed flight rows over a rocket sitting in its box.)*
 
 ## 4.7 If GPS accuracy is poor
 
@@ -945,6 +947,7 @@ All four of these have to be true at once:
 | It is standing **within about 35° of vertical** | A rocket on a rail. The allowance is deliberately wider than any rail angle you'd be permitted to fly, so a legally canted rocket still counts as standing. |
 | **At least one channel shows continuity** | This is what makes it a *prepped* rocket rather than a locator on a bench or in a drawer. |
 | It hasn't launched | Obviously. |
+| It hasn't **already flown** this session | The alert is a pre-flight prompt. A recovered rocket stood upright against a truck with an unfired backup charge still wired satisfies every other line in this table, and warning about it would be wrong twice over: the flight has already happened, and the alert pattern would drown out the landed beacon you are walking toward (§9.4). Arming for the next flight re-arms this alert along with everything else. |
 
 It fires about **10 seconds** after the rocket has been standing, and escalates to the loud pattern after about **60 seconds** of being ignored. Lay the rocket down and it goes quiet about **a second** later.
 
@@ -1013,7 +1016,9 @@ A locator that is powered on but disarmed still:
 
 **None of that is a substitute for arming.** A disarmed flight fires nothing — no drogue, no main, no backup. It is a ballistic flight that you will be able to analyze afterwards and find, which is strictly better than one you can do neither with, and strictly worse than one that deploys.
 
-⚠️ **Two disarmed flights in a row is the one case that does not work.** After a disarmed flight the locator sits in its Landed state, beacon sounding, and nothing puts it back. Arming or a power cycle resets it. So if you fly disarmed by accident, **power-cycle or arm before the next flight** or the second one will not be recorded.
+⚠️ **Two disarmed flights in a row is the one case that does not work.** After a disarmed flight the locator sits in its Landed state, beacon sounding, and nothing puts it back — there is no arm or disarm in that sequence to reset it. Arming or a power cycle does. So if you fly disarmed by accident, **power-cycle or arm before the next flight** or the second one will not be recorded.
+
+(An *armed* flight followed by a disarmed one is fine: disarming after the landing resets the state machine, so the next flight is detected and recorded whether you arm for it or not. It is only the disarmed-then-disarmed pair that has no edge to trip on.)
 
 ### Calibration no longer waits for you either
 
@@ -1234,6 +1239,7 @@ The landed beacon is **loud** and repeats about every 2 seconds — the same thr
 - It's a close-in finder, not a long-range one. Expect to hear it when you're within tens of meters, less in wind or tall vegetation.
 - Stop walking to listen. Your own footsteps are louder than you think.
 - 💡 In a group, spread out and triangulate. Two people who can both hear it will find it much faster than one.
+- ⚡ **Disarming does not silence it**, and that is deliberate — disarming is something you may well do from the flight line before you set off walking, and it makes the rocket safe rather than found. Only arming for the next flight or a power cycle stops the beacon.
 
 💡 **The map holds still as you close in — both its position and its zoom.** Walking the last stretch you will see the rocket marker and your own dot wander around inside a frame that stays put, rather than the frame sliding and re-zooming under them.
 
@@ -1280,6 +1286,8 @@ The locator records which channels fired and their continuity before and after, 
 2. Power on at the pad, and arm as usual.
 
 Arming after a completed flight resets everything and opens a fresh record automatically.
+
+💡 **Disarming after a landing already puts the locator most of the way back.** It returns to its pre-launch message — so the battery gauges, the deployment-channel list and the *not armed* alert all come back, and the app's panel drops out of the flight layout. What it does **not** do is stop the beacon or open a record; arming does that.
 
 ⚠️ **If the flight you just recovered was flown *disarmed* (§7.1), arming or power-cycling before the next one is not optional.** Nothing else clears the Landed state, and until it clears the beacon keeps sounding and a second flight will not be recorded.
 

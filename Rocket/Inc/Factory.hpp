@@ -158,6 +158,24 @@ private:
 
 	bool datestamp_saved_ = false;
 
+	// ── Landed recovery beacon ───────────────────────────────────────────────
+	// "There is a rocket on the ground to be found", which is NOT the same fact
+	// as "the flight state machine is at Landed" — and the two had to be split
+	// once disarming returns that machine to WaitingLaunch (see the disarm edge
+	// in ProcessRocketEvents).  Driving the beacon off flight_state directly
+	// meant signing the flight off in the app silenced the locator the operator
+	// was walking toward.
+	//
+	// Latched on the first Landed observed and cleared only by the next arm, so
+	// it outlives the reset exactly as the rocket in the field outlives it.
+	bool landed_beacon_ = false;
+
+	// Set when the operator disarms after a landing, cleared when the flight
+	// state machine has been returned to the pad.  Deferred rather than immediate
+	// because the archive record's close test is written in terms of Landed — see
+	// where this is consumed.
+	bool pad_reset_pending_ = false;
+
 	// ── Pad-settle detection (ADR-0021 Decision 6, #36) ──────────────────────
 	// Mounting calibration used to run ONLY on arm, which silently assumed the
 	// rocket was vertical at that moment.  It now also runs once the rocket has

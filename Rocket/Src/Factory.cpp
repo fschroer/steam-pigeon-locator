@@ -116,6 +116,10 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 	Diag::mark(Diag::Seg::Console, t_console);
 
 	FlightStates flight_state = flight_.GetFlightState();
+	// Latch the beacon before anything below can return the state machine to the
+	// pad.  Set here rather than at the beacon itself so it is recorded on the
+	// very tick Landed first appears, whatever device state the locator is in.
+	if (flight_state == FlightStates::Landed) landed_beacon_ = true;
 	navigation_.SetD1Converted();
 
 	// Push the configured nose axis into Navigation every cycle (ADR-0021
@@ -139,6 +143,11 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			// power cycle: returns the flight state to WaitingLaunch, clears every
 			// per-flight variable, and drops any stale on-pad data from a prior arm.
 			flight_.PrepareForArm();
+			// The previous flight's rocket has been found — it is on the rail.
+			landed_beacon_ = false;
+			// This arm supersedes any pending disarm reset; PrepareForArm above
+			// has already done the same work.
+			pad_reset_pending_ = false;
 			datestamp_saved_ = false;   // re-write FlightTimestampS for the new flight
 			archive_.StartOpenNewFlight();
 #if SP_VACUUM_SIM
@@ -155,6 +164,31 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 		} else if (prev_device_state_ == DeviceState::Armed) {
 			BuzzerReset();
 			buzzer_phase_ = BuzzerPhase::Disarming;
+			// Disarming after a landing puts the locator back on the pad.
+			//
+			// Without this the flight state stayed at Landed for the rest of the
+			// session, and the send test below reads "Armed OR not WaitingLaunch"
+			// — so a disarmed locator went on broadcasting TelemetryData until it
+			// was power-cycled.  Everything that rides only in PreLaunchData went
+			// with it: battery (whose divider is itself gated on WaitingLaunch),
+			// pad alert, deployment-channel config and the device name — during
+			// recovery, which is the one window where the battery gauge decides
+			// whether the rocket is found.  Launch detection stayed shut too, so a
+			// disarmed flight could not be flown after an armed one.
+			//
+			// Gated on Landed, and on Disarmed specifically rather than on any
+			// state but Armed: DisarmRequest is refused in flight
+			// (Communication.cpp), but a deployment test also leaves Armed, and
+			// clearing the flight machine under it is not what a test asked for.
+			//
+			// REQUESTED here, performed below once the flight record is closed.
+			// The close is driven by RecordComplete(), which is itself written in
+			// terms of Landed — so resetting the state machine the instant the
+			// operator taps disarm would strand an open record whenever the tap
+			// beat the ~2 s post-landing sample tail.
+			if (device_state_ == DeviceState::Disarmed
+			 && flight_state == FlightStates::Landed)
+				pad_reset_pending_ = true;
 #if SP_VACUUM_SIM
 			// Disarming un-stages it.  Without this a disarm/re-arm cycle would
 			// leave a stale stage behind, and the pyro-bus drop that disarming
@@ -385,7 +419,19 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 		// Note isVertical(), NOT isVerticalAndStationary(): a rocket bobbing on a
 		// rod in permitted wind is still a rocket standing on a rod, and
 		// demanding stillness here would silence the alert on the windiest days.
+		//
+		// NOT after a flight (landed_beacon_).  Disarming now returns the state
+		// machine to WaitingLaunch, which put a recovered rocket — stood upright
+		// against a truck with an unfired backup charge still wired — back inside
+		// this condition.  Two things go wrong there, and the louder one is not the
+		// false alarm: DisarmedAlert is tested BEFORE the Landed beacon in the
+		// buzzer chain below, so the alert would REPLACE the sound the manual tells
+		// the operator to walk toward (§9, "Walk toward this sound").  The app's
+		// banner would also read "ROCKET ON PAD — NOT ARMED" over a rocket in a
+		// field.  This alert is a pre-flight prompt; after a flight the prompt has
+		// been overtaken by events.
 		const bool prepped_and_disarmed = flight_state == FlightStates::WaitingLaunch
+		                               && !landed_beacon_
 		                               && device_state_ == DeviceState::Disarmed
 		                               && navigation_.isVertical()
 		                               && DeploymentChannelContinuity() != 0u;
@@ -457,12 +503,16 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 					BuzzerSequence(DisarmedAlertUrgent);
 				else
 					BuzzerSequence(DisarmedAlert);
-			} else if (flight_state == FlightStates::Landed)
-				BuzzerSequence(Landed);   // recovery beacon after a disarmed flight (#36)
+			} else if (landed_beacon_)
+				// Recovery beacon.  #36 introduced it for a flight flown disarmed;
+				// it now also covers an armed flight signed off with a disarm,
+				// which is why it is driven from the latch and not from the flight
+				// state the disarm resets.
+				BuzzerSequence(Landed);
 		} else if (buzzer_phase_ == BuzzerPhase::Arming) {
 			if (BuzzerSequenceOnce(Arming))
 				buzzer_phase_ = BuzzerPhase::Armed;
-		} else if (flight_state == FlightStates::Landed) {
+		} else if (landed_beacon_) {
 			BuzzerSequence(Landed);
 		} else if (buzzer_phase_ == BuzzerPhase::Armed
 				&& flight_state == FlightStates::WaitingLaunch) {
@@ -511,6 +561,24 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			}
 			// The Landed beacon is driven from the buzzer block above, with every
 			// other sequence, so that only one driver ever runs per tick.
+		}
+		// Deferred pad reset: the operator disarmed after a landing, and the
+		// record is now safely closed.  Returning the flight state machine to
+		// WaitingLaunch is what resumes PreLaunchData — and with it the battery
+		// gauge, the pad alert, the deployment-channel config and launch
+		// detection — for a locator that is, as far as the operator is concerned,
+		// back on the pad.  See the disarm edge above for what stayed broken
+		// without it.
+		//
+		// flight_state is refreshed rather than left as this cycle's stale
+		// snapshot, so the message choice and the battery divider below act on the
+		// reset immediately instead of one second late.  landed_beacon_ carries
+		// the rocket-is-on-the-ground fact across the reset, so the recovery
+		// beacon is unaffected.
+		if (pad_reset_pending_ && !archive_.IsActiveOpen()) {
+			flight_.PrepareForArm();
+			flight_state = flight_.GetFlightState();
+			pad_reset_pending_ = false;
 		}
 		switch (rocket_service_count) {
 		case 0:
