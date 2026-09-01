@@ -50,7 +50,16 @@ We will **serialize all outbound GATT writes in the app**, and treat a busy tran
 
 CoreBluetooth does not return a refusal — `writeValue(_:for:type:)` returns `Void` — so this defect cannot present on iOS the way it did on Android. It is **not** therefore absent. `BluetoothTransport.send` writes with `.withoutResponse`, and a `.withoutResponse` write issued while `peripheral.canSendWriteWithoutResponse` is `false` is **silently discarded by the framework** — no error, no callback, no return value, and no boolean the app could even have noticed. That is the same defect with the diagnostic surface removed.
 
-iOS therefore owes decisions 1, 2 and 5, keyed on `canSendWriteWithoutResponse` and `peripheralIsReady(toSendWriteWithoutResponse:)` rather than on a write-completion callback. Decisions 3 and 4 do not port: `send` there already returns only a link-state check, and with no acknowledgment to lose there is nothing for a watchdog to guard.
+**Ported 2026-09-01.** `OutboundWriteQueue` holds the portable half — fragmentation, the all-or-nothing admission rule, the ceiling, FIFO — as a pure type beside `ConnectionHealthMonitor`, with 12 tests. `BluetoothTransport` drains it while `canSendWriteWithoutResponse` allows, resumes on `peripheralIsReady(toSendWriteWithoutResponse:)`, and discards the queue on disconnect and on a receiver switch.
+
+Two claims in this section were written from reading the iOS source and **implementing it corrected both**:
+
+- **Decision 4 does port, for a different hazard.** "No acknowledgment to lose, so nothing for a watchdog to guard" was the wrong reading. The stall it must guard is not a lost completion but a `canSendWriteWithoutResponse` that never comes back — reported `false` on a freshly connected peripheral until something is written to it, which is a deadlock by construction: nothing is written because the flag is false, and the flag never clears because nothing is written. A stalled queue therefore writes its head anyway after 250 ms, best-effort. On a rocket-recovery app the failure mode being guarded against is "no message ever reaches the receiver", which is worse than any dropped write.
+- **Decision 2's retry has no counterpart and needs none.** Android retries because the stack hands back a refusal; iOS has no refusal to retry, only a flag to wait on, and `peripheralIsReady` is the wait. What iOS owes instead is *visibility*, which Android got free from logcat.
+
+That visibility is the third thing implementing it surfaced. **This app has no logging at all** — no `os_log`, no `print` — by convention: diagnostics reach a screen instead. A silently discarded write would therefore have been as invisible after this change as before it, which would have left the ADR's central complaint unaddressed on the platform that suffers from it worst. `BluetoothTransport.droppedWriteChunks` counts every chunk not cleanly delivered — refused for a full queue, discarded with a link, or forced past a stalled ready-callback — and the diagnostics screen shows it as **writes lost**, the outbound counterpart of its existing **bad CRC**.
+
+Decision 3 was already true there: `send` returned a link-state check and nothing more.
 
 ## Alternatives considered
 
