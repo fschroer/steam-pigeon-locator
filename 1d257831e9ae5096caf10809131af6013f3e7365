@@ -1,0 +1,15 @@
+Contains a docs/SteamPigeon_SystemSummary.md hunk that belongs with the
+ADR-0033 iOS port, not with this firmware change. Those edits were sitting
+uncommitted in the working tree when this commit was made and were swept in.
+
+Not this commit's work:
+  - the "Serialized outbound writes (ADR-0033)" parity-matrix row flipping
+    from | Android | iOS | = ✅ | ❌ to ✅ | ✅, and its rewritten note
+  - the §4.3 feature bullet gaining "paces them by what the transport will
+    actually take ... Both platforms."
+
+Both belong with 98efbc0 (docs) and steam-pigeon-ios bdd4d76 (the port).
+Left in place deliberately: the commit was already pushed by the time the
+mix-up was noticed, and rewriting published history was judged not worth it
+for an attribution error in one table row. Nothing is missing or wrong in
+the tree — only the authorship of those lines reads oddly.
