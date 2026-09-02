@@ -212,6 +212,45 @@ The frame count established *that* a channel is occupied and deliberately threw 
 > [ADR-0029](0029-locator-search-candidate-channels.md) decision 8 adds RSSI **and SNR** to
 > every search hit so the two cases can be told apart on screen.
 
+### Tier 3, item 5: the sweep is stoppable (2026-09-02)
+
+The sweep was fire-and-forget, and the one thing it costs is the thing you cannot take
+back: **~8 s of deafness** — a strided coarse pass over 64 channels plus five 1.4 s
+confirm dwells. The firmware could already abandon a sweep, for a queued operator command
+and for a receiver channel change, but the operator could not ask. The case that
+motivated it is the locator going live *after* the scan started: the telemetry is wanted
+back now, and waiting out the confirm phase is exactly what cannot be afforded.
+
+**The cancel is a new `MsgType` (25), not a flag on `ChannelSurveyRequest`** — which is
+*not* the shape [ADR-0029](0029-locator-search-candidate-channels.md) chose for the
+search's cancel, and the difference is forced rather than stylistic. `LocatorSearchRequest`
+already carried a payload, so a flag byte was free. `ChannelSurveyRequest` is header-only
+and `static_assert`-ed at 6 bytes, **and there is no length field on the wire**: the
+receiver's parser derives payload length from `msg_type` alone. Growing that request
+would therefore desync a receiver predating the change on the **ordinary scan**, not
+merely on a cancel — a new app against old firmware would break the feature it was
+extending. A new type leaves that path untouched; old firmware fails the cancel frame's
+CRC, resets, and keeps sweeping. The cost is one more value in a shared enum, reserved in
+the locator's copy like 20/21 and 23/24 before it.
+
+**Answered even when nothing is running**, for the reason the search's cancel is: silence
+is the one reply an app cannot tell apart from firmware that has never heard of the
+message. That contract has a consequence both apps have to hold: Stop tapped as a sweep
+finishes produces **two** responses — the completed sweep's, then the cancel's, which
+describes nothing — and landing the second replaces a good ranking with *"Scan stopped"*,
+the opposite of what happened. Each app drops a `Cancelled` that arrives with no sweep
+outstanding. Gated on the sweep, not on the status alone: the second answer is only
+meaningless once the first has been consumed.
+
+**The status byte still cannot say why.** All three causes report `Cancelled`, and the
+firmware distinguishes them only on its console. Rather than widen the byte, each app
+substitutes a `CancelledByUser` of its own over a `Cancelled` it asked for — the app is
+the one party that *knows* when it asked. This is a wording problem, not a protocol one:
+the shared string ("Scan stopped so your command could reach the locator") is a specific
+claim about the hardware and is false for a Stop the user pressed. Both apps pin the new
+value as unreachable from any byte, so a future firmware that *does* distinguish the
+causes has to make that decision deliberately.
+
 ### Status
 
 Tiers 1 and 2 are bench-validated ([#32](https://github.com/fschroer/steam-pigeon-locator/issues/32), closed). Tier 3's sweep is validated except for the known-interferer case, which RSSI alone cannot establish ([#33](https://github.com/fschroer/steam-pigeon-locator/issues/33), open). Thresholds remain reasoned rather than fitted, and all of them are app-side so tuning needs no reflash.

@@ -381,7 +381,9 @@ If a scan has already found somebody on the channel you type, the app says so un
 
 ### Finding a clean channel
 
-**Communication → *Find a clean channel*** asks the receiver to listen to all 64 channels in turn and rank them from quietest to busiest. It takes about a second. Tap the button next to a suggestion to go there — **Move here** with a locator connected, which moves the rocket and lets the receiver follow, or **Point receiver** without one. Either takes effect on the tap; there is no second step.
+**Communication → *Find a clean channel*** asks the receiver to listen to all 64 channels in turn and rank them from quietest to busiest. It takes **about eight seconds**: a quick pass over the whole band, then a full second on each of the five quietest so a locator that only transmits once a second cannot hide between samples. Tap the button next to a suggestion to go there — **Move here** with a locator connected, which moves the rocket and lets the receiver follow, or **Point receiver** without one. Either takes effect on the tap; there is no second step.
+
+**Your receiver hears nothing for those eight seconds** — it is parked on other channels — so a *Stop* button appears beside the scan while it runs. Tap it and the receiver abandons the sweep, returns to your channel and starts listening again straight away, rather than at the end of the confirm pass. That is what it is for: if the rocket comes to life mid-scan, or you started one you did not mean to, you do not have to sit the sweep out. You get no ranking from a stopped scan; run it again when it suits.
 
 A few things to know about the result:
 
@@ -389,7 +391,7 @@ A few things to know about the result:
 - **It tells you who is on a busy channel, when it can.** A channel with a locator on it is never offered, and if the app has met that locator before it is named: *"Channel 12 has Redline on it — not offered."* Unnamed means the app has not seen that locator before — someone else's rocket, or one of yours it has never been introduced to. The name comes straight off the air and is not password-checked, so treat it as a helpful label rather than proof.
 - **It scans where the receiver is standing.** A channel that's quiet at the flight line may be busier a mile up, where the rocket can hear far more of the world. Use it to pick a good starting channel, not as a forecast.
 - **If it says every channel is loud, believe it.** That almost always means a transmitter is within a few feet — usually a spare locator someone left switched on. Changing channel won't help; moving the transmitter will.
-- **It won't run while the locator is armed.** Scanning stops the receiver hearing your rocket for about a second, and you can't change channel while armed anyway. Disarm first.
+- **It won't run while the locator is armed.** Scanning stops the receiver hearing your rocket for the whole eight seconds, and you can't change channel while armed anyway. Disarm first.
 - **If the move doesn't confirm, the app checks before it does anything.** See *When a channel move isn't confirmed*, next.
 
 💡 The natural time to do this is during bench prep or when you arrive at the field — before you power up on the pad.
@@ -1463,7 +1465,7 @@ A log still being written says so on its row, and can be shared while it is open
 | "I couldn't follow the signal readings / callouts during the flight" | You aren't meant to — they're recorded for you. Menu → **App Flight Logs** (§10.7). |
 | App Flight Logs is empty after a flight | A log is only created for a launch the app was already receiving telemetry for, and only a launch creates one (§10.7). A session that never flew leaves nothing by design. |
 | App never finds the receiver | Receiver powered? Bluetooth on? Phone permissions granted? (§3.8) |
-| Status panel says "Searching…" or "Scanning…" | A scan is running and the receiver is parked on other channels, so your locator cannot be heard until it finishes. Arm and Disarm still work throughout — pressing either stops the scan so the command gets through (§2.5). |
+| Status panel says "Searching…" or "Scanning…" | A scan is running and the receiver is parked on other channels, so your locator cannot be heard until it finishes. **Both scans have a *Stop* button** that ends the sweep and puts the receiver back on your channel immediately (§3.8). Arm and Disarm still work throughout as well — pressing either also stops the scan, so the command gets through (§2.5). |
 | Status panel says "No Locator" but the receiver is connected | Normal when the locator is off (§3.8). Otherwise: locator off, out of range, or on a different channel — **Find a locator** answers the channel question directly (§2.5). If an interference note appears under it, the channel is occupied and that may be why you are hearing nothing. |
 | App asks for a password | First contact with a locator it doesn't know (§2.6). Also happens to a locator it *used* to know, if you have since set or changed that locator's password — the app's stored key no longer verifies, so it treats it as a stranger and asks again. This works even for the locator you are **currently connected to**: the app lets that connection go and asks, rather than holding a connection whose credentials have stopped verifying. |
 | App opened while the locator was already armed | Supported: armed telemetry identifies itself, so the app picks up a locator it already knows and shows live data straight away. If it still reads "No Locator", that locator has never been connected on this phone — **disarm it once** so the app can prompt for its password (§2.6). |

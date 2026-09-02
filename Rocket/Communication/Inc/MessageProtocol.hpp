@@ -65,7 +65,10 @@ enum class MsgType : uint8_t {
 	// app<->receiver only, and claiming the values here stops a future locator
 	// message colliding with them.  Behavior-free — nothing here sends or parses these.
 	LocatorSearchRequest = 23,
-	LocatorSearchResult = 24
+	LocatorSearchResult = 24,
+	// Reserved for the same reason as 20/21 and 23/24 above.  Stops a channel
+	// survey in progress; app<->receiver only, and never sent or parsed here.
+	ChannelSurveyCancelRequest = 25
 };
 
 // Flight event summary indices.  One entry per archived event timestamp; the
