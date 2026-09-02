@@ -5,6 +5,9 @@
 # and iOS repos it prints the branch, short HEAD, whether the working tree is
 # clean, and whether the branch is ahead/behind its upstream (unpushed/unpulled).
 #
+# It also reports PARITY DRIFT: how many app commits have touched the Android UI
+# since steam-pigeon-ios/docs/UI_PARITY.md last changed. See parity_drift() below.
+#
 # Usage:
 #   Scripts/sp-status.sh          # human-readable report
 #   Scripts/sp-status.sh --hint   # also print the SESSION_HANDOFF "Git state" lines
@@ -95,6 +98,13 @@ for entry in "${REPOS[@]}"; do
     continue
   fi
 
+  # Kept for parity_drift(), which needs two repos at once and so cannot run
+  # inside this per-repo loop.
+  case "$name" in
+    app) APP_DIR="$dir" ;;
+    ios) IOS_DIR="$dir" ;;
+  esac
+
   branch=$(git -C "$dir" rev-parse --abbrev-ref HEAD)
   head=$(git -C "$dir" rev-parse --short HEAD)
   subject=$(git -C "$dir" log -1 --pretty=%s)
@@ -126,6 +136,64 @@ for entry in "${REPOS[@]}"; do
 
   handoff_lines+=("- **${name}** \`${branch}\` = \`${head}\` (${subject})")
 done
+
+# parity_drift -- how far the Android UI has moved since UI_PARITY.md last did.
+#
+# sp-docs Gate 3 requires that a change making the two apps DIFFER is recorded in
+# steam-pigeon-ios/docs/UI_PARITY.md. That gate is prose, so it is only as good as
+# remembering to run it; this is the deterministic half. On 2026-08-31 an entire new
+# Android screen went unrecorded there while both other gates passed, because neither
+# names that file -- it is the one doc outside the centralized Locator/docs/.
+#
+# CORRELATED BY DATE, because the two repos share no history and there is nothing
+# else to join on. That makes this a smell rather than a proof: a large count can be
+# ten commits that changed nothing a user sees, and a count of zero only means the
+# file was touched recently, not that it was touched CORRECTLY. It answers "when did
+# anyone last think about this?", which is the question that went unasked.
+#
+# Watches ui/ and strings.xml: every user-visible change lands in one of them, and a
+# pure wire-format change is already covered by Gate 1 and the WireLayoutTest triad,
+# so including data/ would fire constantly for changes parity does not care about.
+#
+# Deliberately does NOT increment $problems. This script's contract is "is everything
+# saved?", and its exit code gates end-of-session checks; drift is neither unsaved nor
+# necessarily wrong, and making a clean tree exit 1 would train people to ignore the
+# exit code. It prints loudly instead.
+parity_drift() {
+  local paths="app/src/main/java/com/steampigeon/flightmanager/ui app/src/main/res/values/strings.xml"
+
+  if [ -z "${APP_DIR:-}" ]; then
+    return
+  fi
+  if [ -z "${IOS_DIR:-}" ]; then
+    # Same rule the skipped-repo line follows: an unchecked thing must not print
+    # like a checked one.
+    printf 'parity     -- UI_PARITY.md drift NOT CHECKED (no iOS checkout; set SP_IOS_DIR)\n'
+    return
+  fi
+
+  local last
+  last=$(git -C "$IOS_DIR" log -1 --format=%cI -- docs/UI_PARITY.md 2>/dev/null)
+  if [ -z "$last" ]; then
+    printf 'parity     !! docs/UI_PARITY.md not found in the iOS repo history\n'
+    return
+  fi
+
+  local n
+  n=$(git -C "$APP_DIR" rev-list --count --since="$last" HEAD -- $paths 2>/dev/null || echo 0)
+
+  if [ "$n" -eq 0 ]; then
+    printf 'parity     UI_PARITY.md is current with the app UI (last touched %s)\n' "${last%%T*}"
+  else
+    printf 'parity     %s app commit(s) touched the UI since UI_PARITY.md last changed (%s)\n' \
+      "$n" "${last%%T*}"
+    printf '           Not necessarily wrong -- but sp-docs Gate 3 has not been run since.\n'
+    git -C "$APP_DIR" log --since="$last" --pretty='             %h %s' -- $paths | head -8
+  fi
+}
+
+echo
+parity_drift
 
 echo
 if [ "$problems" -eq 0 ]; then
