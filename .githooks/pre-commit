@@ -1,0 +1,126 @@
+#!/usr/bin/env sh
+# pre-commit — bench-flag check plus the host C++ suites, before a firmware commit.
+#
+# Counterpart of the app repo's hook (rocket-flight-manager 423b710), same reasons:
+# sp-commit already mandates build-and-test, and it is the RUNNING of it that
+# slips. A step that depends on being remembered is not a gate.
+#
+# Install once per clone (it is tracked, so .git/hooks/ would not survive one):
+#
+#     git config core.hooksPath .githooks
+#
+# Bypass with `git commit --no-verify`.
+#
+# TWO CHECKS, in cost order.
+#
+# 1. Scripts/check-bench-flags.sh. Asserts all four SP_* bench flags still
+#    default to 0 and that each harness still compiles when enabled. Seconds,
+#    and it is the check that earns its place fastest: on 2026-09-01 a
+#    SP_VACUUM_SIM=1 left over from a chamber session was nearly swept into an
+#    unrelated docs commit. A flight build with a synthetic boost injected is
+#    the worst thing in this repo to ship by accident.
+#
+# 2. The host C++ suites under Tests/. Enumerated rather than listed, so a fifth
+#    suite is gated the day it is added instead of the day someone remembers.
+#
+# WHAT IT DELIBERATELY DOES NOT DO: build the ARM firmware in Debug/. That build
+# is driven by IDE-generated subdir.mk files produced by a folder scan, so a
+# source file added since the last STM32CubeIDE build is absent from them, never
+# compiles, and fails at LINK with an undefined reference — not a code bug, and
+# not fixable from a shell. A hook that blocks a legitimate commit until someone
+# opens an IDE is a hook that gets switched off. The wire-format static_asserts
+# in MessageProtocol.hpp are the thing worth catching there, and they are worth
+# a purpose-built check rather than a whole firmware build.
+#
+# AND WHAT A GREEN RUN DOES NOT MEAN: the suites compile this code for the HOST
+# with g++, not for the MCU with arm-none-eabi. Type sizes, alignment and
+# floating-point behaviour can differ, and nothing here exercises the real
+# peripherals. Green means the logic holds, not that the firmware runs.
+
+set -e
+
+REPO=$(git rev-parse --show-toplevel)
+cd "$REPO"
+
+# --- Only pay the cost when firmware or test sources changed -----------------
+STAGED=$(git diff --cached --name-only --diff-filter=ACMR)
+if ! printf '%s\n' "$STAGED" | grep -qE '\.(c|cpp|h|hpp)$|^Tests/|Makefile$'; then
+  exit 0
+fi
+
+# --- 1. Bench flags ----------------------------------------------------------
+echo "pre-commit: checking bench flags..."
+if ! sh Scripts/check-bench-flags.sh >/tmp/sp-bench-flags.$$ 2>&1; then
+  cat /tmp/sp-bench-flags.$$ >&2
+  rm -f /tmp/sp-bench-flags.$$
+  echo "" >&2
+  echo "pre-commit: BENCH FLAG CHECK FAILED — commit refused." >&2
+  echo "            A flag left at 1 after a bench session must not reach a build." >&2
+  echo "            Deliberate? git commit --no-verify" >&2
+  exit 1
+fi
+rm -f /tmp/sp-bench-flags.$$
+echo "pre-commit: bench flags ok (all default 0, all harnesses compile)."
+
+# --- 2. Host C++ suites ------------------------------------------------------
+#
+# On Windows these MUST run through PowerShell. Invoked from git-bash, native
+# g++ rejects the msys-style $TMP, falls back to C:\Windows and dies with
+# "Cannot create temporary file: Permission denied". Exporting TMP/TEMP/TMPDIR
+# from git-bash does not fix it — tried both msys- and Windows-style, 2026-08-22
+# and again 2026-09-02. PowerShell's temp vars are native, so make works there.
+#
+# The trap that hid this for one run: with a prebuilt binary present, `make` has
+# nothing to compile and happily runs the STALE exe, reporting a pass. Only a
+# clean rebuild shows the failure. Hence `make clean` below — a suite that
+# reports on a binary older than the code it is gating is worse than no suite.
+MSYS_BIN='C:\msys64\mingw64\bin;C:\msys64\usr\bin'
+
+run_suite() {
+  suite_dir="$1"
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+      win_dir=$(cygpath -w "$suite_dir")
+      powershell -NoProfile -ExecutionPolicy Bypass -Command \
+        "\$env:PATH='${MSYS_BIN};'+\$env:PATH; Set-Location '${win_dir}'; make clean *>\$null; make; exit \$LASTEXITCODE"
+      ;;
+    *)
+      # Mac/Linux: a native toolchain, and none of the above applies.
+      ( cd "$suite_dir" && make clean >/dev/null 2>&1; cd "$suite_dir" && make )
+      ;;
+  esac
+}
+
+failed=""
+for mk in Tests/*/Makefile; do
+  [ -f "$mk" ] || continue
+  d=$(dirname "$mk")
+  printf 'pre-commit: %s ... ' "$d"
+  if out=$(run_suite "$REPO/$d" 2>&1); then
+    results=$(printf '%s\n' "$out" | grep -E 'Results:' | tail -1)
+    if [ -n "$results" ]; then
+      printf '%s\n' "$results"
+    elif grep -qE '^run:' "$mk"; then
+      # It HAS a run target and still printed no results: the binary ran and
+      # said nothing, which is a broken suite rather than a passing one.
+      printf 'ran but reported no results -- treat as broken\n'
+      failed="$failed $d"
+    else
+      printf 'compile-checked only (no run target)\n'
+    fi
+  else
+    printf 'FAILED\n'
+    printf '%s\n' "$out" | tail -20 >&2
+    failed="$failed $d"
+  fi
+done
+
+if [ -n "$failed" ]; then
+  echo "" >&2
+  echo "pre-commit: HOST SUITES FAILED —$failed" >&2
+  echo "            Commit refused. Deliberate WIP? git commit --no-verify" >&2
+  exit 1
+fi
+
+echo "pre-commit: host suites green."
+exit 0
