@@ -146,12 +146,24 @@ power A and B **off**. Leave *Looking for* on **Any locator**.
 
 **Steps.**
 
-1. Run the short search. When it reports nothing, take the widen button.
-2. **Then power A back on, on one of its candidate channels, and run the short search
-   again.** It finds A. *Search all 64 channels* must **still be offered** — finding some
-   locator is not evidence that the one you want is not out there.
-3. Start a short run and press **Stop**. The widen button must **not** appear: answering
-   "stop" with an offer of a 90-second sweep is not reading the room.
+1. Before searching anything, confirm *Search all 64 channels* is **already offered**,
+   beside the short search. It was gated behind a completed short run until 2026-09-04;
+   sweeping the band is sometimes the right first move, and gating it made a user run a
+   search they knew would fail in order to unlock the one they wanted.
+2. Run the short search. When it reports nothing, take the widen button.
+3. **Then power A back on, on one of its candidate channels, and run the short search
+   again.** It finds A, and the widen button is still there — finding some locator is not
+   evidence that the one you want is not out there.
+4. Start a short run and press **Stop**. The widen BUTTON stays (it always does now), but
+   the *note* explaining a miss must **not** appear: the run was stopped, not missed, and
+   answering "stop" by narrating a failure is not reading the room. `Run.canWiden` still
+   governs that note, which is why it survives as a concept.
+5. **Duplicate-hit check (2026-09-04).** On any run that finds something, each channel may
+   appear at most **once** in the results. The receiver dwells on a channel once and holds
+   one hit slot, so two rows for one channel is the app counting a dwell twice — the
+   symptom reported that day was one marginal false hit on channel 0 shown as four rows.
+   `adb logcat -s SpLog` prints one `LocatorSearch result ...` line per message; compare
+   that count against the rows on screen before blaming the firmware.
 
 **Expect.**
 - Short run: `n` channel lines, all with id `0`, then `done status/ms 1`. App says nothing

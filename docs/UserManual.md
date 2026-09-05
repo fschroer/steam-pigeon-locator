@@ -350,17 +350,25 @@ What this means for you:
 
 ## 2.5 LoRa channels — the Communication screen
 
-Everything to do with which channel you are on lives on one screen: **Communication**, at the top of the app menu. It holds up to four things, in the order you normally reach for them — find a locator you've lost, find a clean channel to move to, point the receiver by hand, move the locator by hand.
+Everything to do with which channel you are on lives on one screen: **Communication**, at the top of the app menu. It holds up to three things, in the order you normally reach for them — find a locator you've lost, find a clean channel to move to, and set a channel by hand.
 
-Two of those come and go with what the app can hear. **Find a clean channel** is offered only while a locator's messages are arriving: it is for a link that is working badly, and with nothing coming through the question is not which channel is quiet but where the rocket is. Once you have started a scan it stays put — with its results — until you leave the screen, even though the scan itself is what silences the locator. **Locator channel** likewise needs a connected locator, since there has to be one to move.
+**Find a clean channel** comes and goes with what the app can hear. It is offered only while a locator's messages are arriving: it is for a link that is working badly, and with nothing coming through the question is not which channel is quiet but where the rocket is. Once you have started a scan it stays put — with its results — until you use something else on the screen, even though the scan itself is what silences the locator.
+
+That last part is the rule for the whole screen: **using any control clears what the others left behind.** A scan's ranking, a search's results and the outcome of a channel move are all answers to a question you have since moved on from, and none of them expire on their own. Pressing something is the app's only signal that you have moved on, so it takes it. Two things are deliberately spared: the result you are acting on — tap **Connect** on a search hit and that row stays, and changes to *Connected* — and anything still running or still in progress.
+
+At the top of the screen, a coloured dot answers the question you came with. **Green** — *"Receiver and locator are together on channel N"* — means broadcasts are arriving, which is what being on the same channel *is*; there is nothing further to check. **Red** — *"Split"* — appears only after a channel move the app could not confirm, and says so in those words: the receiver is on one channel, the locator never acknowledged the move, and it may be on either. Use **Find a locator** to settle it.
+
+The dot stays quiet in two cases, on purpose. While a move is still running the message under it is already telling you so. And when the locator simply is not being heard with no move behind it, that is the ordinary lost-rocket case — nothing is known about where it is, and a red dot would be a guess wearing the clothes of a measurement.
 
 Channels are numbered **0–63**. Default is 0.
 
-> **Communication → *Receiver channel***
+> **Communication → *Receiver channel*, chain open (grey)**
 > Points **your receiver** at a locator that is already on another channel. Your own locator does not move. Use this when you have two locators and want to switch which one you're watching — and it's what **Find a locator** fills in for you.
 >
-> **Communication → *Locator channel***
-> Moves **your locator** to a new channel. Your receiver automatically follows it, so your link is preserved. Use this when the channel is chosen for you — someone else at the launch is on yours, or the club assigns one. Shown only while a locator is connected; there has to be one to move.
+> **Communication → *Receiver + locator channel*, chain closed**
+> Tap the chain icon to the right of the field and it lights up; the label above the field changes with it. **Update** now moves **your locator** to the channel you typed, and your receiver follows it automatically, so your link is preserved. Use this when the channel is chosen for you — someone else at the launch is on yours, or the club assigns one. The chain is greyed out with no locator connected, because there is then nothing to move.
+
+One field, one **Update**, and the chain deciding who it commands — so the safe direction is the one you get without asking for it. Which is which matters: pointing the receiver leaves your rocket where it is, while closing the chain sends a command to the rocket itself. The label above the field always names the one **Update** will do.
 
 <!-- Screenshot needed: the Communication screen. app-05-receiver-settings.png predates the move and shows the channel field in its old home. -->
 
@@ -437,8 +445,8 @@ This is the other half of the problem, and it looks nothing like interference. Y
 - **Each channel takes about a second and a half.** That's not slack: a locator only transmits for about a seventh of each second, so anything quicker would walk past a channel while the rocket happened to be silent. It's the same reason the clean-channel scan listens properly to its final candidates.
 - **Found it? Tap *Connect*.** That moves the **receiver** to the rocket's channel — not the rocket. It's already there, which is what the search just established, and moving it is the one thing guaranteed to lose it again. It takes effect immediately: the row changes to *Connected* once the receiver confirms the new channel. (The clean-channel scan's button still reads *Point receiver*, deliberately — that one sends you to a channel chosen for being **empty**, where "Connect" would promise something that is not there.) While a change is on its way the Connect buttons grey out, so a second tap cannot go missing. If it's a locator the app doesn't know, you'll be asked for its password once broadcasts start arriving, exactly as if you'd tuned there by hand.
 
-  💡 **Picking a channel from a scan acts; typing one by hand needs Update.** Choosing a result is the decision — the search has already established where the rocket is — so there is nothing left to confirm. The *Receiver channel* field lower down is different: every keystroke is a valid channel number, so it waits for **Update**.
-- **You can search all 64 channels.** Offered after any short search that runs to the end — whether it found something or not, because finding *some* rocket is no evidence about the one you're looking for — and never started for you: it takes up to about 90 seconds — less when it finds locators along the way, since it moves on as soon as a channel answers — and the receiver hears nothing at all while it runs.
+  💡 **Picking a channel from a scan acts; typing one by hand needs Update.** Choosing a result is the decision — the search has already established where the rocket is — so there is nothing left to confirm. The channel field lower down is different: every keystroke is a valid channel number, so it waits for **Update**.
+- **You can search all 64 channels.** Offered from the start, beside the short search, because sweeping the band is sometimes the right *first* move — a borrowed locator, or one whose channel was changed somewhere the app never saw. It is never started for you: it takes up to about 90 seconds — less when it finds locators along the way, since it moves on as soon as a channel answers — and the receiver hears nothing at all while it runs.
 - **It won't run while the locator is armed or flying.** Both scan buttons grey out and say so. A full sweep would leave you deaf for over a minute, which is intolerable over a live flight — and pressing **Arm** during a running scan stops the scan so the command gets through, rather than queueing behind it.
 
   ⚠️ **This does not time out, and that is deliberate.** If your rocket arms and then goes out of range, the receiver stays locked on it and both scans stay unavailable until you disarm it or power-cycle the receiver. That is not a lockout from a tool that would have helped: a rocket that armed on your channel is *still on your channel*, so it is a range problem and not a channel one. Sweeping 64 other channels cannot find it, and the ninety seconds spent trying are ninety seconds you are not listening for it to come back. Use direction and distance and walk toward it (§4).
@@ -937,7 +945,7 @@ Walk back to where you'll be standing during the launch, and check that telemetr
 If the link is marginal:
 
 - **Hold the receiver vertically, clear of your body.** This alone often fixes it.
-- **Change the LoRa channel** if you suspect another flier is on yours — use *Communication → Locator channel*, so your receiver follows (§2.5).
+- **Change the LoRa channel** if you suspect another flier is on yours — use *Communication*, close the chain beside the channel field, and **Update**, so your receiver follows (§2.5).
 - **Move.** Vehicles, trailers and crowds between you and the pad all attenuate the signal.
 
 ## 6.5 Leave the rocket Disarmed

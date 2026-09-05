@@ -464,7 +464,7 @@ App `fe5064c`. #20's remaining criteria: 1, 2, 3, 5 pass; 4 retired.
 **Criterion 4 is retired, and the reason is the finding.** It is not reachable from the
 UI: **the condition causing the send failure is the condition removing the control.**
 `sendMessage` refuses a locator-directed command when `connectedLocatorId` is null
-([ADR-0020](adr/0020-targeted-locator-commands.md)); the Locator channel section is gated
+([ADR-0020](adr/0020-targeted-locator-commands.md)); the chain toggle that sends it is gated
 on `locatorConnected`, which is *defined* as `connectedLocatorId != null`; a BLE drop nulls
 it. Both go in the same instant. **Two wrong procedures were written before this was
 understood** — one powering the receiver off (an abrupt cut leaves the GATT link up until

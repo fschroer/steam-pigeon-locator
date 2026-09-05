@@ -99,8 +99,9 @@ of `kParityGroupSize`.
    dropped`).
 3. **Leave the locator powered and in range for the whole run.** The probe has to be
    able to hear it; powering it off is a *different* test — see step 6.
-4. In the app, change the locator LoRa channel (Communication → Locator channel, or a
-   survey pick). Note the old and new channel numbers.
+4. In the app, change the locator LoRa channel (Communication: close the chain beside
+   the channel field, type the new one and press **Update** — or take a survey pick).
+   Note the old and new channel numbers.
 5. Expected sequence, in order:
    1. banner *"Moving to channel N…"*;
    2. locator console prints `DIAG|LOSS: LocatorCfgChgRequest DROPPED (forced miss
@@ -136,7 +137,7 @@ of `kParityGroupSize`.
    the UI: **the condition causing the send failure is the condition removing the
    control.** `sendMessage` refuses a locator-directed command when
    `connectedLocatorId` is null ([ADR-0020](adr/0020-targeted-locator-commands.md)),
-   and the Locator channel section is gated on `locatorConnected`, which is *defined*
+   and the chain toggle is gated on `locatorConnected`, which is *defined*
    as `connectedLocatorId != null`; a BLE drop nulls it via
    `releaseLocatorOnLinkLoss()`, so both go in the same instant. Two procedures were
    written for this before that was understood — one powering the receiver off (which
