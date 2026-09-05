@@ -83,6 +83,32 @@ the locator's archive in name, storage and presentation.**
 7. **Files live in app-private storage** and are deletable from one screen, so the list
    on that screen is the truth about what exists.
 
+8. **The `session_opened` header carries the last battery reading and its age**
+   (added 2026-09-04, after the first real log). This is a correction to decision 6,
+   not an addition to it. The schema was specified as the union of both message
+   types without working through *when* the pre-roll actually sits: the locator
+   sends `PreLaunchData` only while **disarmed and `WaitingLaunch`**
+   (`Factory.cpp`: `send_telemetry = Armed || flight_state != WaitingLaunch`), and a
+   flight is armed before it launches — so the two-second pre-roll of an armed
+   flight lies entirely inside the armed window and contains **no pre-launch frame
+   at all**. The first bench log proved it: 341 telemetry rows, 285 receiver-info
+   rows, zero pre-launch, and therefore nine permanently blank columns
+   (`accel_*`, `gyro_*`, `pad_alert`, and both batteries).
+
+   The columns are **kept**, because they are not universally unreachable: a
+   *disarmed* flight — which [ADR-0021](0021-arming-gates-pyro-only.md) permits,
+   arming gating only the pyro channels — stays disarmed-and-`WaitingLaunch` up to
+   launch, so its pre-roll does carry them. Deleting them would trade a blank for a
+   missing capability.
+
+   The batteries alone go in the header, because they are the one item of the nine
+   that is both *wanted* on an armed flight and *knowable*: the app heard them
+   before arming. The age rides with them (`batt_age_s`) — without it the reading
+   is a claim about an unknown moment, and on a locator that has sat powered on the
+   pad for an hour that distinction is the whole value of the number. Never having
+   heard one is reported as `batteries=unknown` rather than omitted, so it cannot be
+   confused with an older app that wrote no clause.
+
 ## Consequences
 
 **Easier.** A flight becomes reconstructable from the phone's side: link quality against

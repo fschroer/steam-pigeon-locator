@@ -1462,7 +1462,11 @@ A log still being written says so on its row, and can be shared while it is open
 | `link_quality` | The app's interference verdict for that moment (§2.5). |
 | `flight_state`, `lat`, `lon`, `agl_m`, velocity, attitude, `satellites`, `hacc_m` | What the message carried. |
 | `armed`, deployment masks, `drogue_detected`, `main_detected`, `pad_alert` | Arm state, which channels were armed and which had fired, and whether deployment was physically detected. |
-| battery, `receiver_channel`, `locator_id` | Locator and receiver battery, the channel it arrived on, and which locator sent it. |
+| battery, `receiver_channel`, `locator_id` | Locator and receiver battery, the channel it arrived on, and which locator sent it. **The two battery columns are blank on an armed flight — see below.** |
+
+⚡ **The battery columns are blank on an armed flight, and that is not a fault.** Battery levels ride only on the locator's on-pad message, and the locator stops sending that the moment you arm it — so a log, which begins two seconds before launch, never contains one. **Read the batteries off the `session_opened` row instead:** it carries `locator_batt_mv`, `receiver_batt_mv` and `batt_age_s`, the last reading heard before arming and how long before the launch it arrived. If the app was started after the rocket was already armed it never heard one at all, and that row says `batteries=unknown` rather than guessing.
+
+The same applies to the accelerometer, gyro and `pad_alert` columns: those also ride only on the on-pad message. Fly **disarmed** — which the system allows, since arming gates only the pyro channels — and all of them fill in for the pre-launch rows, because a disarmed rocket on the pad is still sending that message.
 
 💡 **`receiver_info` rows are the useful ones during a dropout.** They arrive when nothing else does — the receiver measuring the channel with the locator silent. A gap in the telemetry with these still ticking through it tells you whether the channel was quiet or whether something else was on it, which is the difference between a range problem and an interference one (§2.5).
 
