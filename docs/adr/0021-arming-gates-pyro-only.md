@@ -93,6 +93,20 @@ Everything that rides only in `PreLaunchData` went with it, for the whole of rec
 
 **Not verified on hardware.** Compile-verified in both `SP_VACUUM_SIM` configurations; no host suite covers `Factory.cpp`. The sequence to fly is arm → land → disarm, checking that the beacon keeps sounding, the battery gauges return, the panel drops to the pad layout, and the not-armed alert stays quiet.
 
+### Amendment (2026-09-06): arming while the alert is sounding must not cost the arming beeps
+
+**Reported from the pad: arming a rocket while the not-armed alert was active produced neither the arming chirp nor the 1 Hz ready-beep** — for the rest of the flight. [UserManual.md](../UserManual.md) §7.3 already specified the opposite (alert stops, chirp, then ready-beep), so this was a straight defect against a written sequence rather than an undecided behavior.
+
+The arm edge sets `buzzer_phase_ = Arming`. Later in the *same tick*, the alert block took the buzzer back: its `alert_due` test read the settle counter alone, and the settle is deliberately slow to clear (~1 s of *sustained non-vertical*, and arming does not move the rocket at all), so it was still over the threshold on the arm tick. Seeing a phase that was not `DisarmedAlert`, it overwrote `Arming`. The armed half of the buzzer chain has no branch for `DisarmedAlert`, so nothing sounded; and when the settle finally decayed the "go quiet" branch parked the phase at `Idle` rather than `Armed`, so the ready-beep never started either. Both losses are silent — the failure of an audible cue can only be noticed by its absence.
+
+**`alert_due` now carries `device_state_ == Disarmed`.** The arm *state*, not the settle, is what says this alert applies; the settle only measures how long the rocket has been standing there. Arming additionally clears the settle, the non-vertical run and the escalation clock, because **arming is the answer this alert was asking for** — without that, a disarm within the ~1 s decay window would re-fire the alert on the spot instead of granting the ~10 s settle a rocket just stood up is entitled to.
+
+**The general rule this is an instance of.** Every sequence shares `note_index_` / `duration_index_` and the single `buzzer_phase_`, so a phase set by an *edge* can be taken away later in the same tick by any block that writes the phase on a *level* condition. Level-driven writers must therefore be gated on the device state their sound belongs to — the per-tick `BuzzerServiceWatchdog` catches a stuck note, but nothing catches a stolen phase.
+
+**Only the firmware was affected.** The app's half already handles this exit path: `TelemetryData` carries no `pad_alert`, and `RocketViewModel` clears `PadAlertState` explicitly on receiving one precisely because `PreLaunchData` stops arriving at that point. Banner, voice and haptic stopped correctly on arm; only the locator's own two beeps went missing.
+
+**Not verified on hardware.** The full firmware builds and links; no host suite covers `Factory.cpp`, so nothing asserts this. The sequence to fly: stand the rocket up disarmed with e-matches wired, wait ~10 s for the alert, then arm *while it is sounding* — expect the descending double-beep to stop, the two-note chirp immediately, then the rising three-note ready-beep once the record opens.
+
 6. **Mounting calibration must not remain arm-triggered.** It runs on `ArmRequest` today, so under Decision 1 a disarmed flight would be recorded through the identity mounting frame (`{{0,1,2},{1,1,1}}`) whenever the locator is not mounted in the standard orientation — silently corrupting the axis assignment of the one record that exists. ~~Calibration is retriggered on the same sustained-vertical-and-stationary condition as Decision 5, and still on each arm.~~ **Amended 2026-08-07 — see below; the trigger as originally written was not implementable.** The nose axis is **configured**, and calibration is retriggered on a pad settle measured against it.
 
 ### Amendment (2026-08-07): Decision 6's trigger was circular

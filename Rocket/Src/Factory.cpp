@@ -139,6 +139,14 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			console_baud_.CloseWindow();
 			BuzzerReset();
 			buzzer_phase_ = BuzzerPhase::Arming;
+			// Arming is the answer the disarmed-rocket alert was asking for, so retire
+			// the settle here rather than leaving it to decay on its own.  The decay
+			// path is deliberately debounced (kNonVerticalClearCycles), and within that
+			// window a disarm would re-fire the alert on the spot instead of granting
+			// the ~10 s settle the operator expects from a rocket just stood up.
+			disarmed_alert_count_ = 0u;
+			non_vertical_run_     = 0u;
+			disarmed_alert_elapsed_ = 0u;
 			// Full reset so the locator can be re-armed after a landing without a
 			// power cycle: returns the flight state to WaitingLaunch, clears every
 			// per-flight variable, and drops any stale on-pad data from a prior arm.
@@ -454,7 +462,19 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 		// So when the snooze expires the alert resumes immediately if the rocket
 		// is still standing there, rather than restarting a 10 s settle and
 		// giving back another quiet window.
-		const bool alert_due = disarmed_alert_count_ >= kDisarmedAlertCycles;
+		//
+		// Gated on Disarmed, not on the settle alone.  The settle clears slowly by
+		// design, so on the arm edge — the very tick the transition block above sets
+		// BuzzerPhase::Arming — it is still over the threshold.  Ungated, the block
+		// below saw a phase that was not DisarmedAlert and took the buzzer back,
+		// overwriting Arming; the armed half of the buzzer chain then matched no
+		// branch at all, and once the settle finally decayed the "go quiet" branch
+		// parked the phase at Idle rather than at Armed.  Arming while the alert was
+		// sounding therefore cost BOTH the arming confirmation and the 1 Hz
+		// ready-beep, for the whole flight — the two sounds an operator arming a
+		// rocket is listening hardest for.
+		const bool alert_due = device_state_ == DeviceState::Disarmed
+		                    && disarmed_alert_count_ >= kDisarmedAlertCycles;
 		if (alert_due && !comm_.IsPadAlertSnoozed()) {
 			if (buzzer_phase_ != BuzzerPhase::DisarmedAlert) {
 				BuzzerReset();

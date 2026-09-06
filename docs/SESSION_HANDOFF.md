@@ -2,6 +2,18 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-09-06 (fix) — arming while the not-armed alert was sounding killed BOTH arming beeps — [ADR-0021](adr/0021-arming-gates-pyro-only.md) Decision 5, amended
+
+🔧 **Reported from the pad, fixed in [`Factory.cpp`](../Rocket/Src/Factory.cpp).** Arm a rocket while the disarmed-rocket alert is active and you got **neither the two-note arming chirp nor the 1 Hz ready-beep**, for the rest of the flight. [UserManual.md](UserManual.md) §7.3 already specified the opposite sequence, so this was a defect against written behavior, not an open question.
+
+**The mechanism is worth carrying forward.** The arm edge sets `buzzer_phase_ = Arming`; later in the *same tick*, the alert block's `alert_due` still read `true` (it tested the settle counter alone, and the settle clears only after ~1 s of sustained non-vertical — arming does not move the rocket), so it saw a phase that was not `DisarmedAlert` and **overwrote `Arming`**. The armed half of the buzzer chain has no branch for `DisarmedAlert` → silence; and when the settle finally decayed, the "go quiet" branch left the phase at `Idle` rather than `Armed` → no ready-beep either. `alert_due` now carries `device_state_ == Disarmed`, and the arm edge clears the settle, the non-vertical run and the escalation clock outright.
+
+⚠️ **The trap that generalizes:** all sequences share `note_index_` / `duration_index_` and one `buzzer_phase_`, so a phase set by an **edge** can be stolen later in the same tick by any block that writes the phase on a **level** condition. `BuzzerServiceWatchdog` backstops a stuck *note*; nothing backstops a stolen *phase*.
+
+✅ **App side needed nothing** — `RocketViewModel` already clears `PadAlertState` on `TelemetryData` because `PreLaunchData` stops arriving at arm. Banner, voice and haptic were correct throughout; only the locator's beeps were lost.
+
+⚠️ **Builds, but is unverified on hardware.** Full firmware links (`make main-build`, 257 428 B text); no host suite covers `Factory.cpp`, so nothing asserts the behavior. **To fly:** stand the rocket up disarmed with e-matches wired, wait for the alert, arm while it is sounding — the descending double-beep should stop, the chirp follow immediately, the ready-beep once the record opens.
+
 ## 2026-09-01 (bench 2) — two chamber flights: the fixes are HARDWARE-VALIDATED; one run lost to operator technique
 
 Records `Testy_McTestface_..._2026-09-01_134123` and `_134309` (locator + app).
