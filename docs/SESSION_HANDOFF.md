@@ -14,6 +14,8 @@ Orientation note for resuming work. Detail lives in the linked artifacts; this i
 
 ⚠️ **Builds, but is unverified on hardware.** Full firmware links (`make main-build`, 257 428 B text); no host suite covers `Factory.cpp`, so nothing asserts the behavior. **To fly:** stand the rocket up disarmed with e-matches wired, wait for the alert, arm while it is sounding — the descending double-beep should stop, the chirp follow immediately, the ready-beep once the record opens.
 
+📋 **Separately, and NOT a defect: the beacon keeps sounding after a post-flight disarm.** Reported the same day. It is documented (UserManual §9.4, §9.7) and deliberate — `landed_beacon_` is cleared only by the next arm. **Reaffirmed, no code change.** But it does mean the wire and the buzzer now disagree (`PreLaunchData` = "on the pad" while the beacon says "on the ground"), which is new since the 2026-09-01 amendment and is now recorded there rather than left to be re-derived. Open end noted there too: nothing silences the beacon once the rocket is *in hand*, which is the habituation argument that won the pad alert its snooze.
+
 ## 2026-09-01 (bench 2) — two chamber flights: the fixes are HARDWARE-VALIDATED; one run lost to operator technique
 
 Records `Testy_McTestface_..._2026-09-01_134123` and `_134309` (locator + app).
