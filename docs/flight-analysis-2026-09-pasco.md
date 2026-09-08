@@ -79,7 +79,7 @@ counts the set as 16.
 | 6 | AIR4 dynamic model validated to 376 m/s | [ADR-0017 amendment](adr/0017-gps-receiver-configuration-ownership.md) |
 | 7 | `fix_type` is the wrong trust gate; `h_acc` is the right one | [ADR-0017 amendment](adr/0017-gps-receiver-configuration-ownership.md) |
 | 8 | Burnout declared 3.8 s late on fast flights | [#45](https://github.com/fschroer/steam-pigeon-locator/issues/45) |
-| 9 | Four columns are near-constant | this file, §9 — no issue yet |
+| 9 | Near-constant status bytes; two could cross the chunk-packing step | [#48](https://github.com/fschroer/steam-pigeon-locator/issues/48) |
 | 10 | Pre-launch pad data is not retained | [#47](https://github.com/fschroer/steam-pigeon-locator/issues/47) |
 
 ---
@@ -315,12 +315,28 @@ Measured across all 16 records — columns constant *within* a record:
 | `ekf_health` | 3 / 16 | genuinely informative |
 | `fused_vspeed_mps` | 2 / 16 | both are the dead-channel records in §5 |
 
-**Suggested demotions to per-flight statistics:** `armed`, `pps_status` (store the worst
-value seen), `fix_type` (store the minimum). **Also worth questioning:** `q_w…q_z` is 8
-B/sample and `tilt_deg` is an exact function of it (agreement 0.19°); the quaternion's
-only unique content is roll and heading, which ADR-0005 explicitly does not claim to
-observe. Until something consumes roll, that is unvalidated payload. **No issue opened
-yet.**
+**Suggested demotions to per-flight statistics:** `armed` and `pps_status` (the latter as
+an OR of all samples). **`fix_type` should stay per-sample** — an earlier draft of this
+file grouped it with the other two, which was wrong. `h_acc` is the *quality* signal (§7),
+but `fix_type`'s other job is the 6/7 stale classification, i.e. **which rows carry a
+latched position**, and that is inherently per-sample: a per-flight minimum says a freeze
+happened and not *when*, which is exactly what made the 2026-08-01 diagnosis take a
+session.
+
+**Two bytes is enough to matter.** `FlightSample` is 88 B under `#pragma pack(push, 1)` —
+83 B of fields plus `reserved[5]` — and `ArchiveTypes.hpp` documents that the binding
+constraint is **samples per chunk, not bytes**: ≤ 82 B packs 6 per chunk and fits **10**
+records, where ≤ 90 B packs 5 and fits 9. `record_count` was cut 10 → 9 to fund
+ARCHIVE_VERSION 6. Dropping `armed` and `pps_status` leaves 81 B of fields; with one
+reserved byte that is **82 B — exactly the threshold**. The capacity arithmetic needs
+re-doing properly against `Archive.hpp` before that tenth record is believed.
+
+**Also worth questioning:** `q_w…q_z` is 8 B/sample and `tilt_deg` is an exact function of
+it (agreement 0.19°); the quaternion's only unique content is roll and heading, which
+ADR-0005 explicitly does not claim to observe. Until something consumes roll, that is
+unvalidated payload — though it becomes worth more, not less, if
+[#44](https://github.com/fschroer/steam-pigeon-locator/issues/44) is resolved by fixing the
+estimator. **Tracked as [#48](https://github.com/fschroer/steam-pigeon-locator/issues/48).**
 
 ## 10. The record cannot audit its own pad phase
 
