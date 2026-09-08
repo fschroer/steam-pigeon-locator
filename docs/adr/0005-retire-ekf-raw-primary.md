@@ -133,3 +133,79 @@ It is also effectively unrecoverable in flight: `correctTiltFromAccel()` injects
 - **It does NOT fully explain the divergence.** Replayed peak |fused vertical speed| improves 1268 → 808 m/s: better, still badly wrong. At least one further mechanism is unaccounted for ([#28](https://github.com/fschroer/steam-pigeon-locator/issues/28)).
 
 **Do not read this as rehabilitating the EKF.** Nothing here has flown, and the remaining divergence is large. But if FR-P8/FR-P9 are ever revisited, the fair test is against the *fixed* filter — re-running ADR-0004's vetting method on pre-fix data would compare against a straw man.
+
+## Amendment (2026-09-07) — the accel tilt correction this ADR describes has never run in flight; the envelope claim is currently false
+
+Sixteen records from Pasco 2026-09-04..07 — see
+[flight-analysis-2026-09-pasco.md](../flight-analysis-2026-09-pasco.md) §2–3, and
+[#44](https://github.com/fschroer/steam-pigeon-locator/issues/44) for the mechanism.
+
+⚠️ **This ADR's stated envelope and the shipped behaviour disagree.** The honesty note
+in this ADR, and the `AttitudeEstimator` header that quotes it, both say accelerometer
+tilt correction is valid *"on the pad, gentle descent under canopy."* **Only the pad half
+happens.** Two independent gates each block it in flight:
+
+```cpp
+const bool quasi_static = !m_gps_velocity_enabled_ && IsStationary(imu, baro);
+```
+
+`m_gps_velocity_enabled_` is `false` only in `WaitingLaunch` and `Landed` — it schedules
+the EKF's ZUPT and says nothing about whether gravity is observable, yet on its own it
+disables the correction from launch detect to landing. And `IsStationary` requires
+`|ω| ≤ 5 dps`, which under canopy passes on **0.0–4.6 %** of samples: the airframe hangs
+steadily but spins.
+
+⚠️ **The accelerometer is a good gravity reference exactly where the ADR says it is.**
+Under drogue and main, `|a| − 1 g` is inside ±0.15 g on **57–97 %** of samples, with
+median magnitude 1.00–1.13 g. The reference the ADR names is present and unused.
+
+⚠️ **The cost is measured, not projected.** Against accel-implied tilt, the strapdown's
+**median** error under canopy is **−117°** (`Ken_6`), **−141°** (`Mike_5 09-06`) and
+**−63°** (`Ken 132857`). Single-sample tilt steps reach **125° in one 50 ms cycle**.
+`Mike_8 09-06` shows only +2° — coincidence, not accuracy: it drifted from ~10° and
+stayed near 10° while that airframe hung at ~15°.
+
+✅ **The parts of this ADR that hold.** The export path is faithful — `tilt_deg` matches
+the tilt recomputed from the logged quaternion to within **0.19°** on every row of every
+record, so the error is in the estimator and nowhere else. Raw-primary itself is
+vindicated again: `raw_baro_agl_m` was the reference every finding in the review was
+measured against, and the fused channel died outright on two flights (§5) while raw was
+correct on all sixteen. And the ADR's refusal to claim heading is unchanged — nothing
+here makes yaw observable.
+
+✅ **A measured short-horizon drift figure now exists.** The 2026-09-06 180444 pair put
+two independent strapdowns in one airframe. They agreed to **~3° at burnout** and **~4°
+at the coast peak**. That is the number a freshness budget should be built on, in place
+of an assumption.
+
+### The decision this needs
+
+Two coherent positions. The code currently matches neither honestly, which is why this is
+an amendment and not a bug note:
+
+1. **Fix the code and keep the envelope.** Separate "gravity is observable" from "the
+   vehicle is stationary": gate `correctTiltFromAccel` on the accel-norm test over a short
+   window, drop the gyro term and drop `m_gps_velocity_enabled_` from the expression.
+   `kStrapdownTiltGain = 0.02` is already conservative. Roll and pitch under canopy become
+   observable again at no cost, and the ADR text becomes true.
+2. **Narrow the envelope to match the code.** State that the correction is pad-only, that
+   in-flight attitude is dead-reckoned with unbounded error after burnout, and publish the
+   freshness budget above so consumers gate on it.
+
+**FR-P13 is not in danger either way.** Boost-phase tilt is defensible on the correctly
+mounted units — accel-implied pad tilt 1.4–4.2°, thrust vector within 0.8–3.6° of body X
+through boost — which is the window the air-start gate actually needs. What is in danger
+is anything built later on the assumption that descent tilt means something.
+
+📋 **Separately, two locators need a bench mounting check before the next flight.**
+`Ken 132857` shows the boost acceleration **38.8°** off body X (p90 155.8°) and an
+accel-implied pad tilt of 40.1° stable to ±1°; `Ken_6` shows the same pattern. A rocket
+that flew to 1 656 m was not 40° off the rail. See also
+[#43](https://github.com/fschroer/steam-pigeon-locator/issues/43), which is a different
+frame defect in the same area and should not be confused with this one.
+
+📋 **And the gyro has less headroom than the design assumes.** Full scale is ±4 587 dps
+at 0.14 dps/LSB. `Ken_6`'s **median** boost body rate was 2 152 dps, and two records
+railed on a handful of samples. A faster-rolling airframe will saturate, and the strapdown
+has no way to know that it did — which bears directly on NFR-9's ≥ 480 Hz strapdown, since
+sampling faster does not help once the sensor is at its rail.

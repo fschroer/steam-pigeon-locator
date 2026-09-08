@@ -79,3 +79,73 @@ The common root is one assumption: that configuring the receiver once at boot wa
 - **A new `Statistic` event for the stream classification.** Same orphaning problem — `statsSlotCount` is validated identically.
 - **ACK the in-flight configuration writes.** Blocks up to 1 s; incompatible with the 50 ms budget and the IWDG.
 - **Hide the marker when GPS health is not `Ok`** (the app's behavior before this ADR — it gated the marker on `== SensorHealth.Ok`). Removes the last-known position from the screen at precisely the moment it is the only thing left to walk toward. Graying communicates the same distrust while keeping the information.
+
+## Amendment (2026-09-07) — the dynamic-model schedule is VALIDATED. But `fix_type` is the wrong field to have archived as the trust signal
+
+Sixteen records from Pasco 2026-09-04..07 — see
+[flight-analysis-2026-09-pasco.md](../flight-analysis-2026-09-pasco.md) §6–7.
+
+### Decision 3 (phase-scheduled dynamic model) — confirmed, no change
+
+✅ Across **28 689 samples**, only **128 (0.45 %)** lacked a 3D fix, and the 3D fix
+**held to 376 m/s** (`Ken 132857`, ≈ Mach 1.1) and 202 m/s (`Ken_6`). The 2026-08-02
+failure that motivated this decision — 7.75 s of loss with recovery on the first sample
+back under the Portable model's 50 m/s ceiling — has no analogue in this set.
+
+✅ The residual losses are **not velocity-correlated**. The longest, 3.90 s on
+`Ken 132857`, occurred at **11–47 m/s** near apogee. Two more were on the ground or under
+main at ~0 m/s. Exactly one outage anywhere — 0.80 s on `Ken_6` — was at high speed.
+
+**The "revisit if a flight shows fix loss with the airborne model active" condition is
+therefore answered in the negative.** One 0.8 s boost outage in sixteen flights is not
+the model. AIR4 stays.
+
+### Decision 4 (archived fix quality) — the field choice was wrong, and this data shows why
+
+⚠️ **`fix_type` reads 3 on 99.55 % of all samples** and is constant within 12 of 16
+records. As a trust gate it carries almost no information — and on the one flight where
+it mattered it was actively misleading.
+
+On `Ken 132857`, the receiver reported a continuous 3D fix from 4.8 s to 11.0 s while the
+solution collapsed underneath it:
+
+```
+t     num_sv  h_acc     baro vz    gps_vel_d   fix_type
+4.6s      7    4.9 m    +97 m/s     -24.7        3
+4.8s      5   11.6 m    +99 m/s     +15.9        3
+5.6s      5   15.6 m   +104 m/s    +101.6        3   <- reports DESCENDING while climbing
+6.8s      5   19.9 m    +97 m/s    -121.2        3
+15.2s     0  299.6 m    +13 m/s        --        0
+```
+
+A 3D fix on 5 satellites with 300 m of claimed accuracy is not a usable position, and
+`fix_type` cannot say so. **Only `num_sv` and `gps_h_acc_m` registered any of it.**
+
+**Amendment:** position trust is gated on **`gps_h_acc_m` first and `num_sv` second**, not
+on `fix_type`. `fix_type` remains archived — it is what distinguishes a live fix from the
+6/7 stale classification, which is a different question and still the right one for that
+job — but it is not the quality signal.
+
+**This resolves the open item on getting fix quality across the wire.** The ADR left
+`gps_fix_sv` unavailable to the app and deferred the codec change. If only one field fits
+in `FlightProfileCodec`, it must be **`h_acc`** — two bytes, and the one that was right.
+Sending `fix_type` alone would put a field reading "3" on 99.55 % of samples in front of
+the operator as a trust indicator. That change remains a wire-format change under the
+three-places rule ([ADR-0016](0016-ios-port-corebluetooth-and-platform-parity.md)) and is
+still deferred; what changes here is **which** field it should carry.
+
+### Decision 2 (stale-fix watchdog) — never fired, and that is the result
+
+✅ **Zero samples** in sixteen flights carried the stale classifications 6 or 7. The
+receiver did not lose its configuration once across a whole meet. The watchdog remains
+justified — the 2026-08-01 freeze cost a full session of inference and the trigger is
+still unidentified — but it has now gone a meet without being needed, which is worth
+recording as evidence rather than leaving to be re-derived.
+
+### New, and outside this ADR's scope
+
+📋 **A 6× fix-quality difference between two locators on the same launch.** On
+2026-09-07 110552, `Mike_5` averaged 31.3 satellites with h<sub>acc</sub> p95 of 0.64 m;
+`Mike_9`, seconds away, averaged 19.8 with p95 3.74 m and dipped to 7 satellites. That is
+an antenna or placement question, not a configuration one — but it is `h_acc` that makes
+it visible, which is the point above restated as hardware.

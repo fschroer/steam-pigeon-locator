@@ -209,3 +209,58 @@ its own decision rather than arriving as a filtering tweak.
 makes the latch survivable, but leaves the velocity reading itself wrong through
 the whole fast phase — the record and FR-P13's ascent-rate gate both still read a
 saturated constant.
+
+## Amendment (2026-09-07) — FLOWN WITH CHARGES. The pyro-shock half is closed; the residual noise is aerodynamic, not sensor
+
+Sixteen records from Pasco 2026-09-04..07 — see
+[flight-analysis-2026-09-pasco.md](../flight-analysis-2026-09-pasco.md) §4 for the
+per-record numbers and the file hashes.
+
+✅ **The open item this ADR flagged as untestable in a chamber is now tested.** The
+"Validated in a vacuum chamber; still not flown" block above ends by naming the gap: the
+clamp existed to suppress **pyro-shock** transients, no e-match goes in the jar, and
+*"the first flight with charges is the test that closes it."* Sixteen flights with live
+charges produced **zero outlier events** — against a 2026 archive average of ~4.6 per
+flight. Per-sample altitude noise, recovered from the second-difference residual, is
+**σ ≈ 0.04–0.07 m** in benign descent. **Median-5 → IIR survives real deployment shock.**
+
+✅ **And the un-capped velocity channel was exercised well past the old ceiling.**
+`Ken 132857` peaked at **376 m/s** (≈ Mach 1.1) and `Ken_6` at 250.7 m/s, both read
+without a plateau. Under the removed clamp every one of those samples would have reported
+exactly `200.0`.
+
+⚠️ **But the residual descent noise this ADR sized N against is largely NOT sensor
+noise, and N cannot fix it.** Under drogue the altitude carries a sustained **0.2–0.9 Hz
+oscillation** whose amplitude varies **50× between airframes** — detrended residual sd
+0.11 m on `Mike_8 09-06` against **7.32 m, max 15.34 m** on `Mike_6 09-05 133510`. On
+`Ken_6` it is **phase-locked to the attitude oscillation**, the same ~1.7 s period
+appearing in altitude and in tilt, which identifies it as the pressure port coupling to
+body attitude.
+
+**This matters for how the "descent dominates the noise population" line in the original
+analysis should be read.** That finding — 50 of 78 events, 64 %, median 35 m — was
+counted as baro noise and used to size the window. A rank filter **cannot** reject a
+sustained oscillation; it is not an outlier. So some fraction of the descent population
+the sizing rests on is an airframe property that no window width would have removed, in
+the same way that [#42](https://github.com/fschroer/steam-pigeon-locator/issues/42)'s
+corrupt loads were not sensor behaviour either. **N = 5 is not wrong; the descent half of
+its justification is weaker than it reads.**
+
+📋 **No change to the filter chain.** Nothing here argues for a different N or a
+different order. Two consequences do follow, and both belong outside this ADR:
+
+- **The deployment gate, not the filter, is where the oscillation should be handled.**
+  With ±15 m against a 130 m main gate, main can fire early or late by that much.
+  Requiring the gate to hold for **N consecutive samples** costs a fixed 50 ms × N
+  regardless of descent rate; a smoother's lag scales with exactly the descent rate that
+  makes an early main dangerous.
+- **`VelocityEstimator<10>` is an endpoint difference and discards 8 of its 10 samples.**
+  A least-squares slope over the same ring has roughly a third of the noise variance for
+  the same group delay and no added latency. This ADR removed the clamp from that class
+  and left it "once again just a differentiator over a ring" — it can be a better one.
+
+📋 **Revisit conditions, updated.** *"More 2026-or-later flights, especially supersonic"*
+is now partly satisfied: 16 more MS5611 flights, one at Mach 1.1, taking the past-Mach-1
+count from one to two. Still thin for that regime. *"A pyro-shock transient lasting more
+than two samples"* — none observed in 16 flights with charges. **Raw pressure logging
+remains the outstanding item**, and is now the main thing that would move this decision.
