@@ -75,12 +75,12 @@ counts the set as 16.
 | 2 | Strapdown accel tilt correction never runs in flight | [#44](https://github.com/fschroer/steam-pigeon-locator/issues/44), [ADR-0005 amendment](adr/0005-retire-ekf-raw-primary.md) |
 | 3 | Tilt is credible to burnout, unbounded after | [#44](https://github.com/fschroer/steam-pigeon-locator/issues/44) |
 | 4 | Baro is clean; the derivative and an aerodynamic oscillation are the real issues | [ADR-0032 amendment](adr/0032-baro-outlier-filtering.md) |
-| 5 | `ekf_health` guards altitude, is blind to velocity | this file, §5 — no issue yet |
+| 5 | `ekf_health` guards altitude, is blind to velocity | [#46](https://github.com/fschroer/steam-pigeon-locator/issues/46) |
 | 6 | AIR4 dynamic model validated to 376 m/s | [ADR-0017 amendment](adr/0017-gps-receiver-configuration-ownership.md) |
 | 7 | `fix_type` is the wrong trust gate; `h_acc` is the right one | [ADR-0017 amendment](adr/0017-gps-receiver-configuration-ownership.md) |
 | 8 | Burnout declared 3.8 s late on fast flights | [#45](https://github.com/fschroer/steam-pigeon-locator/issues/45) |
 | 9 | Four columns are near-constant | this file, §9 — no issue yet |
-| 10 | Pre-launch pad data is not retained | this file, §10 — no issue yet |
+| 10 | Pre-launch pad data is not retained | [#47](https://github.com/fschroer/steam-pigeon-locator/issues/47) |
 
 ---
 
@@ -236,9 +236,11 @@ altitude symptom; nothing watches velocity at all.
 
 **Suggested:** a fifth bit `0x10 fused_vspeed_implausible`, set when
 `|fused_vspeed − raw_baro_vel|` exceeds a bound for N cycles — the same
-symptom-not-mechanism shape that made `fused_frozen` work. One comparison per cycle.
+symptom-not-mechanism shape that made `fused_frozen` work. One comparison per cycle, and
+bit `0x10` is free inside the existing byte so no `ARCHIVE_VERSION` bump is needed.
 Until then `fused_vspeed_mps` costs 4 B/sample to record a number that can be wrong by
-900 m/s with no way to tell from the record. **No issue opened yet.**
+900 m/s with no way to tell from the record. **Tracked as
+[#46](https://github.com/fschroer/steam-pigeon-locator/issues/46).**
 
 ## 6–7. GPS
 
@@ -328,9 +330,11 @@ of sixteen records contain 6–8 rows before launch detect, most already above 1
 
 That means the **tilt seed, the learned gyro bias and the baro zero are not in the
 archive** — precisely what §2, §3 and §4 need in order to be checked. Retaining ~0.5 s
-(20 samples, ~1.8 KB per flight) unconditionally would unblock all three; the epoch can
-stay anchored to onset with the pad samples carried at a recorded offset. **No issue
-opened yet.**
+(20 samples, 1 760 B per flight) unconditionally would unblock all three. The ring already
+holds 2 s (`kPreLaunchRingSamples = 51`) and the `health_flagged` branch already moves the
+epoch back, so nothing new is needed but the decision to stop discarding — the cost is that
+t = 0 stops meaning thrust onset for every flight. **Tracked as
+[#47](https://github.com/fschroer/steam-pigeon-locator/issues/47).**
 
 ## 11. Same-launch pairs
 
