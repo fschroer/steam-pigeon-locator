@@ -256,8 +256,8 @@ Listed in menu order:
 | Menu item | Appears when |
 |---|---|
 | Communication | The receiver is connected |
-| Flight Profiles | The locator is powered, in range, and **disarmed** |
-| Locator Settings | The locator is powered, in range, and **disarmed** |
+| Flight Profiles | The locator is powered, in range, and **disarmed** — or is sending you a flight record in the background (§10.1) |
+| Locator Settings | The locator is powered, in range, and **disarmed** — or is sending you a flight record in the background (§10.1) |
 | Receiver Settings | The receiver is connected |
 | Application Settings | Always |
 | Download maps | Always |
@@ -1337,7 +1337,16 @@ You get a list of stored flights, each showing its **record number, date, time a
 
 So a slow drift down under canopy looks slightly coarser than the boost, by design. **The full-rate record is still on the locator**; the USB-C console export (§10.4) always has every sample.
 
-⚠️ **A locator on firmware older than 2026-09-29 sends only the first ~100 seconds of any flight** and the chart simply ends there — often partway down the descent — with nothing to say it stopped early. Update the locator's firmware if a long flight's profile stops short.
+⚠️ **A locator on firmware older than 2026-09-29 sends only the first ~100 seconds of any flight.** The chart then ends there, often partway down the descent. The app now says so in red above the chart — *"Partial record: this locator's firmware sends only about the first 102 s of a flight…"* — so a short profile is no longer mistaken for the whole flight. Update the locator's firmware to see the rest. (Older app versions showed no warning at all.)
+
+**You don't have to wait on the chart.** Leave it — back to the list, or all the way out to the map — and the download carries on by itself:
+- While the locator is sending, the status panel shows **Downloading 62%** where the locator's name normally is, and the rocket marker turns **gray** rather than red. The locator is quiet because the app asked it for the record, not because it's missing; it won't report its position or battery until the download finishes.
+- A **ring with an ✕** appears in the map's control column beside the archived-path button, filling as the download progresses. **Tapping it stops the download and throws away what has arrived.** You don't need it to pause — pausing is automatic.
+- **Opening a screen that talks to the locator pauses the download**: Flight Profiles, Locator Settings, Receiver Settings, Communication, or Deployment Test, as does **arming**. The locator goes back to broadcasting within a second or two so the screen works normally. So does losing the Bluetooth link to the receiver.
+- **It resumes by itself** once you're back off those screens with the locator disarmed and heard again — even after a reconnect — **picking up where it left off**, not from the beginning. The same happens if you open the same record on the chart again.
+- **Choosing a different record** in Flight Profiles replaces the unfinished one.
+- If the record in that slot has changed meanwhile (the rocket flew again and the slot was reused), the app notices and starts the new record from the beginning rather than mixing the two.
+- When it finishes, the locator returns to broadcasting on its own, and the **archived path** on the map shows the whole flight.
 
 **The altitude you see plotted is the barometric altitude** — the same measurement the locator actually used to make its deployment decisions. That's deliberate: the chart shows you the world as the flight computer saw it.
 
@@ -1525,7 +1534,7 @@ The same applies to the accelerometer, gyro and `pad_alert` columns: those also 
 | Can't stop a deployment test countdown | Press the red **STOP TEST** button below the countdown; leaving the screen sends the same cancel. It is a radio message and can be lost: while one is outstanding the button reads **STOPPING…** and the count keeps ticking until the locator honors it. Press again, and treat the charge as live until the countdown clears (§3.5). |
 | STOP TEST is greyed out | No test is running as far as the app knows. If the locator's LED is still blinking red, the app has lost the link — the countdown is not reaching it, and the cancel would not reach the locator either. |
 | A deployment test counted down but the channel never fired | First check you are measuring the channel you tested — the terminal blocks are numbered 1–4 and it is an easy one to get wrong. Then connect USB-C, press `p` for the pin trace (Appendix D), and run the test again. `cmd DARM=1 D`*n*`=1` with your meter reading nothing puts the fault in the hardware; anything else puts it in the locator's firmware and is worth reporting. The channel is live for **1 second**, so a meter may miss it where a scope will not. |
-| Locator Settings / Flight Profiles aren't in the menu | They only appear while the locator is powered, in range, and **disarmed** (§2.1). |
+| Locator Settings / Flight Profiles aren't in the menu | They only appear while the locator is powered, in range, and **disarmed**, or while it is sending you a flight record in the background (§2.1, §10.1). |
 | Ready-beep never starts after arming | Flight memory full (§3.6) or battery too low. Longest when re-arming after a completed flight. **Don't launch** (§7.4). |
 | Locator is playing a repeating *descending* double-beep | It is not armed and it thinks it's on the pad (§6.6). Arm it, lay the rocket down, or snooze the alert. Do not tape over the buzzer. |
 | That alert won't sound even though the rocket is standing there disarmed | Most likely *Sensor Axis Along Rocket* names the wrong axis for this build — the default X is right only if X runs along the tube, and a wrong axis makes an upright rocket read as lying down (§1.7). Check it with the console's `m` key. **Auto** disables the alert entirely. Otherwise: no channel shows continuity, or the rocket is more than ~35° off vertical (§6.6). |

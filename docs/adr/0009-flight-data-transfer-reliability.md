@@ -81,7 +81,8 @@ Separately, leaving the chart cancelled the load (invariant 3), so "load a recor
     - **Mismatch:** any mismatch discards the partial copy. A new flight in that slot, or a newer firmware with a different plan, are both caught this way.
 13. **Lifecycle (supersedes invariant 3's "on leaving the flight-profile screen").**
     - **Leaving the chart does not cancel an incomplete transfer.** The app keeps receiving, and sends `DisarmRequest` when the transfer **completes** or when it is **paused**.
-    - **Pause triggers** are anything that needs the link or changes the context: arming, locator or receiver settings, a deployment test, switching locators, or a BLE disconnect.
+    - **Pause triggers** are anything that needs the link or changes the context: arming, locator or receiver settings, a deployment test, switching locators, or a BLE disconnect. On Android the screens are held by destination (Flight Profiles, Locator Settings, Receiver Settings, Communication, Deployment Test), and arming holds the link for the duration of the arm attempt so the download cannot re-request the record under it. Pausing is automatic; there is no pause control.
+    - **Stopping is explicit and discards.** The map offers one control, a progress ring with an ✕, which abandons the download and returns the locator to broadcasting.
     - **Requesting a different record discards** the partial copy rather than pausing it.
     - **Resume** is automatic once the phone is connected, the receiver is on the locator's channel, and the locator is **Disarmed and broadcasting `PreLaunchData`**.
     - **While a background transfer runs,** the locator is silent (unchanged). The app shows the download's progress in place of stale or lost-telemetry warnings for that locator.
