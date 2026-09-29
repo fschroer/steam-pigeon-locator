@@ -2,6 +2,42 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-09-28 (analysis) — Gerlach BALLS: a Mach 1.2 motor burn-through reconstructed, coast attitude VALIDATED, the app has only ever seen the first 115 s of any record — [flight-analysis-2026-09-gerlach.md](flight-analysis-2026-09-gerlach.md)
+
+Three ride-along records (Red Ryder, Shane, Nike Smoke) plus their app logs. **Ride-alongs: the deployment events are logic only.** Separate flight computers fired the charges.
+
+🔧 **[#49](https://github.com/fschroer/steam-pigeon-locator/issues/49) is the one to fix first.**
+- A transfer carries at most **256 packets × 9 = 2,304 samples ≈ 115 s**. `BeginTransfer` clamps `packet_count_` silently, and the app reports **complete**.
+- Red Ryder got 49 % (the chart stops at 742 m in descent) and Shane got 24 %.
+- It's a wire change (ACK bitmap), so all three layout copies change together.
+- The same issue carries fschroer's requirement that **the transfer keeps running after the user leaves the chart**.
+
+🔧 **Other new defects:**
+- [#50](https://github.com/fschroer/steam-pigeon-locator/issues/50): typed app settings bypass every bound, because the focus-loss clamp can never fire. The firmware has no range check, so a main altitude of 2,500 m reached a locator.
+- [#51](https://github.com/fschroer/steam-pigeon-locator/issues/51): 0 means "unknown receiver channel", which closed the Nike log.
+- [#52](https://github.com/fschroer/steam-pigeon-locator/issues/52): the deployment status byte is misdecoded by the app, corrupted by unmasked continuity in the firmware, and not archived.
+- [#53](https://github.com/fschroer/steam-pigeon-locator/issues/53): GPS velocity pins at ±327.67 m/s.
+- [#54](https://github.com/fschroer/steam-pigeon-locator/issues/54): the physical drogue and main detectors are both false on a vehicle with no recovery.
+
+⚠️ **Two documented claims now contradicted:**
+- **ADR-0017's "`h_acc` is the right trust gate"** ([#55](https://github.com/fschroer/steam-pigeon-locator/issues/55)): Shane's receiver lost lock at 40 g and was 2.9 km off with `h_acc` < 1.3 m.
+- **ADR-0032's delay budget** ([#56](https://github.com/fschroer/steam-pigeon-locator/issues/56)): end-to-end barometer lag at touchdown is 0.5–0.8 s, not about 0.25 s. A section tumbling in airflow reads hundreds of meters high.
+
+⚠️ **Before fixing [#45](https://github.com/fschroer/steam-pigeon-locator/issues/45):**
+- The late magnitude-based burnout is *also* an accidental lockout. It held apogee detection closed through Shane's Mach 1 down-crossing in coast and through Nike's fictitious −551 m/s after the breakup.
+- The fix needs a deliberate replacement for that lockout.
+
+✅ **Coast attitude checked against GPS flight-path angle:**
+- Red Ryder ≤ 3.4°, Shane 1–6°.
+- A bias-corrected 20 Hz replay matched within 2.5°.
+- This narrows [#44](https://github.com/fschroer/steam-pigeon-locator/issues/44) to descent.
+- The archived gyro is raw, since the pad bias isn't stored; Red Ryder's was 3.6 dps. That strengthens [#47](https://github.com/fschroer/steam-pigeon-locator/issues/47).
+
+📋 **Nike Smoke root cause (evidence only, no code impact):**
+- The case wall ruptured at **65 % of impulse** (about 5.4 of 8.1 s), at 415 m/s and 80 kPa.
+- The side jet (at most about 12 g) started it. The broadside aerodynamic load (about 160–220 g, measured 179 g) destroyed the airframe within about 100 ms.
+- The hole is 3–6″ below the forward end, which points at a defect around the forward grain rather than at the closure seal.
+
 ## 2026-09-07 (analysis) — 16 flights at Pasco reviewed: baro and GPS VALIDATED, attitude and the cross-channel diagnostic are BROKEN — [flight-analysis-2026-09-pasco.md](flight-analysis-2026-09-pasco.md)
 
 First multi-flight review since the 2026-08-31 archive sweep. **16 distinct records, 28 689 samples**, apogee 69.6–1 655.7 m, peak ascent **376 m/s (≈ Mach 1.1)**, and — new for this set — **two pairs flown on the same launch**. Detail and per-record tables in the analysis doc; this is the map.
