@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-07-04
 - **Deciders:** Frank Schroer
-- **Related issues:** #18 (bench-validate under loss); interacts with #16 (radio-layer CRC discard removed)
+- **Related issues:** #18 (bench-validate under loss); interacts with #16 (radio-layer CRC discard removed); #49 (whole-record transfer, resume, background completion — 2026-09-28 amendment)
 
 ## Context
 
@@ -48,6 +48,55 @@ The app's flight-profile chart drew every event marker at sample 0: the locator 
 9. **Best-effort, never blocking.** `FlightEvents` is unacknowledged and sent twice during the `kPreTransferGuardMs` window before the first data packet (radio-idle paced, like the no-data marker). Losing it costs only the chart's markers; it must never gate or stall the independently-ACKed data transfer. The receiver treats it like `FlightMetadata` for invariant 4 (it also implies the locator is quiet and listening).
 
 Sizes are pinned the usual way: `static_assert(sizeof(FlightEventsMessage) == 66)` in **both** firmware copies, `Protocol.FLIGHT_EVENTS_PAYLOAD_SIZE == 60` in the app, plus `WireLayoutTest`/`FlightEventsTest`. The event order is a third shared contract — `Communication::FlightEvent` (both firmwares) and `FlightEventIndex` (app) must stay in step; reordering silently mislabels every marker.
+
+## Amendment (2026-09-28) — whole-record transfers, resume, and background completion ([#49](https://github.com/fschroer/steam-pigeon-locator/issues/49))
+
+The transfer silently truncated every record longer than **256 packets × 8 samples = 2,048 samples ≈ 102 s**:
+
+- `BeginTransfer` clamped `packet_count_` to `kMaxPackets`, which is fixed by the 256-bit `FlightDataAck` bitmap.
+- The app mirrored the clamp and declared the transfer complete.
+- On the 2026-09-26/27 Gerlach set, Red Ryder delivered 44 % of its record (the chart and 3D path stop at 829 m in descent) and Shane 22 % ([flight-analysis-2026-09-gerlach.md](../flight-analysis-2026-09-gerlach.md)).
+
+Separately, leaving the chart cancelled the load (invariant 3), so "load a record, then look at it on the map" only worked if the user waited on the chart.
+
+**Decided (fschroer, 2026-09-28):**
+
+1. Deliver the **whole flight** by sending full rate where the flight is eventful and decimating the long descent. This means no wire-format change.
+2. Let the transfer **continue after the user leaves the chart**.
+3. **Resume** after an interruption once the locator is back in a state where the transfer can complete.
+
+10. **Transfer plan — the whole record, always inside `kMaxPackets`.** At `BeginTransfer`, the locator selects which archive samples to send, using the record's own event times:
+    - **Full rate** from the first sample through **apogee + 10 s**. That covers pad, boost, coast, apogee, both drogue events and the drogue snatch.
+    - **Full rate** around **main primary (−2 s / +8 s)** and from **landing − 2 s to the end**.
+    - **Every k-th sample** everywhere else, with the smallest `k` that fits the budget of `kMaxPackets × MaxSamplesPerPacket()`.
+    - **Fallbacks:** a record with no apogee event, or whose full-rate windows alone exceed the budget, is decimated uniformly.
+
+    `total_samples` on the wire is the **planned** count, so `packet_count = ⌈total_samples / 8⌉ ≤ 256` holds by construction and the silent clamp is gone. The plan is a pure function of the record: every retransmission, and every resumed transfer, of the same record carries byte-identical packets.
+
+    The USB export is unaffected and remains the full-rate copy. Resulting times: Shane 9,458 → 2,046 samples with `k = 9` in descent (about 2.2 Hz), Red Ryder 4,683 → 2,028. At the ~12.9 samples/s burst rate (64 samples per ~4.95 s burst), every record downloads in **≤ ~2.6 min**.
+11. **Sample spacing is not uniform — use timestamps.** Any consumer must place a sample by its `timestamp_ms`, never by `index × 50 ms`. The app's chart already does, and event markers match the nearest sample within 1 s (invariant 7), which the full-rate event windows keep exact.
+12. **Resume by ACK, no new message.** A transfer interrupted before completion is resumed by re-requesting the same record.
+    - **Identity:** the app treats the new transfer as the same data when the record slot, `FlightEvents.flight_timestamp_s`, `total_samples` and `packet_count` all match what it holds.
+    - **Skipping:** it then ACKs the packets it already has under the new `transfer_id`, and the locator treats that as an ordinary cumulative ACK and skips them. The first burst of up to 8 packets may repeat; that's the whole cost.
+    - **Mismatch:** any mismatch discards the partial copy. A new flight in that slot, or a newer firmware with a different plan, are both caught this way.
+13. **Lifecycle (supersedes invariant 3's "on leaving the flight-profile screen").**
+    - **Leaving the chart does not cancel an incomplete transfer.** The app keeps receiving, and sends `DisarmRequest` when the transfer **completes** or when it is **paused**.
+    - **Pause triggers** are anything that needs the link or changes the context: arming, locator or receiver settings, a deployment test, switching locators, or a BLE disconnect.
+    - **Requesting a different record discards** the partial copy rather than pausing it.
+    - **Resume** is automatic once the phone is connected, the receiver is on the locator's channel, and the locator is **Disarmed and broadcasting `PreLaunchData`**.
+    - **While a background transfer runs,** the locator is silent (unchanged). The app shows the download's progress in place of stale or lost-telemetry warnings for that locator.
+    - The locator-side safety-net timeouts are unchanged. A pause that loses its `DisarmRequest` ends in `kDataActiveTimeoutMs`, after which the locator broadcasts again and the resume conditions are met.
+14. **Codec deltas saturate and chain from the reconstructed value.**
+    - `PackSamples` used to cast an out-of-range delta straight to `int16_t` (undefined behavior) and then chain the next delta from the *true* previous sample. So one out-of-range delta, such as a gyro swing above 3,276.7 dps within a step, skewed every later sample in the packet.
+    - Deltas now **saturate** to the `int16_t` range, and the encoder chains from the value the **decoder will reconstruct**, using the same float arithmetic. A saturated step costs that one sample, rounding no longer accumulates along a packet, and the decoders are unchanged.
+    - Decimation widens the step between kept samples, which is what made this worth fixing now.
+
+**Compatibility.**
+- **Old app with new firmware** works unchanged (fewer, timestamped samples).
+- **New app with old firmware** receives the truncated first 102 s. It detects this from `packet_count × 8 < total_samples` and labels the record as partial rather than complete.
+- **Receiver firmware** does not change: it forwards these frames without decoding them, and no struct changes.
+
+**Rejected:** a sliding-window ACK (a `window_base` in `FlightDataAck`) or segmented `[start, count)` requests. Either carries the full 20 Hz record, but needs a wire-format change across four codebases, and full-rate downloads would take about 6 min (Red Ryder) to 12 min (Shane). The app's download is for seeing the whole flight; the USB export is the full-fidelity copy.
 
 ## Alternatives considered
 

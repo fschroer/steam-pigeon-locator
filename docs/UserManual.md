@@ -1328,7 +1328,16 @@ You get a list of stored flights, each showing its **record number, date, time a
 
 > 📱 **Screenshot needed — `images/app-15-flight-profile-chart.png`:** a downloaded flight profile chart with event markers. Requires a locator holding a record with actual flight samples in it; the bench locator used for the other captures had only an unflown record.
 
-💡 The download takes a little while over the radio — it's a lot of data through a long-range, low-bandwidth link. Stay in good range and let it finish.
+💡 The download takes a little while over the radio — it's a lot of data through a long-range, low-bandwidth link. Stay in good range and let it finish. **Every flight downloads in about 2½ minutes or less**, however long it was.
+
+**The whole flight, thinned where nothing is happening.** A long flight holds more samples than the radio transfer carries, so the locator picks them:
+- **Every sample** from the pad through **10 seconds past apogee** (boost, coast, apogee and the drogue events).
+- **Every sample** around the **main** event and at **landing**.
+- **Every few samples** on the long descent between them — a few per second, which is plenty to see a steady descent rate.
+
+So a slow drift down under canopy looks slightly coarser than the boost, by design. **The full-rate record is still on the locator**; the USB-C console export (§10.4) always has every sample.
+
+⚠️ **A locator on firmware older than 2026-09-29 sends only the first ~100 seconds of any flight** and the chart simply ends there — often partway down the descent — with nothing to say it stopped early. Update the locator's firmware if a long flight's profile stops short.
 
 **The altitude you see plotted is the barometric altitude** — the same measurement the locator actually used to make its deployment decisions. That's deliberate: the chart shows you the world as the flight computer saw it.
 

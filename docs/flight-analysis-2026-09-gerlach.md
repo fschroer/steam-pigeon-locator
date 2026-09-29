@@ -51,7 +51,7 @@ Everything from [Pasco's method notes](flight-analysis-2026-09-pasco.md#method-n
 
 | # | Finding | Landed in |
 |---|---|---|
-| 1 | The transfer truncates at 256 packets = 2,304 samples ≈ 115 s and reports **complete** | [#49](https://github.com/fschroer/steam-pigeon-locator/issues/49) |
+| 1 | The transfer truncates at 256 packets × 8 = 2,048 samples ≈ 102 s and reports **complete** | [#49](https://github.com/fschroer/steam-pigeon-locator/issues/49) |
 | 2 | Typed settings bypass every app bound, and the firmware stores anything | [#50](https://github.com/fschroer/steam-pigeon-locator/issues/50) |
 | 3 | The app's "unknown receiver channel" is 0, which closed the Nike log | [#51](https://github.com/fschroer/steam-pigeon-locator/issues/51) |
 | 4 | Deployment status byte: wrong bits in the app, unmasked continuity in the firmware, not archived | [#52](https://github.com/fschroer/steam-pigeon-locator/issues/52) |
@@ -161,7 +161,7 @@ Mass 49.9 kg, Isp 180–200 s, Cd 0.5–0.7, frontal area 0.0324 m²:
 - **Fused altitude ran away to 9,183 m at apogee and 31,158 m on the ground.** 2,624 of the bad rows read `ekf_health = 0`. Fused vertical speed was already 52 m/s on the pad ([#46](https://github.com/fschroer/steam-pigeon-locator/issues/46)).
 - **180°-about-Y accel mounting:** `accel_alt` x/z correlation −0.98/−0.72 ([#43](https://github.com/fschroer/steam-pigeon-locator/issues/43)).
 - **Physical main "detected" at 21.30 s from apogee noise** (reference −5.6 m/s, then +0.2 m/s), 2 s before the real snatch ([#54](https://github.com/fschroer/steam-pigeon-locator/issues/54)).
-- **The app received only 2,304 of 4,683 samples.** The chart and 3D path stop at 115.1 s and 742.5 m, and the transfer still reported complete ([#49](https://github.com/fschroer/steam-pigeon-locator/issues/49)).
+- **The app received only 2,048 of 4,683 samples.** The chart and 3D path stop at 102.3 s and 828.6 m, and the transfer still reported complete ([#49](https://github.com/fschroer/steam-pigeon-locator/issues/49)).
 
 ## 3. Shane
 
@@ -188,7 +188,7 @@ Mass 49.9 kg, Isp 180–200 s, Cd 0.5–0.7, frontal area 0.0324 m²:
 - **Telemetry:**
   - An 18 s blackout (12–30 s) during coast, with RSSI about −104 dBm before it. It came back at apogee, which suggests an antenna null along the airframe axis.
   - The locator's Landed report reached the app at 2,899 s, after the walk or drive in.
-- **The app received 24 % of the record** (to 115.1 s, 4,494 m, under drogue) ([#49](https://github.com/fschroer/steam-pigeon-locator/issues/49)).
+- **The app received 22 % of the record** (to 102.3 s, 4,659.5 m, under drogue) ([#49](https://github.com/fschroer/steam-pigeon-locator/issues/49)).
 
 ## 4. Barometer (all three)
 

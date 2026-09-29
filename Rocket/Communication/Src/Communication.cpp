@@ -512,8 +512,9 @@ void Communication::BeginTransfer(uint8_t record_id) {
 	chunk_buf_count_ = 0;
 	chunk_start_ = 0;
 
-	// Query the exact sample count upfront so that total_samples_ and
-	// packet_count_ are correct on every wire packet from the first TX.
+	// Query the archive's sample count and build the transfer plan upfront so
+	// that total_samples_ and packet_count_ are correct on every wire packet
+	// from the first TX.
 	uint32_t sample_count = 0;
 	if (!archive_.GetFlightSampleCount(record_id, sample_count) || sample_count == 0) {
 		// Record doesn't exist or is empty.  Instead of silently reverting (which
@@ -531,11 +532,31 @@ void Communication::BeginTransfer(uint8_t record_id) {
 		return;
 	}
 
-	total_samples_ = sample_count;
+	// Plan which samples to carry so the WHOLE record fits the 256-packet ACK
+	// bitmap (#49, ADR-0009 amendment 2026-09-28, invariant 10).  This used to
+	// clamp packet_count_ to kMaxPackets and send only the first 2,048 samples
+	// (≈102 s) — reported to the app as a complete transfer.
 	const size_t spp = FlightProfileCodec::MaxSamplesPerPacket();
+
+	// The last sample's timestamp scales event times to sample indices.
+	if (!FetchChunk(sample_count - 1u) || chunk_buf_count_ == 0)
+		return;  // archive read failed — abort
+	const uint32_t last_ts_ms = chunk_buf_[0].timestamp_ms;
+
+	TransferPlan::Events ev {};
+	archive_.ReadEvent(record_id, FlightArchive::Statistic::ApogeeTimestampMs,
+			ev.apogee_ms, ev.has_apogee);
+	archive_.ReadEvent(record_id, FlightArchive::Statistic::MainPrimaryDeployTimestampMs,
+			ev.main_ms, ev.has_main);
+	archive_.ReadEvent(record_id, FlightArchive::Statistic::LandingTimestampMs,
+			ev.landing_ms, ev.has_landing);
+
+	plan_ = TransferPlan::Build(sample_count, last_ts_ms, ev,
+			static_cast<uint32_t>(kMaxPackets) * spp);
+	total_samples_ = plan_.total;
 	packet_count_ = static_cast<uint16_t>((total_samples_ + spp - 1) / spp);
-	if (packet_count_ > kMaxPackets)
-		packet_count_ = kMaxPackets;
+	if (total_samples_ == 0 || packet_count_ > kMaxPackets)
+		return;  // the plan guarantees ≤ kMaxPackets; never truncate silently
 
 	// Prime the chunk buffer with the first chunk so SendDataPacket never
 	// cold-fetches on the first call. Mirrors startTestReplay() -> fetchNextChunk().
@@ -613,29 +634,28 @@ bool Communication::DbgConsumeTxDrop(uint16_t packet_index) {
 
 void Communication::SendDataPacket(uint16_t packet_index, uint32_t now_ms) {
 	const size_t spp = FlightProfileCodec::MaxSamplesPerPacket();
+	// Index into the samples this transfer CARRIES (0 .. total_samples_-1);
+	// the plan maps each one to its archive index (#49).
 	const uint32_t global_start = static_cast<uint32_t>(packet_index) * spp;
-
-	// Ensure the chunk covering global_start is loaded.
-	// Because kChunkSize is a whole multiple of spp, a packet's samples
-	// always fall entirely within one chunk — no packet spans a chunk boundary.
-	if (global_start < chunk_start_ || global_start >= chunk_start_ + chunk_buf_count_) {
-		// Align the fetch to the chunk boundary that contains global_start.
-		// Dividing by kChunkSize and multiplying back gives the aligned start.
-		const uint32_t aligned = (global_start / kChunkSize) * kChunkSize;
-		if (!FetchChunk(aligned) || chunk_buf_count_ == 0)
-			return;  // archive read failed — skip this packet
-	}
-
-	const uint32_t chunk_end = chunk_start_ + chunk_buf_count_;
-	const uint32_t samples_left = (global_start < chunk_end) ? (chunk_end - global_start) : 0u;
-	if (samples_left == 0)
+	if (global_start >= total_samples_)
 		return;
+	const uint32_t left = total_samples_ - global_start;
+	const size_t count = (left < spp) ? static_cast<size_t>(left) : spp;
 
-	const size_t count = (samples_left < spp) ? static_cast<size_t>(samples_left) : spp;
-
-	// Pointer into chunk buffer at the right offset
-	const uint32_t local_offset = global_start - chunk_start_;
-	const Sample *src = &chunk_buf_[local_offset];
+	// Gather the packet's samples.  At stride 1 they are contiguous, and
+	// since kChunkSize is a multiple of spp they fall in one chunk; a
+	// decimated packet spans up to spp × stride archive samples, so fetch
+	// whichever aligned chunk holds each one.
+	for (size_t s = 0; s < count; ++s) {
+		const uint32_t a = TransferPlan::ArchiveIndex(plan_, global_start + static_cast<uint32_t>(s));
+		if (a < chunk_start_ || a >= chunk_start_ + chunk_buf_count_) {
+			const uint32_t aligned = (a / kChunkSize) * kChunkSize;
+			if (!FetchChunk(aligned) || a >= chunk_start_ + chunk_buf_count_)
+				return;  // archive read failed — skip this packet; it will be retried
+		}
+		packet_samples_[s] = chunk_buf_[a - chunk_start_];
+	}
+	const Sample *src = packet_samples_;
 
 	// Build and send the packet
 	FlightDataPacket pkt { };

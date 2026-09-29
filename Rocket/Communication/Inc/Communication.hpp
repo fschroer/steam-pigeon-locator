@@ -15,6 +15,7 @@
 #include "PowerManagement.hpp"
 #include "ArchiveTypes.hpp"
 #include "FlightProfileCodec.hpp"
+#include "TransferPlan.hpp"
 #include "MessageProtocol.hpp"
 #include "Deployment.hpp"
 
@@ -265,9 +266,12 @@ private:
 	// This mirrors the bench-replay chunk pattern in Navigation.cpp exactly.
 	//
 	// kChunkSize must be a whole multiple of MaxSamplesPerPacket() so that
-	// every packet's samples fall entirely within one chunk fetch.
-	// With MaxSamplesPerPacket() == 9, we use 9*8 = 72 (8 packets/chunk,
-	// ~4 KB of RAM for the buffer).
+	// every full-rate packet's samples fall entirely within one chunk fetch.
+	// (A decimated packet spans spp × stride archive samples and may need a
+	// fetch per sample; SendDataPacket gathers them into packet_samples_.)
+	// MaxSamplesPerPacket() is 8 (a 239 B payload: 48 B header + 7 × 24 B
+	// deltas), so 72 is 9 packets per chunk; 72 × 88 B ≈ 6.3 KB of RAM.
+	// (This comment said "== 9" for a long time; it never was.)
 	// -----------------------------------------------------------------------
 	static constexpr uint32_t kChunkSize = 72u;
 
@@ -287,9 +291,19 @@ private:
 	// Transfer state
 	// -----------------------------------------------------------------------
 
+	// One packet's samples, gathered from wherever the transfer plan puts them
+	// in the archive (a decimated packet spans up to 8 × stride samples, so it
+	// is no longer one contiguous slice of chunk_buf_).  A member rather than a
+	// local: 8 × 88 B on a deep call chain is the kind of buffer that overflowed
+	// the 2 KB stack in the strapdown's FIFO drain.
+	FlightArchive::FlightSample packet_samples_[FlightProfileCodec::MaxSamplesPerPacket()]{};
+
 	uint8_t  record_id_       = 0;
 	bool     transfer_active_ = false;
-	uint32_t total_samples_   = 0;  // exact count from GetFlightSampleCount(), set in BeginTransfer()
+	// Samples this transfer CARRIES (the wire's total_samples): the plan's
+	// count, not the archive's.  Always ≤ kMaxPackets × MaxSamplesPerPacket().
+	uint32_t total_samples_   = 0;
+	TransferPlan::Plan plan_ {};   // archive samples this transfer carries (#49)
 
 	uint16_t transfer_id_   = 0;
 	uint16_t packet_count_  = 0;

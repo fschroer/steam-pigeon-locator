@@ -2,13 +2,13 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
-## 2026-09-28 (analysis) — Gerlach BALLS: a Mach 1.2 motor burn-through reconstructed, coast attitude VALIDATED, the app has only ever seen the first 115 s of any record — [flight-analysis-2026-09-gerlach.md](flight-analysis-2026-09-gerlach.md)
+## 2026-09-28 (analysis) — Gerlach BALLS: a Mach 1.2 motor burn-through reconstructed, coast attitude VALIDATED, the app has only ever seen the first 102 s of any record — [flight-analysis-2026-09-gerlach.md](flight-analysis-2026-09-gerlach.md)
 
 Three ride-along records (Red Ryder, Shane, Nike Smoke) plus their app logs. **Ride-alongs: the deployment events are logic only.** Separate flight computers fired the charges.
 
 🔧 **[#49](https://github.com/fschroer/steam-pigeon-locator/issues/49) is the one to fix first.**
-- A transfer carries at most **256 packets × 9 = 2,304 samples ≈ 115 s**. `BeginTransfer` clamps `packet_count_` silently, and the app reports **complete**.
-- Red Ryder got 49 % (the chart stops at 742 m in descent) and Shane got 24 %.
+- A transfer carries at most **256 packets × 8 = 2,048 samples ≈ 102 s**. `BeginTransfer` clamps `packet_count_` silently, and the app reports **complete**.
+- Red Ryder got 44 % (the chart stops at 829 m in descent) and Shane got 22 %.
 - It's a wire change (ACK bitmap), so all three layout copies change together.
 - The same issue carries fschroer's requirement that **the transfer keeps running after the user leaves the chart**.
 

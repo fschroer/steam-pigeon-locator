@@ -5,6 +5,27 @@
 
 namespace FlightProfileCodec {
 
+namespace {
+
+// Saturate to the int16_t delta range.  The former int16_t(std::round(...))
+// cast of an out-of-range value is undefined behavior (float -> integer
+// overflow); in practice it typically wraps, turning a large positive step
+// into a large negative one.  Not observed on hardware — found by reading.
+int16_t Sat16(int64_t v) {
+    if (v > INT16_MAX) return INT16_MAX;
+    if (v < INT16_MIN) return INT16_MIN;
+    return static_cast<int16_t>(v);
+}
+
+int16_t Sat16(float v) {
+    if (!(v == v)) return 0;                       // NaN
+    if (v >= static_cast<float>(INT16_MAX)) return INT16_MAX;
+    if (v <= static_cast<float>(INT16_MIN)) return INT16_MIN;
+    return static_cast<int16_t>(std::lround(v));
+}
+
+}  // namespace
+
 // PackSamples encodes sample_count samples into the out_payload buffer.
 //
 // Wire layout:
@@ -15,7 +36,9 @@ namespace FlightProfileCodec {
 //
 // All fields are relative to the previous sample EXCEPT lat/lon, which are
 // stored relative to the packet's absolute base (hdr.base_lat_rad /
-// hdr.base_lon_rad) to prevent accumulated rounding error.
+// hdr.base_lon_rad) to prevent accumulated rounding error.  "Previous sample"
+// means the one the decoder reconstructs, and every delta saturates at the
+// int16_t range (see the loop).
 //
 // Returns the number of samples written (not bytes).  May be less than
 // sample_count if out_capacity is exhausted.
@@ -48,7 +71,14 @@ size_t PackSamples(const FlightArchive::FlightSample* samples,
     std::memcpy(p, &hdr, sizeof(hdr));
     p += sizeof(hdr);
 
-    FlightArchive::FlightSample prev = samples[0];
+    // `rec` is the sample as the DECODER will reconstruct it, not the true
+    // previous sample.  Chaining from the truth let one out-of-range delta (a
+    // >3,276.7 dps gyro swing in a step, likelier once the transfer plan
+    // decimates the descent) skew every later sample in the packet, and let
+    // rounding accumulate along it (ADR-0009 amendment 2026-09-28, invariant
+    // 14).  Updated below with the decoder's own float arithmetic, so the two
+    // stay bit-identical and the decoders need no change.
+    FlightArchive::FlightSample rec = samples[0];
     size_t written = 1;
 
     for (size_t i = 1; i < sample_count; ++i) {
@@ -59,15 +89,16 @@ size_t PackSamples(const FlightArchive::FlightSample* samples,
 
         CompressedDelta d{};
 
-        // Time and kinematic fields: delta from previous sample
-        d.d_timestamp_ms     = int16_t(s.timestamp_ms - prev.timestamp_ms);
-        d.d_alt_0p1m         = int16_t(std::round((s.raw_baro_altitude_agl - prev.raw_baro_altitude_agl) * 10.0f));
-        d.d_accel_x_0p1mps2  = int16_t(std::round((s.accel.x    - prev.accel.x)     * 10.0f));
-        d.d_accel_y_0p1mps2  = int16_t(std::round((s.accel.y    - prev.accel.y)     * 10.0f));
-        d.d_accel_z_0p1mps2  = int16_t(std::round((s.accel.z    - prev.accel.z)     * 10.0f));
-        d.d_gyro_x_0p1dps    = int16_t(std::round((s.gyro.x     - prev.gyro.x)      * 10.0f));
-        d.d_gyro_y_0p1dps    = int16_t(std::round((s.gyro.y     - prev.gyro.y)      * 10.0f));
-        d.d_gyro_z_0p1dps    = int16_t(std::round((s.gyro.z     - prev.gyro.z)      * 10.0f));
+        // Time and kinematic fields: delta from the reconstructed previous sample
+        d.d_timestamp_ms     = Sat16(static_cast<int64_t>(s.timestamp_ms)
+                                     - static_cast<int64_t>(rec.timestamp_ms));
+        d.d_alt_0p1m         = Sat16((s.raw_baro_altitude_agl - rec.raw_baro_altitude_agl) * 10.0f);
+        d.d_accel_x_0p1mps2  = Sat16((s.accel.x    - rec.accel.x)     * 10.0f);
+        d.d_accel_y_0p1mps2  = Sat16((s.accel.y    - rec.accel.y)     * 10.0f);
+        d.d_accel_z_0p1mps2  = Sat16((s.accel.z    - rec.accel.z)     * 10.0f);
+        d.d_gyro_x_0p1dps    = Sat16((s.gyro.x     - rec.gyro.x)      * 10.0f);
+        d.d_gyro_y_0p1dps    = Sat16((s.gyro.y     - rec.gyro.y)      * 10.0f);
+        d.d_gyro_z_0p1dps    = Sat16((s.gyro.z     - rec.gyro.z)      * 10.0f);
 
         // Lat/lon: delta from the packet's absolute base, NOT from prev.
         // This keeps accumulated floating-point error out of the decode path.
@@ -77,7 +108,15 @@ size_t PackSamples(const FlightArchive::FlightSample* samples,
         std::memcpy(p, &d, sizeof(d));
         p += sizeof(d);
 
-        prev = s;
+        // Advance exactly as UnpackSamples (and the app's decodePayload) will.
+        rec.timestamp_ms          = rec.timestamp_ms          + d.d_timestamp_ms;
+        rec.raw_baro_altitude_agl = rec.raw_baro_altitude_agl + d.d_alt_0p1m        / 10.0f;
+        rec.accel.x               = rec.accel.x               + d.d_accel_x_0p1mps2 / 10.0f;
+        rec.accel.y               = rec.accel.y               + d.d_accel_y_0p1mps2 / 10.0f;
+        rec.accel.z               = rec.accel.z               + d.d_accel_z_0p1mps2 / 10.0f;
+        rec.gyro.x                = rec.gyro.x                + d.d_gyro_x_0p1dps   / 10.0f;
+        rec.gyro.y                = rec.gyro.y                + d.d_gyro_y_0p1dps   / 10.0f;
+        rec.gyro.z                = rec.gyro.z                + d.d_gyro_z_0p1dps   / 10.0f;
         ++written;
     }
 
