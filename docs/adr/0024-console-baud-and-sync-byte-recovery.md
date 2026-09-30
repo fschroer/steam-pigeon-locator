@@ -41,7 +41,7 @@ for it, `UART_ADVFEATURE_AUTOBAUDRATE_ON0X7FFRAME`.
 
 Measuring across eight bit-times rather than one is what makes this usable at the
 top of the range: at 48 MHz, 921600 baud spans ~417 USART clocks, so ±1 clock of
-quantisation is ±0.24%. Detecting on the start bit alone (`ONSTARTBIT`) would
+quantization is ±0.24%. Detecting on the start bit alone (`ONSTARTBIT`) would
 give ±1.9% and consume most of the 8N1 budget — which is why a scheme without a
 mandated sync byte would have had to cap the console well below its working rate.
 
@@ -75,14 +75,14 @@ the receiver, and pair it with a hardware sync-byte recovery path.
    abandoned measurement, and is suppressed for 10 s after a deliberate rate
    change so the operator switching their terminal is not mistaken for a fault.
    See the corrections below for why each of these is load-bearing rather than an
-   optimisation.
+   optimization.
 
 ## Consequences
 
 **Easier.** A console rate can be matched to whatever adapter the operator owns.
 A wrong rate is recoverable in the field with a terminal, no debugger and no
 reflash. The receiver's console input moved out of the RX ISR to satisfy this
-(re-initialising USART2 cannot be done from inside USART2's own interrupt), which
+(re-initializing USART2 cannot be done from inside USART2's own interrupt), which
 also brings it into line with the ISR policy the system summary already states
 and the locator already followed.
 
@@ -185,7 +185,7 @@ either end, because the broken state lives in the terminal.
 The signature was in the very first report — *"garbage characters (except for
 numbers)"*. A baud mismatch garbles uniformly; a character-set switch garbles a
 contiguous byte range. That distinction identifies the fault immediately and was
-read past repeatedly in favour of reasoning about the USART.
+read past repeatedly in favor of reasoning about the USART.
 
 **Fix:** `clear_screen_` now begins with `ESC ( B` + `SI`, so any screen redraw
 re-designates ASCII, and the `DIAG|BAUD:` confirmation carries the same prefix —

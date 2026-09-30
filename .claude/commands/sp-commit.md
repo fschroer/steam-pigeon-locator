@@ -10,7 +10,7 @@ Run `Scripts/sp-status.sh` in the Locator repo (`C:\STM32_Projects\Locator`) to 
 
 ## Before committing
 
-**1. Run the docs gate.** Invoke `/sp-docs` and act on both of its gates. Do not skip this because the change "obviously" needs no docs — that judgement is what the gate exists to make explicit.
+**1. Run the docs gate.** Invoke `/sp-docs` and act on both of its gates. Do not skip this because the change "obviously" needs no docs — that judgment is what the gate exists to make explicit.
 
 **2. Build and test every repo you are about to commit code in.** A commit that does not build is worse than an uncommitted change: it is on the branch, it bisects badly, and it is discovered by someone else.
 
@@ -20,7 +20,7 @@ Run `Scripts/sp-status.sh` in the Locator repo (`C:\STM32_Projects\Locator`) to 
 
 Report the actual result — suite counts and failures, not "tests pass". **If anything fails, stop and say so rather than committing.** A docs-only or comment-only change does not need a build; say that explicitly rather than staying silent about it.
 
-**3. Read the diff you are about to commit, in full.** Not to summarise it back, but to catch what the working tree still carries from earlier iterations of the same task: comments describing behaviour that was rewritten since, locals left unused, debug output, a rationale that was true two revisions ago. This is the last point at which those are free to fix.
+**3. Read the diff you are about to commit, in full.** Not to summarize it back, but to catch what the working tree still carries from earlier iterations of the same task: comments describing behavior that was rewritten since, locals left unused, debug output, a rationale that was true two revisions ago. This is the last point at which those are free to fix.
 
 ## Committing
 

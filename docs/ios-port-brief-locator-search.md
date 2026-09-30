@@ -112,7 +112,7 @@ Invariants that are not obvious and must survive the port:
   finds Twist 0, and a hit-count test calls that success.
 - **Widening is offered after any *completed* short run**, not only a missed one. Gating
   it on an empty result left no way to reach the band sweep at all while anything was
-  audible. A *cancelled* run does not qualify — answering "stop" with an offer of a
+  audible. A *canceled* run does not qualify — answering "stop" with an offer of a
   90-second sweep is not reading the room.
 
 ### Near-field artifacts are real — this is why SNR is on the wire
@@ -128,7 +128,7 @@ beside the receiver can make it withhold channels that are free.
 
 The app therefore:
 
-- shows **RSSI and SNR on every hit**, in the format and colour scales the status panel
+- shows **RSSI and SNR on every hit**, in the format and color scales the status panel
   already uses (`rssiColor` / `snrColor`, shared rather than duplicated). Neither number
   separates the cases alone — the artifact reads *strong*, so RSSI cannot, and SNR can;
 - marks every hit for a locator except its best `· likely false hit`
@@ -136,7 +136,7 @@ The app therefore:
   the flagged channel is the one that disappears at distance, so the rule picks the real
   channel. Revisit only if an artifact is ever seen arriving *stronger* than the true one;
 - flags rather than hides them. The reading is real; it is the *channel attribution* that
-  is doubtful, and the numbers beside it are what let the user check the judgement.
+  is doubtful, and the numbers beside it are what let the user check the judgment.
 
 ### "Connected" needs the channel **and** the identity
 
@@ -177,7 +177,7 @@ makes the command deliverable. Applies to the survey as well.
 
 **And a sweep no longer starts on top of one (added 2026-08-30).** The abort above fired
 for a message queued *before* the run as readily as one that arrived during it, so a run
-started while something was still waiting for its forwarding window was cancelled on its
+started while something was still waiting for its forwarding window was canceled on its
 first service pass — reported as *"Search stopped."* when Search was pressed the instant
 the button re-enabled after a previous run. `BeginLocatorSearch` and `BeginChannelSurvey`
 now refuse with `RefusedBusy` while an **operator command** is queued, keeping it first
@@ -185,9 +185,9 @@ rather than making it wait out a run. *Operator* is load-bearing: the first cut 
 `pending_tx_.ready` alone and bench 6 still failed, because what is usually in that slot is
 the app's **own version poll** — the version job re-requests on the rising edge of the
 locator link, and a scan is longer than the 5 s that edge is measured against, so every
-scan queues one about a second after it ends. Housekeeping was cancelling scans and the app
+scan queues one about a second after it ends. Housekeeping was canceling scans and the app
 was blaming the user for a command they never sent. `IsOperatorCommand` is a blacklist
-(`VersionRequest` only), so anything unrecognised still ends the sweep. **App side: widen the `RefusedBusy` text** —
+(`VersionRequest` only), so anything unrecognized still ends the sweep. **App side: widen the `RefusedBusy` text** —
 "a scan, a flight data transfer, **or a command still on its way to the locator**" — since
 it now covers a third case. The survey's own `RefusedBusy` string said "A flight data
 transfer is in progress" and was widened the same way. No wire change.
@@ -261,7 +261,7 @@ The firmwares never hit this because `version.h` is a real prerequisite of
 - Wire layout mirrored and pinned in `WireLayoutTests.swift`, at **104 / 28 / 39**.
 - Search and survey identity implemented, with the pure logic — candidates, occupancy,
   suspect channels, connected-on — unit tested the way Android tests it.
-- The UI reorganisation, **or** a written argument in
+- The UI reorganization, **or** a written argument in
   `steam-pigeon-ios/docs/UI_PARITY.md` for diverging.
 - Update the parity matrix row **"Locator search + Communication screen (ADR-0029)"** in
   [SteamPigeon_SystemSummary.md](SteamPigeon_SystemSummary.md) — it currently reads
@@ -291,7 +291,7 @@ against hardware.
 well as the code does.
 
 **Still unverified anywhere:** the UI changes made on 2026-08-28 — help popups, button
-layout, the centred Connected label, the dropdown — beyond fschroer's own passes on
+layout, the centered Connected label, the dropdown — beyond fschroer's own passes on
 Android. Three layout regressions were caught that way rather than by any test, which is
 the part worth carrying over: none of this is reachable from a unit test on either
 platform.

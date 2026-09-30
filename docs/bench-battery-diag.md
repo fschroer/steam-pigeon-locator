@@ -135,7 +135,7 @@ DIAG|BATT: production samples at t=100000 us; app gauge is empty below 3750 mV
 |--------|---------|
 | `t_us` | Offset of the **conversion start** from the BATTRD rising edge — measured, not the requested offset, since the ADC enable plus a 160.5-cycle sample is tens of µs against a 629 µs curve |
 | `counts` | Raw ADC counts. Meaningless on a `FAIL` row — that is the stale data register, not a low reading |
-| `node_mV` | Voltage at the BATTLVL pin, using the **measured** VDDA. No divider maths, so this is the one column no assumption can distort |
+| `node_mV` | Voltage at the BATTLVL pin, using the **measured** VDDA. No divider math, so this is the one column no assumption can distort |
 | `tlm_mV` | What telemetry would send: the divider ratio against production's assumed 3300 mV reference |
 | `meas_mV` | The same ratio against the **measured** reference |
 | `hal` | Whether the HAL reported a completed conversion |

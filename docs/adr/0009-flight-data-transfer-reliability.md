@@ -57,7 +57,7 @@ The transfer silently truncated every record longer than **256 packets × 8 samp
 - The app mirrored the clamp and declared the transfer complete.
 - On the 2026-09-26/27 Gerlach set, Red Ryder delivered 44 % of its record (the chart and 3D path stop at 829 m in descent) and Shane 22 % ([flight-analysis-2026-09-gerlach.md](../flight-analysis-2026-09-gerlach.md)).
 
-Separately, leaving the chart cancelled the load (invariant 3), so "load a record, then look at it on the map" only worked if the user waited on the chart.
+Separately, leaving the chart canceled the load (invariant 3), so "load a record, then look at it on the map" only worked if the user waited on the chart.
 
 **Decided (fschroer, 2026-09-28):**
 

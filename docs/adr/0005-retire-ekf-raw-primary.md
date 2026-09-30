@@ -140,7 +140,7 @@ Sixteen records from Pasco 2026-09-04..07 — see
 [flight-analysis-2026-09-pasco.md](../flight-analysis-2026-09-pasco.md) §2–3, and
 [#44](https://github.com/fschroer/steam-pigeon-locator/issues/44) for the mechanism.
 
-⚠️ **This ADR's stated envelope and the shipped behaviour disagree.** The honesty note
+⚠️ **This ADR's stated envelope and the shipped behavior disagree.** The honesty note
 in this ADR, and the `AttitudeEstimator` header that quotes it, both say accelerometer
 tilt correction is valid *"on the pad, gentle descent under canopy."* **Only the pad half
 happens.** Two independent gates each block it in flight:

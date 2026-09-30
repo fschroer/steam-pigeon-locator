@@ -1,12 +1,12 @@
 ---
-description: Restate a code-change request and name its ambiguities before writing any code. Use at the start of any task that will change behaviour, especially a one-line request whose wording could be read more than one way.
+description: Restate a code-change request and name its ambiguities before writing any code. Use at the start of any task that will change behavior, especially a one-line request whose wording could be read more than one way.
 ---
 
 Before writing code, work out whether you actually know what is being asked. Then say so, briefly.
 
 ## Produce three things
 
-**1. The restatement.** One or two sentences: what will be different once this is done, in terms of observable behaviour, not implementation. If you cannot write this without using the word "or", you have found an ambiguity — go to 2.
+**1. The restatement.** One or two sentences: what will be different once this is done, in terms of observable behavior, not implementation. If you cannot write this without using the word "or", you have found an ambiguity — go to 2.
 
 **2. The ambiguities that matter.** Only the ones where different readings produce *materially different work*. For each: the readings, and which you would pick. Ignore anything a sensible default settles.
 

@@ -197,7 +197,7 @@ the app both drops `DARM` on the next cycle and un-stages the harness.
 
 **Reported altitudes carry an offset, and depend on ADR-0018 having no AGL
 ceiling.** The AGL reference freezes at pulse start while lagging true altitude by
-`R × 2.5 s`, so the flight "launches" from tens of metres and, on venting back to
+`R × 2.5 s`, so the flight "launches" from tens of meters and, on venting back to
 true ambient, **reported AGL goes negative**. Landing still detects because
 [ADR-0018](0018-landing-detection-quiescence-window.md) Decision 2 deliberately
 refuses an absolute AGL gate (for uphill landing sites). **That decision is now
@@ -206,7 +206,7 @@ break chamber runs as well as uphill recoveries.
 
 **A simulated record is not marked, and can be misread.** Decision 8 accepts this;
 the mitigation is decision 6's two-channel disagreement, the 300 ms rectangle at
-exactly 2.0 g, and a flight that starts at tens of metres. **Revisit if a sim
+exactly 2.0 g, and a flight that starts at tens of meters. **Revisit if a sim
 record is ever mistaken for flight evidence** — the corpus ADR-0018's window rests
 on is three flights and must not silently become four.
 

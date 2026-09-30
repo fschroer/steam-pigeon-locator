@@ -13,7 +13,7 @@ will corrupt every one of these tests.
 on a hit, so an occupied channel costs less. Whole band = 64 channels ≈ **90 s** with
 nothing on air. Firmware deadline **105 s**. App silence timeout **8 s** between streamed
 messages. Candidate list capped at **16**. Terminator status: `0` Progress, `1` Done,
-`2` RefusedArmed, `3` RefusedBusy, `4` Cancelled.
+`2` RefusedArmed, `3` RefusedBusy, `4` Canceled.
 
 ## Validation state (2026-08-30)
 
@@ -134,7 +134,7 @@ a locator the candidate list could not.
 > reversed: **widening is offered after any *completed* short run**, found something or not
 > (ADR-0029, `Run.canWiden`). Gating it on an empty result left no way to reach the band
 > sweep at all while anything was audible — you would be hunting Prometheus, the run would
-> find Twist 0, and the widen button would never appear. A *cancelled* run still does not
+> find Twist 0, and the widen button would never appear. A *canceled* run still does not
 > qualify. The procedure below exercises the empty case because that is the one that also
 > proves the sweep finds what the short list cannot; **step 2 adds the found case**, which
 > is the half the old wording denied existed.
@@ -174,7 +174,7 @@ power A and B **off**. Leave *Looking for* on **Any locator**.
 - `restored channel` matches the receiver's channel from before the run.
 
 **Passed 2026-08-30 (fschroer), all three steps** — empty short run widens and the sweep
-finds C; a short run that *found* a locator still offers the widen; a cancelled run does
+finds C; a short run that *found* a locator still offers the widen; a canceled run does
 not.
 
 **Measure `done status/ms` and write it down.** Nominal is ~89.6 s of dwell plus
@@ -202,7 +202,7 @@ and regain. Start a **whole-band** run so there is time to act.
 the app's status panel.
 
 **Expect.**
-- `done status/ms 4 <ms>` — status 4, Cancelled — within about one dwell of the tap.
+- `done status/ms 4 <ms>` — status 4, Canceled — within about one dwell of the tap.
 - `restored channel <home>`.
 - App shows *"Search stopped."*
 - **The important part:** A reappears on the status panel within a few seconds, and stays.
@@ -212,7 +212,7 @@ the app's status panel.
 action — that is the RX re-arm having been missed, and it would be invisible without this
 last check.
 
-Repeat once with a **candidate-list** run, cancelling during the first dwell, to confirm a
+Repeat once with a **candidate-list** run, canceling during the first dwell, to confirm a
 cancel that arrives almost immediately is handled as cleanly as one mid-sweep.
 
 ## 4. Arming during a whole-band run — **known gap, not a pass/fail test**
@@ -264,11 +264,11 @@ receiver **cannot hear** the arm event at all, so no amount of flag plumbing fix
 > *"Scanning…"* while a run is in progress. **Add to 4.2's expectations:** the panel must
 > say what the receiver is doing, and must never read "No Locator" during a scan.
 
-**Passed 2026-08-30 (fschroer)** with the greyed buttons and the reason shown up front.
+**Passed 2026-08-30 (fschroer)** with the grayed buttons and the reason shown up front.
 
 **What to test instead.**
 
-1. **The start gate does work.** Arm A. **Both scan buttons must now be greyed out, with
+1. **The start gate does work.** Arm A. **Both scan buttons must now be grayed out, with
    the reason already on screen** — *"The locator is armed or in flight, so neither scan
    can run…"*. Added 2026-08-30 at fschroer's suggestion: the refusal used to be reachable
    only by pressing a button whose one possible outcome was a refusal. The receiver's gate
@@ -333,7 +333,7 @@ is, and they need different fixes:
 ## 6. Starting a search the instant the last one ends
 
 **Claim under test.** A sweep never starts on top of a command still queued for the
-locator, and a run started immediately after a completed one is not cancelled by it.
+locator, and a run started immediately after a completed one is not canceled by it.
 
 **Background.** `ServicePendingTx` ends a sweep whenever something is queued for the
 locator. Until 2026-08-30 that fired for a message queued *before* the run too, and one is

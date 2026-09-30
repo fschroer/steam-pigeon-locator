@@ -23,7 +23,7 @@
 | Bandwidth / SF / CR | 125 kHz / SF7 / 4-5 | [`subghz_phy_app.c:63,70,77`](../../SubGHz_Phy/App/subghz_phy_app.c) |
 | TX power | 22 dBm (158 mW) | [`subghz_phy_app.c:56`](../../SubGHz_Phy/App/subghz_phy_app.c) |
 | Cadence | ~1 Hz broadcast. Airtime depends on which frame: **~200 ms disarmed** (`PreLaunchData`, 118 B), ~138.5 ms armed (`TelemetryData`, 77 B) | [ADR-0006](0006-locator-connect-password.md), and *The occupancy margin was computed from the wrong frame* below |
-| Default channel | **0** — `default_settings_ { }` value-initialises it | [`Archive.hpp:115`](../../Rocket/Archive/Inc/Archive.hpp) |
+| Default channel | **0** — `default_settings_ { }` value-initializes it | [`Archive.hpp:115`](../../Rocket/Archive/Inc/Archive.hpp) |
 
 ### The plan is the LoRaWAN US915 uplink plan, verbatim
 
@@ -60,7 +60,7 @@ answered.
 
 ### Every locator ships on channel 0
 
-`default_settings_` is value-initialised, so `lora_channel` defaults to 0 and a
+`default_settings_` is value-initialized, so `lora_channel` defaults to 0 and a
 factory-fresh locator sits on 902.3 MHz. Eggtimer's own published FAQ names this
 as the dominant conflict source in their fleet — most collisions they see are
 units left on the shipped default. This is independent of everything else here
@@ -95,7 +95,7 @@ range session, with no measurable symptom on either side.
 Hopping is the only mechanism considered here that addresses this. It does not
 detect the interference; it requires *same channel* **and** *time overlap*, which
 over N channels reduces the collision to roughly 28%/N per broadcast and
-re-randomises it every second. **It converts a persistent, asymmetric outage into
+re-randomizes it every second. **It converts a persistent, asymmetric outage into
 per-packet independent noise.** That is a real engineering benefit and not a
 by-product of the compliance route — and it is precisely the problem the system
 has already spent significant effort failing to solve by measurement.
@@ -113,7 +113,7 @@ option in this ADR.
 | Featherweight Swift | those 56, **plus 240 ch at 902.2–926.5 MHz, 62.5 kHz BW, 100 kHz steps**, 158 mW | frequency hopping |
 | Eggtimer / Eggfinder | 12 base frequencies 903–925 MHz, 2 MHz steps × 8 ID codes = 96 combinations; default 915/0 | 100 mW ISM |
 | Multitronix Kate | 902–928 MHz, license-free | not published |
-| Altus Metrum | 70 cm ham band | Part 97 — requires an amateur licence |
+| Altus Metrum | 70 cm ham band | Part 97 — requires an amateur license |
 
 Three things fall out. Every 900 MHz product spans well past 915 MHz; none stops
 at 914.9. Featherweight's step-to-bandwidth ratio is 1.6× in **both** of its
@@ -208,7 +208,7 @@ Bundle it with whatever breaking change step 1 forces. `ChannelSurveyResponse`'s
 receiver↔app message; that is a flag-day of exactly the shape
 [ADR-0019](0019-channel-interference-detection.md)'s 2026-08-11 addendum warns
 about, where the app frames by exact length before checking CRC and a mismatched
-pair desynchronises the framer rather than failing a check. Paying it twice is
+pair desynchronizes the framer rather than failing a check. Paying it twice is
 the thing this ordering exists to prevent. Sweep time also roughly doubles, to
 ~2 s at the current 15 ms dwell.
 
@@ -222,7 +222,7 @@ orthogonal to everything above.
 
 ### It solves two problems, and only one of them is regulatory
 
-Stating this first because the rest of this ADR is organised around compliance
+Stating this first because the rest of this ADR is organized around compliance
 and that framing undersells it. Hopping is invoked here as a **permission**
 mechanism — 15.247(a)(1) is a door that opens if you hop. But independently of
 the rules it is also the only option in this document that addresses
@@ -250,14 +250,14 @@ over ≥50 channels, no single frequency is visited more than once per window, s
 occupancy per frequency is ≤138.5 ms against the 0.4 s limit — a margin of about
 2.9×. With ≥50 hopping channels, 15.247(b)(1) permits 1 W conducted; we transmit
 158 mW. **The broadcast schedule does not have to change to hop.** The cost is
-entirely in synchronisation, not in airtime or power.
+entirely in synchronization, not in airtime or power.
 
 ### Featherweight Swift is the existence proof, and its mechanism is GPS time
 
 There is no hop-sync handshake. Both ends hold GPS, both know the exact time, and
 the channel is a function of time — so the ground station computes where the
 tracker *will* be and is already there. Adrian Adamson (Featherweight) states
-both the original and the Swift are "precisely synchronised to GPS time", with a
+both the original and the Swift are "precisely synchronized to GPS time", with a
 1 Hz transmission schedule locked to it. The Swift adds automatic open-channel
 scanning and will not transmit on an occupied channel.
 
@@ -287,7 +287,7 @@ have one. Two ways out:
 This is the property that makes it expensive, and it deserves stating plainly:
 when the shared time is lost, the link does not degrade — it **vanishes**. Both
 ends are on different frequencies and neither can signal the other, because
-signalling requires the link that is gone. Featherweight shipped with intermittent
+signaling requires the link that is gone. Featherweight shipped with intermittent
 sync loss reported after 10–20 minutes with GPS lock and Bluetooth both healthy,
 and had to bolt on a fast rescan (~20 channels/s) to recover from it. A shipping
 commercial product, designed by a full-time RF engineer, still had this open a
@@ -298,7 +298,7 @@ new mechanism — assume the condition is fully present and check the detector s
 runs; assume it fully absent and check it goes quiet. Hopping needs a third of the
 same family:
 
-> **Assume synchronisation is lost, and check there is a path back that does not
+> **Assume synchronization is lost, and check there is a path back that does not
 > depend on the link that is lost.**
 
 A fixed rendezvous channel is that path, and it must be designed in from the
@@ -317,7 +317,7 @@ rendezvous beacon (whose own compliance must then be argued) or accepting the
 gap. Route 1a avoids the question entirely — this is the strongest argument
 against 1b, and it should be weighed against the displacement benefit rather than
 treated as decisive on its own. The two point in opposite directions: hopping
-protects the link when other locators are present, and jeopardises it when the
+protects the link when other locators are present, and jeopardizes it when the
 sky is not.
 
 ### What transfers, and what breaks
@@ -426,7 +426,7 @@ hardware**, and the 0.1 ms result above is a number that deserves to be.
 **Revisit if:** the 6 dB bandwidth measurement rules out route 1a; the expected
 flight-line density changes, which moves the 1a/1b preference directly; a
 receiver hardware revision adds GPS for other reasons, which would make 1b
-substantially cheaper; the product moves to a licence-required model, which
+substantially cheaper; the product moves to a license-required model, which
 removes the constraint entirely; or FCC rules for the band change.
 
 ## Alternatives considered
@@ -450,8 +450,8 @@ removes the constraint entirely; or FCC rules for the band change.
 - **Move to the 70 cm amateur band, as Altus Metrum does.** Removes bandwidth and
   power constraints outright and is well-proven in this exact application.
   Rejected on product grounds rather than technical ones: it makes an amateur
-  licence a prerequisite for every user, and the 900 MHz rocketry products all
-  sell licence-free with Multitronix naming it explicitly as a feature.
+  license a prerequisite for every user, and the 900 MHz rocketry products all
+  sell license-free with Multitronix naming it explicitly as a feature.
 - **Featherweight's dual-mode migration — keep the legacy channels, add a
   compliant set beside them.** Not rejected; noted as the *shape* any transition
   should take, since it preserves interoperability with already-flashed locators.

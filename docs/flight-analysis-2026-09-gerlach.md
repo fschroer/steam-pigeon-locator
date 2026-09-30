@@ -14,7 +14,7 @@ This file is the **evidence base**, in the same role as
 
 | Property | Value |
 |---|---|
-| Records analysed | 3 Locator + 3 app flight logs |
+| Records analyzed | 3 Locator + 3 app flight logs |
 | Samples | 15,485 at 20 Hz |
 | Apogee range | 1,333 m (Nike, after breakup) – 5,708 m (Shane) |
 | Peak speed | ~545 m/s, Shane (axial-accel integration; about Mach 1.6) |
@@ -119,13 +119,27 @@ Mass 49.9 kg, Isp 180–200 s, Cd 0.5–0.7, frontal area 0.0324 m²:
 | 5.60–5.65 | 171 g, then 107 g; 800 → 1,578 dps | The structure fails. Rotational terms are tens of g per meter of offset from the section's CG (angular acceleration 400–800 rad/s²) and are included in these readings |
 | 5.45 → 5.70 | Tilt 3° → 153° in 250 ms | A tumble, not a controlled pitch |
 | 5.60–5.85 | Barometer +313 m in 0.25 s to a raw peak of **1,681.5 m** | Vents in separated crossflow suction (§3). Not altitude. |
-| 5.45 → 7.05 | Integrated \|a\|: **297 m/s gone by 5.75 s, 365 by 6.05, 414 by 7.05** | The locator's section was stopped aerodynamically. The total matches the 415 m/s it was carrying. |
+| 5.45 → 7.05 | Integrated \|a\|: **297 m/s by 5.75 s, 365 by 6.05, 414 by 7.05** | Most of the section's 415 m/s was shed aerodynamically — but **not all 414 m/s of that integral is deceleration**. The section was still climbing at roughly +30 m/s near 7 s (see the next rows), so only about **87 %** of the measured \|a\| was vertical drag. The rest is most plausibly rotation measured at the locator's offset from the section's CG. *(Corrected 2026-09-29: an earlier version said this total "matches the 415 m/s", i.e. that the budget closed. It does not.)* |
 | 6.1–7.4 | GPS reports ≥ 327 m/s upward with a 3D fix and `h_acc` 1.4–2.8 m | The receiver is extrapolating, not tracking ([#55](https://github.com/fschroer/steam-pigeon-locator/issues/55)) |
 | 6.30 | Barometer "descends" at **−551 m/s** | The decay of the suction offset, with lag. Apogee detection was closed only because burnout wasn't declared until 7.35 s ([#45](https://github.com/fschroer/steam-pigeon-locator/issues/45)) |
-| ~7 | Specific force ≈ 1 g | The section is coasting slowly. The barometer becomes trustworthy again. |
+| ~7–8.5 | Specific force falls from ≈ 1.5 g to ≈ 0.2 g | Drag decaying as the section slows while still climbing. The barometer is trustworthy again from **~8.5–9 s**, lagging about 0.4 s. |
+| 9–10.5 | Specific force ≈ 0 g | Near free fall at almost zero airspeed. GPS vertical speed crosses zero (apogee) at **~9.9 s**; the barometer's at ~10.3 s. |
 | ~10.0 | Peak **~1,333 m** (the archived apogee) | About 230 m of climb after breakup |
 | 10.6–58 | Descent 25–27 m/s, steady | No working canopy. "Drogue deployed" and "Main deployed" were both false ([#54](https://github.com/fschroer/steam-pigeon-locator/issues/54)) |
 | **63.047** | 51 g on the high-g channel | **Ground impact at ~27 m/s.** The barometer still read 19.9 m (lag, §3). |
+
+### Estimated true altitude
+
+The raw barometer is wrong for most of the ascent (lag, then transonic and crossflow artifacts), so a best-estimate altitude was built and saved alongside the export as `Nike_Smoke_2026-09-27_11-30-20_estimated_agl.csv` (columns `est_agl_m`, `est_agl_source`; the original file is untouched, so its hash above still holds):
+
+| Span | Method | Check |
+|---|---|---|
+| 0–5.42 s | Integrated axial specific force, `(accel_x − 1) g` | Matches GPS vertical speed within ~10 m/s up to its 327 m/s ceiling; **~1,100–1,120 m AGL at failure** |
+| 5.42–9.9 s | Vertical model: deceleration = `k·\|a\| + g`, with `k` solved so vertical speed reaches 0 at the GPS apogee (9.88 s) → **k = 0.874** | The model's apogee, **1,323 m**, lands within **10 m** of the barometer's 1,333 m, which it never sees |
+| 9.9–10.9 s | Linear blend from the model to the barometer | — |
+| 10.9 s on | Barometer advanced by its measured **0.45 s** lag | Reads **−0.1 m at the accelerometer-marked impact** (63.047 s), where the raw barometer read 19.9 m |
+
+Uncertainty: ±10–20 m through boost (accelerometer bias), ~±10 m at apogee, ~±5 m in descent. The barometer's −2.6 m resting value after landing (drift) is not corrected.
 
 ### Root cause: what the data supports
 

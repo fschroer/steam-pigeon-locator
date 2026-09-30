@@ -125,7 +125,7 @@ apogee loses every deployment**, which is a Priority-1 failure.
   [ADR-0032](0032-baro-outlier-filtering.md), which replaces it with a median-5 on pressure ahead
   of the IIR and closes [#41](https://github.com/fschroer/steam-pigeon-locator/issues/41). This amendment made the resulting latch survivable; ADR-0032
   removes the plateau that caused it. Both are needed: filtering still leaves 25 residual outlier
-  events across the archive, so this ladder remains the last line of defence.
+  events across the archive, so this ladder remains the last line of defense.
 - **(Superseded note, kept for history) the clamp was tracked as [#41](https://github.com/fschroer/steam-pigeon-locator/issues/41).**
   It is what pins the baseline to a ceiling in the first place (while saturated, consecutive
   samples differ by 0, so the guard keeps accepting them), and it is still capable of hiding a

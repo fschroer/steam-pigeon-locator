@@ -22,7 +22,7 @@ not carried by `PreLaunchData`. The app therefore has no way to learn what the
 locator actually holds for either.
 
 That matters because of how a config change is confirmed. There is no
-acknowledgement message: the app compares the whole settings object it sent
+acknowledgment message: the app compares the whole settings object it sent
 against one rebuilt from the next broadcast, and reports success only on
 equality. For the two fields the broadcast does not carry, it had to substitute
 something — and what it substituted was the firmware defaults, 30 m and 1.0 s.

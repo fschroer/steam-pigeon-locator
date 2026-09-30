@@ -15,7 +15,7 @@ must be able to re-check belongs in a file like this one.
 
 | Property | Value |
 |---|---|
-| Records analysed | **16 distinct** (17 files — two are byte-identical, see below) |
+| Records analyzed | **16 distinct** (17 files — two are byte-identical, see below) |
 | Samples | 28 689 at 20 Hz |
 | Apogee range | 69.6 m – 1 655.7 m |
 | Peak ascent rate | 376 m/s (≈ Mach 1.1), `Ken 132857` |
@@ -60,7 +60,7 @@ counts the set as 16.
   `r[i] = a[i] − (a[i−1] + a[i+1]) / 2`. For white noise `Var(r) = 1.5 σ²`, so
   `σ = sd(r) / √1.5`. This separates sensor noise from trajectory curvature without
   assuming a descent-rate model.
-- "Oscillation residual" removes the descent trend with a **2 s (41-sample) centred
+- "Oscillation residual" removes the descent trend with a **2 s (41-sample) centered
   moving average** and reports the sd of what is left, plus the dominant frequency from
   the zero-crossing rate.
 - "Accel-implied tilt" is `acos(accel_x / |accel|)` — valid only where `|accel| ≈ 1 g`,
@@ -196,7 +196,7 @@ body attitude, not the sensor. A rank filter cannot remove a sustained oscillati
 a low-pass that could would cost real lag at descent rates up to 20 m/s.
 
 **Consequence for the main gate.** With ±15 m of oscillation against a 130 m gate, main
-can fire early or late by that much. The suggested defence is **N consecutive samples
+can fire early or late by that much. The suggested defense is **N consecutive samples
 satisfying the gate**, not a smoother: that costs a fixed 50 ms × N regardless of descent
 rate, where a filter's lag scales with exactly the descent rate that makes an early main
 dangerous.

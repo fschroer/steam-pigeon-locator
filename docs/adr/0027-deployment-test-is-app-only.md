@@ -21,7 +21,7 @@ in `WaitingLaunch`. The operator stands wherever they like.
 **Over the USB-C console.** Typing `test` opened a menu; keys `1`–`4` selected a
 channel and fired it ten seconds later. This is only reachable with a cable
 plugged into the locator — which is to say, with the operator's hand roughly a
-metre from the e-match that is about to light. The countdown was the only
+meter from the e-match that is about to light. The countdown was the only
 distance the design offered, and ten seconds is the time it takes to stand up.
 
 Two further facts, both found while fixing the buzzer (this session), made the
@@ -67,7 +67,7 @@ thing that enters it.
 **Distance is the only real mitigation available here.** Everything else the
 design can offer against a charge going off near a person — the countdown, the
 LED, the warnings in the manual — is a request for the operator's attention. The
-radio path gives actual metres, and it costs nothing to insist on it, because
+radio path gives actual meters, and it costs nothing to insist on it, because
 the app path already exists, is already the documented procedure, and is already
 the one the manual tells people to use.
 

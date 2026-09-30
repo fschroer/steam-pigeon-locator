@@ -356,17 +356,17 @@ Everything to do with which channel you are on lives on one screen: **Communicat
 
 That last part is the rule for the whole screen: **using any control clears what the others left behind.** A scan's ranking, a search's results and the outcome of a channel move are all answers to a question you have since moved on from, and none of them expire on their own. Pressing something is the app's only signal that you have moved on, so it takes it. Two things are deliberately spared: the result you are acting on — tap **Connect** on a search hit and that row stays, and changes to *Connected* — and anything still running or still in progress.
 
-At the top of the screen, a coloured dot answers the question you came with. **Green** — *"Receiver and locator are together on channel N"* — means broadcasts are arriving, which is what being on the same channel *is*; there is nothing further to check. **Red** — *"Split"* — appears only after a channel move the app could not confirm, and says so in those words: the receiver is on one channel, the locator never acknowledged the move, and it may be on either. Use **Find a locator** to settle it.
+At the top of the screen, a colored dot answers the question you came with. **Green** — *"Receiver and locator are together on channel N"* — means broadcasts are arriving, which is what being on the same channel *is*; there is nothing further to check. **Red** — *"Split"* — appears only after a channel move the app could not confirm, and says so in those words: the receiver is on one channel, the locator never acknowledged the move, and it may be on either. Use **Find a locator** to settle it.
 
 The dot stays quiet in two cases, on purpose. While a move is still running the message under it is already telling you so. And when the locator simply is not being heard with no move behind it, that is the ordinary lost-rocket case — nothing is known about where it is, and a red dot would be a guess wearing the clothes of a measurement.
 
 Channels are numbered **0–63**. Default is 0.
 
-> **Communication → *Receiver channel*, chain open (grey)**
+> **Communication → *Receiver channel*, chain open (gray)**
 > Points **your receiver** at a locator that is already on another channel. Your own locator does not move. Use this when you have two locators and want to switch which one you're watching — and it's what **Find a locator** fills in for you.
 >
 > **Communication → *Receiver + locator channel*, chain closed**
-> Tap the chain icon to the right of the field and it lights up; the label above the field changes with it. **Update** now moves **your locator** to the channel you typed, and your receiver follows it automatically, so your link is preserved. Use this when the channel is chosen for you — someone else at the launch is on yours, or the club assigns one. The chain is greyed out with no locator connected, because there is then nothing to move.
+> Tap the chain icon to the right of the field and it lights up; the label above the field changes with it. **Update** now moves **your locator** to the channel you typed, and your receiver follows it automatically, so your link is preserved. Use this when the channel is chosen for you — someone else at the launch is on yours, or the club assigns one. The chain is grayed out with no locator connected, because there is then nothing to move.
 
 One field, one **Update**, and the chain deciding who it commands — so the safe direction is the one you get without asking for it. Which is which matters: pointing the receiver leaves your rocket where it is, while closing the chain sends a command to the rocket itself. The label above the field always names the one **Update** will do.
 
@@ -443,11 +443,11 @@ This is the other half of the problem, and it looks nothing like interference. Y
 
 - **Pick which rocket you're looking for, if you know.** *Looking for* lets you choose one of your known locators; the search then stops the moment it hears from that one, usually on the first channel it tries. Leave it on **Any locator** and it reports everything it finds — which is what you want for a borrowed locator the app has never met, or when you want to see both of your rockets at once.
 - **Each channel takes about a second and a half.** That's not slack: a locator only transmits for about a seventh of each second, so anything quicker would walk past a channel while the rocket happened to be silent. It's the same reason the clean-channel scan listens properly to its final candidates.
-- **Found it? Tap *Connect*.** That moves the **receiver** to the rocket's channel — not the rocket. It's already there, which is what the search just established, and moving it is the one thing guaranteed to lose it again. It takes effect immediately: the row changes to *Connected* once the receiver confirms the new channel. (The clean-channel scan's button still reads *Point receiver*, deliberately — that one sends you to a channel chosen for being **empty**, where "Connect" would promise something that is not there.) While a change is on its way the Connect buttons grey out, so a second tap cannot go missing. If it's a locator the app doesn't know, you'll be asked for its password once broadcasts start arriving, exactly as if you'd tuned there by hand.
+- **Found it? Tap *Connect*.** That moves the **receiver** to the rocket's channel — not the rocket. It's already there, which is what the search just established, and moving it is the one thing guaranteed to lose it again. It takes effect immediately: the row changes to *Connected* once the receiver confirms the new channel. (The clean-channel scan's button still reads *Point receiver*, deliberately — that one sends you to a channel chosen for being **empty**, where "Connect" would promise something that is not there.) While a change is on its way the Connect buttons gray out, so a second tap cannot go missing. If it's a locator the app doesn't know, you'll be asked for its password once broadcasts start arriving, exactly as if you'd tuned there by hand.
 
   💡 **Picking a channel from a scan acts; typing one by hand needs Update.** Choosing a result is the decision — the search has already established where the rocket is — so there is nothing left to confirm. The channel field lower down is different: every keystroke is a valid channel number, so it waits for **Update**.
 - **You can search all 64 channels.** Offered from the start, beside the short search, because sweeping the band is sometimes the right *first* move — a borrowed locator, or one whose channel was changed somewhere the app never saw. It is never started for you: it takes up to about 90 seconds — less when it finds locators along the way, since it moves on as soon as a channel answers — and the receiver hears nothing at all while it runs.
-- **It won't run while the locator is armed or flying.** Both scan buttons grey out and say so. A full sweep would leave you deaf for over a minute, which is intolerable over a live flight — and pressing **Arm** during a running scan stops the scan so the command gets through, rather than queueing behind it.
+- **It won't run while the locator is armed or flying.** Both scan buttons gray out and say so. A full sweep would leave you deaf for over a minute, which is intolerable over a live flight — and pressing **Arm** during a running scan stops the scan so the command gets through, rather than queueing behind it.
 
   ⚠️ **This does not time out, and that is deliberate.** If your rocket arms and then goes out of range, the receiver stays locked on it and both scans stay unavailable until you disarm it or power-cycle the receiver. That is not a lockout from a tool that would have helped: a rocket that armed on your channel is *still on your channel*, so it is a range problem and not a channel one. Sweeping 64 other channels cannot find it, and the ninety seconds spent trying are ninety seconds you are not listening for it to come back. Use direction and distance and walk toward it (§4).
 - **Names and channels here aren't password-checked.** They're read straight off the air. Normal recognition happens the usual way (§2.6) once the receiver is pointed at the channel.
@@ -623,7 +623,7 @@ This confirms two things: that each channel actually fires, and that your ignite
 
    <img src="images/app-10b-deployment-test-select.png" alt="Choosing the channel to test" width="300">
 
-6. **Press the button** — now reading *Deployment Channel n Test* — to start the countdown. The button becomes the countdown and greys out, the red **STOP TEST** button below it comes alive, and the locator's status LED blinks red, faster in the last 3 seconds.
+6. **Press the button** — now reading *Deployment Channel n Test* — to start the countdown. The button becomes the countdown and grays out, the red **STOP TEST** button below it comes alive, and the locator's status LED blinks red, faster in the last 3 seconds.
 
    <img src="images/app-10-deployment-test.png" alt="The countdown running on channel 2" width="300">
 
@@ -637,8 +637,8 @@ This confirms two things: that each channel actually fires, and that your ignite
 
 ⚠️ **Read this before you start one, not after.**
 
-- **STOP TEST is the cancel**, sitting under the countdown in red. It is on screen from the moment you open the page — greyed out until there is a test to stop — so you can see where it is *before* you start one. It is a full-width target, not the shrunken digit the countdown becomes.
-- **The button that started the test cannot restart it.** It greys out for the duration, so stabbing near zero can no longer set off a fresh countdown. (Older firmware and app versions used one button for both, and this was a real way to fire the charge you were trying to stop.)
+- **STOP TEST is the cancel**, sitting under the countdown in red. It is on screen from the moment you open the page — grayed out until there is a test to stop — so you can see where it is *before* you start one. It is a full-width target, not the shrunken digit the countdown becomes.
+- **The button that started the test cannot restart it.** It grays out for the duration, so stabbing near zero can no longer set off a fresh countdown. (Older firmware and app versions used one button for both, and this was a real way to fire the charge you were trying to stop.)
 - **Leaving the screen sends the cancel too.** Return and the back arrow both send it as the screen closes.
 - ⚡ **The cancel is a radio message, and radio messages get lost.** ⚠️ **It is a request, not a switch.** STOP TEST reads **STOPPING…** while a cancel is outstanding, and the count above it keeps ticking until the locator actually honors it. **Until the countdown clears, treat the charge as live.** If it keeps ticking, press again — pressing repeatedly is the right answer, not a mistake.
 - ⚡ **Watch it stop.** This is the reason to prefer STOP TEST over Return: leaving the screen sends the same cancel but takes away the one display that would tell you whether it landed. If you need to be sure, stay and watch. (If you have already left, come back — the screen picks the countdown back up if it is still running.)
@@ -673,7 +673,7 @@ Recovery happens where there is no cell signal. This screen pre-loads the satell
 
 **To download a site:**
 
-1. Open the menu → **Download maps**. It opens centred on **where you are**, zoomed out far enough to see a state or two — so a site a few hours' drive away is a pan rather than a search. If the phone has no position fix yet it opens on the whole world instead; frame down from there.
+1. Open the menu → **Download maps**. It opens centered on **where you are**, zoomed out far enough to see a state or two — so a site a few hours' drive away is a pan rather than a search. If the phone has no position fix yet it opens on the whole world instead; frame down from there.
 2. **Frame the area** in one of three ways:
    - Pan and zoom the map directly.
    - **Go to preset site…** — pick from the built-in list of known launch sites, each with the area it will frame. It also fills in the **Site name** for you.
@@ -998,7 +998,7 @@ Tap the status panel at the top of the map to expand it; a **Snooze 5 min** butt
 
 Three things keep this a snooze rather than an off switch, and each of them matters:
 
-- **It is capped at 15 minutes total.** The button greys out at the ceiling rather than disappearing, so "no more" is something you can see. The locator enforces the cap itself — no version of the app can talk it into more.
+- **It is capped at 15 minutes total.** The button grays out at the ceiling rather than disappearing, so "no more" is something you can see. The locator enforces the cap itself — no version of the app can talk it into more.
 - **Powering the locator off clears it.** The snooze lives in RAM only. A power cycle always fails toward the alert.
 - **The clock underneath keeps running.** Only the *sound* stops. When the snooze expires the alert resumes immediately if the rocket is still standing there — you do not get a fresh ten seconds of grace.
 
@@ -1141,12 +1141,12 @@ With **Enable Speech** on (§2.8), the app announces:
 | Marker | Meaning |
 |---|---|
 | **Green** | Live. Packets are arriving and the locator reports a healthy GPS fix. The position is current. |
-| **Grey** | The link is fine, but the locator says its **fix** is not — stale or unhealthy. The marker stays where the last good fix put it, and the accuracy ring greys with it rather than claiming a precision the position no longer has. |
+| **Gray** | The link is fine, but the locator says its **fix** is not — stale or unhealthy. The marker stays where the last good fix put it, and the accuracy ring grays with it rather than claiming a precision the position no longer has. |
 | **Red** | Nothing has been heard for over 2 seconds. The position is as old as the dropout. This is checked first, and for a good reason: with no recent packet the locator's *reported* fix health is itself stale and cannot vouch for anything. |
 
-The distinction that matters is **grey versus green**: a frozen fix with a perfect radio link used to draw exactly like a healthy one — a green marker sitting still, which reads as a stationary rocket rather than as a stalled position. Grey says "this is the last place it told me, and it hasn't told me since."
+The distinction that matters is **gray versus green**: a frozen fix with a perfect radio link used to draw exactly like a healthy one — a green marker sitting still, which reads as a stationary rocket rather than as a stalled position. Gray says "this is the last place it told me, and it hasn't told me since."
 
-⚡ **Grey never means the position is gone.** The marker, the track and the last coordinates all stay on screen. Withholding the last known position at the moment it is the only thing left to walk toward would be the wrong trade — see §9.5 for the separate case where the app refuses to quote a *distance*.
+⚡ **Gray never means the position is gone.** The marker, the track and the last coordinates all stay on screen. Withholding the last known position at the moment it is the only thing left to walk toward would be the wrong trade — see §9.5 for the separate case where the app refuses to quote a *distance*.
 
 **The banner across the middle of the map** carries the rocket's pre-flight state in a few words: **Disarmed** and **No GPS** in white when they are simply true and unremarkable, **ROCKET ON PAD — NOT ARMED** in pulsing red when the pad alert is sounding, and **NOT ARMED — alert snoozed *n* min** in yellow while you have silenced it (§6.6). Only the alert states pulse; a rocket sitting disarmed in the prep area is an ordinary state and does not need an animation.
 
@@ -1390,37 +1390,84 @@ This gives you everything the locator recorded, at full rate, for analysis in a 
 2. Open a serial terminal at the locator's console baud rate — **921600 unless you changed it** (§Appendix D).
 3. Type `data` and press Enter. You'll get a numbered list of stored flights with dates, apogees and times to apogee.
 4. **Start your terminal's logging-to-file** *before* the next step — the export scrolls past as plain text.
-5. Type the number of the flight you want. The CSV streams out, followed by a summary of the flight's events and per-channel deployment statistics.
+5. Type the number of the flight you want. It streams out in this order: **a short summary of the flight's events**, then **the column-name line**, then **one row per sample**.
+
+**The summary lines** come first, one event per line, as `Name: value`:
+
+| Line | Meaning |
+|---|---|
+| `Flight time:` | Date and time of the flight, **UTC**, from GPS. |
+| `Launch detect time:` | When the locator decided it was flying (§10.2 **Launch**), in the same milliseconds as `time_ms`. Usually a few hundred ms after thrust onset; up to about 2 s for a slow, low-thrust motor, which is detected by altitude instead. |
+| `Burnout time:` | §10.2 **Burnout**. On fast rockets this runs several seconds late ([#45](https://github.com/fschroer/steam-pigeon-locator/issues/45)). |
+| `Apogee time:`, `Noseover time:` | §10.2 **Apogee** and **Noseover**. |
+| `Drogue primary time:`, `Drogue backup time:` | When each drogue charge was due, per the settings. |
+| `Drogue velocity threshold time:` | §10.2 **Drogue Deploy** — where the locator concluded the drogue had taken hold. |
+| `Main primary time:`, `Main backup time:` | When each main charge was due. |
+| `Main velocity threshold time:` | §10.2 **Main Deploy**. |
+| `Landing time:` | §10.2 **Landing**. |
+
+⚡ **A time of `0` means the event never happened** (a charge that never became due, a flight cut short before landing was detected) — not that it happened at the start. The deployment times are recorded by the locator's own logic from its own settings, whether or not anything was wired to that channel. The per-channel *fired* and *continuity* results are **not** in this export.
 
 **Columns:**
 
 | Column | Meaning |
 |---|---|
-| `time_ms` | Milliseconds since thrust onset. |
-| `raw_baro_agl_m` | Barometric altitude above ground — the altitude used for deployment decisions. |
+| `time_ms` | Milliseconds since the start of the record — normally **thrust onset**. See §10.6 for the one exception. |
+| `raw_baro_agl_m` | Barometric altitude above ground — the altitude used for deployment decisions. It trails the rocket by roughly half a second, and it can read **wildly high or low for a moment** while the rocket passes the speed of sound or a section tumbles broadside to the air — both are air pressure around the vent holes, not altitude. |
 | `fused_agl_m` | Altitude from the combined sensor solution, recorded for analysis. |
 | `raw_baro_vel_mps` | Vertical speed derived from the barometer. |
 | `fused_vspeed_mps` | Vertical speed from the combined solution. |
 | `accel_x_g`, `accel_y_g`, `accel_z_g` | Acceleration in g, in the rocket's own axes. |
 | `gyro_x_dps`, `gyro_y_dps`, `gyro_z_dps` | Rotation rate in degrees per second. |
 | `lat_deg`, `lon_deg` | GPS position. |
-| `flight_state` | Which state the flight state machine was in. |
+| `flight_state` | Which state the flight state machine was in — a number; see **Flight state values** below. |
 | `armed` | Whether the locator was armed for this sample — 1 or 0. Because a disarmed locator now records a full flight (§7.1), this is the column that tells you whether the charges were ever going to fire. |
 | `ekf_health` | **0 means the combined solution was working on that sample.** Anything else means `fused_agl_m` and `fused_vspeed_mps` on that row cannot be trusted — see the note below. |
-| `gps_vel_n_mps`, `gps_vel_e_mps`, `gps_vel_d_mps` | GPS velocity north / east / down. **Blank** when that fix carried no velocity — blank is not zero. |
-| `gps_h_acc_m` | How accurate the GPS thought its own position was, in metres. |
-| `tilt_deg` | Angle off vertical. **Trustworthy through boost; not after.** The locator has no way to measure which way is up once it is falling, so from coast onward this is dead reckoning and drifts without bound — on flights analysed 2026-09-07 it was wrong by more than 60° for the whole descent. Read it for the boost, ignore it under the canopy. |
+| `gps_vel_n_mps`, `gps_vel_e_mps`, `gps_vel_d_mps` | GPS velocity north / east / **down** (so a climbing rocket has a *negative* `gps_vel_d_mps`). **Blank** when that fix carried no velocity — blank is not zero. ⚠️ The record cannot hold more than **±327.67 m/s**; a faster rocket shows exactly that value, which is a ceiling, not a reading ([#53](https://github.com/fschroer/steam-pigeon-locator/issues/53)). |
+| `gps_h_acc_m` | How accurate the GPS thought its own position was, in meters. |
+| `tilt_deg` | Angle off vertical, from the locator's gyros. **Trustworthy through boost and coast; not under the canopy.** On two 2026-09-26 flights it matched the direction GPS said the rocket was traveling to within a few degrees all the way to apogee — including the steady tip-over toward horizontal a stable rocket makes as it slows. After deployment the tumbling defeats it: on flights analyzed 2026-09-07 it was wrong by more than 60° for the whole descent. Read it for boost and coast; ignore it under the canopy. |
 | `q_w`, `q_x`, `q_y`, `q_z` | Orientation, as a quaternion. |
-| `fix_type`, `num_sv` | GPS fix quality and satellite count at that sample — what the position readings in the same row are worth. |
+| `fix_type`, `num_sv` | GPS fix type (a number; see **GPS fix type values** below) and satellite count at that sample. ⚠️ A `fix_type` of 3 does not by itself mean the position is good — under high acceleration the GPS can report a 3D fix while being kilometers off. `gps_h_acc_m` and `num_sv` are better guides, and during a hard boost none of the three is reliable. |
 | `accel_alt_x_g`, `accel_alt_y_g`, `accel_alt_z_g` | The *other* accelerometer. The locator carries a sensitive one and a high-range one and uses whichever suits the moment; this is the one it wasn't using, so the two *should* be directly comparable. ⚠️ **They are not, yet** — on locators mounted one particular way round, this column is written in the sensor's own axes while `accel_*_g` is written in the rocket's, so the two can come out mirrored ([#43](https://github.com/fschroer/steam-pigeon-locator/issues/43), found 2026-09-07 on 9 of 16 records). Until that is fixed, compare their *magnitudes*, not their signs. **Blank** if that sensor had nothing valid to report. |
 | `accel_source` | Which accelerometer the `accel_*_g` columns came from: 0 = low-g, 1 = high-g. |
-| `pps_status` | Whether the GPS one-pulse-per-second timing reference was healthy: 1 = locked, 2 = a pulse was missed, 4 = a bad interval was rejected. These add together. 1 on its own is the good case. |
+| `pps_status` | Whether the GPS one-pulse-per-second timing reference was healthy: 1 = locked, 2 = a pulse was missed, 4 = a bad interval was rejected. These add together — 3 is "locked, but a pulse was missed", 5 is "locked, but an interval was rejected". 1 on its own is the good case. |
 
 They are exported in that order.
 
-> **Reading `ekf_health`.** The combined ("fused") solution can fail in flight, and when it does it fails quietly: the altitude stops changing and the vertical speed reads exactly `0.0`. That looks identical to a rocket sitting still on the pad, which is why six flights were analysed before anyone noticed. `ekf_health` is the column that tells them apart — sort or filter on it before you trust `fused_agl_m`. (For `fused_vspeed_mps` it is necessary but **not** sufficient; see the second note below.) The value is a set of flags: 1 = the velocity estimate had to be reset, 2 = a sensor correction was rejected, 4 = a barometer update was rejected, 8 = the fused altitude stood still while the barometer moved, and they add together. **`raw_baro_agl_m` is unaffected** — deployment decisions never used the fused columns.
+**Flight state values** (`flight_state`):
 
-> ⚠️ **`ekf_health` covers the altitude, not the speed.** Flag 8 is the one that catches the failure described above, and it works — it flagged both flights in the September 2026 set that lost their fused altitude. But nothing watches `fused_vspeed_mps`, and that is the column that goes furthest wrong: across ten flights analysed 2026-09-07, **70 rows read `ekf_health` = 0 while the fused vertical speed disagreed with the barometer by more than 50 m/s** — including +910 m/s during a boost, and several readings past ±400 m/s while the rocket was **sitting on the ground**. So a clean `ekf_health` vindicates `fused_agl_m` and says nothing about `fused_vspeed_mps`. Sanity-check that column against `raw_baro_vel_mps` yourself.
+| Value | State | Meaning |
+|---|---|---|
+| 0 | Waiting for launch | On the pad. |
+| 1 | Launched | Launch detected; under thrust. |
+| 2 | Burnout | The locator has decided the motor is out and the rocket is coasting. |
+| 3 | Noseover | Apogee detected. Often **never appears**: with a drogue primary delay of 0 the drogue state follows in the same instant, and the record goes straight from 2 to 4. |
+| 4 | Drogue primary | The drogue primary charge has become due. |
+| 5 | Drogue backup | The drogue backup charge has become due. |
+| 6 | Main primary | The main primary charge has become due. |
+| 7 | Main backup | The main backup charge has become due. |
+| 8 | Landed | Landing detected. |
+
+The state only ever moves forward, and it can **skip**: if two events come due in the same instant it goes straight to the later one — so a record can jump from 2 to 7 if the main altitudes are set above apogee. States 4–7 say what the locator's logic *decided*; they do not prove a charge fired (the same states occur with nothing wired).
+
+**GPS fix type values** (`fix_type`):
+
+| Value | Meaning |
+|---|---|
+| 0 | No fix. |
+| 1 | Dead reckoning only. |
+| 2 | 2D fix (no altitude). |
+| 3 | 3D fix — the normal case. |
+| 4 | GPS plus dead reckoning. |
+| 5 | Time only. |
+| 6 | **Stale** — the GPS stopped sending its normal messages (it had reset to factory defaults). The position on this row is the last good one, repeated. |
+| 7 | **Stale** — the GPS went silent. The position on this row is the last good one, repeated. |
+
+> **Reading `ekf_health`.** The combined ("fused") solution can fail in flight, and when it does it fails quietly: the altitude stops changing and the vertical speed reads exactly `0.0`. That looks identical to a rocket sitting still on the pad, which is why six flights were analyzed before anyone noticed. `ekf_health` is the column that tells them apart — sort or filter on it before you trust `fused_agl_m`. (For `fused_vspeed_mps` it is necessary but **not** sufficient; see the second note below.) The value is a set of flags: 1 = the velocity estimate had to be reset, 2 = a sensor correction was rejected, 4 = a barometer update was rejected, 8 = the fused altitude stood still while the barometer moved, and they add together. **`raw_baro_agl_m` is unaffected** — deployment decisions never used the fused columns.
+
+> ⚠️ **`ekf_health` also misses a fused altitude that runs away.** Flag 8 catches an altitude that *stops*; it does not catch one that keeps moving the wrong way. On a flight analyzed 2026-09-28, `fused_agl_m` climbed to **31,158 m while the rocket sat on the ground**, and most of those rows read `ekf_health` = 0. Compare `fused_agl_m` with `raw_baro_agl_m` before trusting it ([#46](https://github.com/fschroer/steam-pigeon-locator/issues/46)).
+
+> ⚠️ **`ekf_health` covers the altitude, not the speed.** Flag 8 is the one that catches the failure described above, and it works — it flagged both flights in the September 2026 set that lost their fused altitude. But nothing watches `fused_vspeed_mps`, and that is the column that goes furthest wrong: across ten flights analyzed 2026-09-07, **70 rows read `ekf_health` = 0 while the fused vertical speed disagreed with the barometer by more than 50 m/s** — including +910 m/s during a boost, and several readings past ±400 m/s while the rocket was **sitting on the ground**. So a clean `ekf_health` vindicates `fused_agl_m` and says nothing about `fused_vspeed_mps`. Sanity-check that column against `raw_baro_vel_mps` yourself.
 
 > ⚡ **The timing columns are gone**, and the column order changed. `oc_start_us`, `oc_end_us`, `process_start_us` and `process_dur_us` were replaced by the GPS velocity and accuracy columns above. If you have a spreadsheet that reads columns by position rather than by name, it will need updating. Per-cycle timing is still available live from the data menu's `t` breakdown.
 
@@ -1437,6 +1484,7 @@ They are exported in that order.
 **In the locator's record** (§10.1, §10.4):
 
 - **`time_ms = 0` is thrust onset.** The record starts at launch.
+- **One exception:** if the locator's combined ("fused") solution was already flagged as unhealthy on the pad (a nonzero `ekf_health` in the seconds before launch), the record deliberately keeps about **2 seconds of pad data** so the problem can be examined, and `time_ms = 0` is the start of that instead. Thrust onset is then partway in. Find it with the `Launch detect time:` summary line (§10.4) or where `accel_x_g` first rises above 1 g.
 - Time is measured on a **GPS-disciplined clock**, so it is real elapsed time, not an assumed sample rate. Durations you measure from the data are trustworthy.
 - Data is recorded at **20 samples per second**.
 - A record is capped at **8 minutes** and includes about **2 seconds of settled data after landing**.
@@ -1444,7 +1492,7 @@ They are exported in that order.
 **In the app flight log** (§10.7), which is a different clock and a weaker one:
 
 - Rows are stamped **when the message reached the phone**, using the phone's own clock — not the locator's. Bluetooth delivery adds a little jitter on top.
-- `elapsed_s` counts from launch detection, so the pre-launch rows are negative.
+- `elapsed_s` counts from when **the app** learned of the launch — the first message saying *Launched* to reach the phone — so the pre-launch rows are negative. Messages arrive about once a second, so this is typically **0.5–1 s after** the locator's own launch detection. When lining the two files up, match an event that appears in both (a flight-state change, or the altitude) rather than assuming the zeros coincide.
 - Good enough for *"the app said `telemetry lost` nine seconds before it said `landing`"*, which is what it is for. **Not** a substitute for `time_ms` when you want real flight timing — use the locator's record for that.
 
 ## 10.7 App flight logs
@@ -1483,14 +1531,57 @@ A log still being written says so on its row, and can be shared while it is open
 
 | Column | Meaning |
 |---|---|
-| `timestamp`, `elapsed_s` | When, on the phone's clock, and seconds from launch detection (negative before it) — see §10.6. |
-| `source` | `prelaunch`, `telemetry`, `receiver_info`, or `app` for something the app did. |
-| `event`, `detail` | Blank on telemetry rows. Otherwise the app event and its text — including the exact words of every spoken callout. |
-| `rssi_dbm`, `snr_db`, `noise_floor_dbm`, `bad_frames` | **The receiver's measurement of that message.** The reason this log exists. |
-| `link_quality` | The app's interference verdict for that moment (§2.5). |
-| `flight_state`, `lat`, `lon`, `agl_m`, velocity, attitude, `satellites`, `hacc_m` | What the message carried. |
-| `armed`, deployment masks, `drogue_detected`, `main_detected`, `pad_alert` | Arm state, which channels were armed and which had fired, and whether deployment was physically detected. |
-| battery, `receiver_channel`, `locator_id` | Locator and receiver battery, the channel it arrived on, and which locator sent it. **The two battery columns are blank on an armed flight — see below.** |
+| `timestamp` | When the row was written, on the phone's clock, with the phone's time zone. |
+| `elapsed_s` | Seconds from when the app learned of the launch; negative before it (§10.6). |
+| `source` | Where the row came from — see **Row sources** below. |
+| `event`, `detail` | Blank on message rows. On `app` rows, the event name (see **App events** below) and its text — for `announcement`, the exact words spoken. |
+| `flight_state` | The locator's flight state, by name — the same states as §10.4's numbers: `WaitingLaunch` (0), `Launched` (1), `Burnout` (2), `Noseover` (3), `DroguePrimaryEvent` (4), `DrogueBackupEvent` (5), `MainPrimaryEvent` (6), `MainBackupEvent` (7), `Landed` (8). |
+| `lat`, `lon` | GPS position the locator sent, in degrees. |
+| `agl_m` | **Barometric** altitude above ground, meters — the same measurement as `raw_baro_agl_m` in the locator's export. |
+| `vel_n_ms`, `vel_e_ms` | GPS ground velocity north / east, m/s. |
+| `vel_d_ms` | Vertical speed, m/s, **positive downward** — so a climbing rocket shows a *negative* number. It comes from the **barometer**, not GPS (unlike the two columns before it). |
+| `accel_x`, `accel_y`, `accel_z` | The locator's accelerometer, **in m/s²** — not in g as in the locator's own export. On-pad messages only. |
+| `gyro_x`, `gyro_y`, `gyro_z` | The locator's gyros, **in radians per second** — not degrees per second as in the locator's own export. On-pad messages only. |
+| `q_w`, `q_x`, `q_y`, `q_z` | The locator's orientation estimate, as a quaternion — the same quantity as `q_w`…`q_z` in §10.4. |
+| `satellites` | GPS satellites in use. |
+| `hacc_m` | How accurate the GPS thought its position was, meters (horizontal). |
+| `rssi_dbm` | **The receiver's measurement of that message:** signal strength in dBm. Less negative is stronger; around −120 dBm is the edge of reception. |
+| `snr_db` | Signal-to-noise ratio of that message, dB. LoRa still decodes somewhat below 0 dB, so a negative value is marginal, not fatal. |
+| `noise_floor_dbm` | How loud the channel was *between* messages, dBm — the background your signal has to rise above. Blank when the receiver had no measurement. |
+| `bad_frames` | Frames the receiver heard but could not decode since the previous row — another transmitter, or ours arriving damaged. |
+| `link_quality` | The app's verdict for that moment (§2.5): `Normal` — nothing to report; `Congested` — the channel is busy but our messages are still clean; `Interference` — loud messages arriving damaged, something is degrading the link. |
+| `armed` | 1 if the locator reported itself armed, 0 if not. |
+| `deploy_armed_mask`, `deploy_fired_mask` | Meant to show, one bit per channel (1 = channel 1, 2 = channel 2, 4 = channel 3, 8 = channel 4), which channels had continuity and which had fired. ⚠️ **Do not rely on these yet** — the app reads the wrong bits from the locator's message, so they do not mean what their names say ([#52](https://github.com/fschroer/steam-pigeon-locator/issues/52)). |
+| `drogue_detected`, `main_detected` | 1 once the locator has *inferred* from the descent rate that that parachute is working. An inference, not a measurement: it can be set with no working parachute at all ([#54](https://github.com/fschroer/steam-pigeon-locator/issues/54)). |
+| `pad_alert` | The not-armed alert (§6.6): `Quiet`, `Alerting`, or `Snoozed`. On-pad messages only. |
+| `locator_batt_mv`, `receiver_batt_mv` | Battery voltages, millivolts. **Blank on an armed flight — see below.** |
+| `receiver_channel` | The LoRa channel the receiver was on. |
+| `locator_id` | Which locator sent the message: its unique ID, written as a plain decimal number. |
+
+**Row sources** (`source`):
+
+| Value | What the row is |
+|---|---|
+| `prelaunch` | The locator's on-pad message, sent about once a second while it is **disarmed**. Carries the accelerometer, gyros, batteries and pad alert, but no velocity or orientation. |
+| `telemetry` | The locator's flight message, sent about once a second once it is **armed**. Carries the flight state, velocity and orientation, but none of the on-pad fields. |
+| `receiver_info` | The **receiver's** own report of the channel. The app asks for one every couple of seconds once the locator has been silent for about 5 seconds. Only the radio columns and `receiver_channel` are filled in. |
+| `app` | Something the app did or decided — see the next table. |
+
+**App events** (`event`, on `app` rows):
+
+| Event | Meaning |
+|---|---|
+| `session_opened` | The first row of every file: which locator and receiver, the app version, and the last battery readings heard before launch (see below). |
+| `session_closed` | The last row: why the log stopped (`detail` says which of the reasons in the list above). |
+| `launch_detected` | The rocket left the pad. The file is named for this moment. |
+| `flight_state_changed` | The locator moved to a new flight state, e.g. `Burnout -> DroguePrimaryEvent`. With about one message a second, fast states in between are often never seen. |
+| `landing_detected` | The locator reported *Landed*. Does **not** end the log. |
+| `announcement` | Something the app said out loud; `detail` is the exact text. |
+| `link_quality_changed` | The `link_quality` verdict changed, e.g. `Normal -> Congested`. |
+| `connection_changed` | The phone's Bluetooth link to the receiver went up or down. A gap in the rows with this nearby is the phone, not the rocket. |
+| `armed_state_changed` | The locator was armed or disarmed. Disarming also closes the log. |
+| `receiver_channel_changed` | The receiver's channel changed; closes the log. ⚠️ On current app versions this can appear **spuriously** as `0 -> N` when the app hears the receiver's channel for the first time, and close the log early ([#51](https://github.com/fschroer/steam-pigeon-locator/issues/51)). |
+| `locator_changed` | The app switched to a different locator; closes the log. |
 
 ⚡ **The battery columns are blank on an armed flight, and that is not a fault.** Battery levels ride only on the locator's on-pad message, and the locator stops sending that the moment you arm it — so a log, which begins two seconds before launch, never contains one. **Read the batteries off the `session_opened` row instead:** it carries `locator_batt_mv`, `receiver_batt_mv` and `batt_age_s`, the last reading heard before arming and how long before the launch it arrived. If the app was started after the rocket was already armed it never heard one at all, and that row says `batteries=unknown` rather than guessing.
 
@@ -1532,17 +1623,17 @@ The same applies to the accelerometer, gyro and `pad_alert` columns: those also 
 | Continuity on a channel set to `Unused` | Mis-wired, or the mode is wrong (§4.6). |
 | Deployment Test isn't in the menu | It only appears while the locator is **armed** (§3.5). |
 | Can't stop a deployment test countdown | Press the red **STOP TEST** button below the countdown; leaving the screen sends the same cancel. It is a radio message and can be lost: while one is outstanding the button reads **STOPPING…** and the count keeps ticking until the locator honors it. Press again, and treat the charge as live until the countdown clears (§3.5). |
-| STOP TEST is greyed out | No test is running as far as the app knows. If the locator's LED is still blinking red, the app has lost the link — the countdown is not reaching it, and the cancel would not reach the locator either. |
+| STOP TEST is grayed out | No test is running as far as the app knows. If the locator's LED is still blinking red, the app has lost the link — the countdown is not reaching it, and the cancel would not reach the locator either. |
 | A deployment test counted down but the channel never fired | First check you are measuring the channel you tested — the terminal blocks are numbered 1–4 and it is an easy one to get wrong. Then connect USB-C, press `p` for the pin trace (Appendix D), and run the test again. `cmd DARM=1 D`*n*`=1` with your meter reading nothing puts the fault in the hardware; anything else puts it in the locator's firmware and is worth reporting. The channel is live for **1 second**, so a meter may miss it where a scope will not. |
 | Locator Settings / Flight Profiles aren't in the menu | They only appear while the locator is powered, in range, and **disarmed**, or while it is sending you a flight record in the background (§2.1, §10.1). |
 | Ready-beep never starts after arming | Flight memory full (§3.6) or battery too low. Longest when re-arming after a completed flight. **Don't launch** (§7.4). |
 | Locator is playing a repeating *descending* double-beep | It is not armed and it thinks it's on the pad (§6.6). Arm it, lay the rocket down, or snooze the alert. Do not tape over the buzzer. |
 | That alert won't sound even though the rocket is standing there disarmed | Most likely *Sensor Axis Along Rocket* names the wrong axis for this build — the default X is right only if X runs along the tube, and a wrong axis makes an upright rocket read as lying down (§1.7). Check it with the console's `m` key. **Auto** disables the alert entirely. Otherwise: no channel shows continuity, or the rocket is more than ~35° off vertical (§6.6). |
-| Snooze button isn't there | It only appears while the alert is actually sounding, and only in the expanded top status panel — which closes itself after a few seconds, so expand and press in one motion. Greyed out means you're at the 15-minute ceiling (§6.6). |
+| Snooze button isn't there | It only appears while the alert is actually sounding, and only in the expanded top status panel — which closes itself after a few seconds, so expand and press in one motion. Grayed out means you're at the 15-minute ceiling (§6.6). |
 | Alert came back before the snooze looked expired | Powering the locator off clears the snooze — it deliberately fails toward the alert (§6.6). |
 | A flight recorded but nothing deployed | Check the `armed` column in the CSV (§10.4) or the arm state on the profile. A disarmed locator records and beacons in full and fires nothing (§7.1). |
 | Landed beacon won't stop, and a second flight didn't record | The previous flight was flown disarmed. Arm or power-cycle to clear the Landed state (§7.1, §9.7). |
-| Rocket marker is grey | The link is fine; the locator's GPS fix isn't. The marker is showing the last good position (§8.3). |
+| Rocket marker is gray | The link is fine; the locator's GPS fix isn't. The marker is showing the last good position (§8.3). |
 | Battery gauge reads empty on a battery you know is charged | The gauge cannot tell a flat cell from a broken battery-sense circuit — both read empty. Before you replace the battery, check it over USB-C: press `v` at the console (disarmed). If the readings there don't respond at all, the fault is in the locator, not the battery, and it needs service (Appendix D). |
 | USB-C console shows nothing, or a screen of random characters | Baud mismatch — not a fault, and nothing is lost. Set your terminal to the rate you want and **hold Shift+U** for a second; the device will match you and say so. If nothing happens, the device is set *slower* than your terminal — step through the eight rates instead (Appendix D). |
 | Console text is garbled but **pastes correctly**, digits and CAPITALS readable | Not a baud problem at all. A stray control code has put your terminal into its line-drawing character set. **Reset the terminal.** Changing baud rate or power-cycling the device will not fix it (Appendix D). |
@@ -1735,7 +1826,7 @@ The cost of a slower rate is the CSV export (§10.4), which is the one thing on 
 
 The second case is easy to mistake for the first. Its tell is that **digits and CAPITAL letters look fine while lowercase letters turn into line-drawing symbols** — a terminal that has been switched into its line-drawing character set by a stray control code, which the random bytes of a real baud mismatch can produce by chance. Once you have reset the terminal it will not come back on its own.
 
-**The fix — hold down `U`.** Set your terminal to the rate **you** want, 8-N-1, then hold Shift+U for a second or two. The device recognises the stream, measures your rate from it, and matches you, replying:
+**The fix — hold down `U`.** Set your terminal to the rate **you** want, 8-N-1, then hold Shift+U for a second or two. The device recognizes the stream, measures your rate from it, and matches you, replying:
 
 ```
 DIAG|BAUD: detected 115200 - saved
@@ -1769,7 +1860,7 @@ Nothing is lost and nothing is broken while you are hunting; a device at the wro
 [search] restored channel 0
 ```
 
-A zero id means nothing decoded on that channel. `done status` is 1 for a completed run, 2 for a refusal (armed or in flight), 3 for busy, 4 for cancelled.
+A zero id means nothing decoded on that channel. `done status` is 1 for a completed run, 2 for a refusal (armed or in flight), 3 for busy, 4 for canceled.
 
 **Channel scan trace (receiver only).** While a channel scan is running (§2.5), the receiver prints a trace to its console. Nothing needs to be enabled — a scan is a deliberate, one-off action, so there is no background chatter. It is there so a scan that misbehaves can be diagnosed directly instead of by guesswork:
 
@@ -1899,6 +1990,15 @@ Puts the device into firmware-update mode. It will not work again until it is re
 | **LoRa** | The long-range radio link between the locator and the receiver. |
 | **LoRa channel** | Which frequency the link uses, 0–63. Both ends must match. |
 | **RSSI** | Received signal strength — how strong the radio link is. |
+| **dBm** | The unit RSSI and noise floor are measured in: decibels relative to one milliwatt. Always negative here; **less negative is stronger** (−80 dBm is a strong signal, −120 dBm is at the edge of reception). |
+| **SNR** | Signal-to-noise ratio — how far a message stood above the background noise, in dB. LoRa can still decode messages a little *below* the noise, so a small negative SNR is marginal rather than lost. |
+| **Noise floor** | How loud a radio channel is when nobody we care about is transmitting. A high (less negative) noise floor means something else is using the channel. |
+| **Horizontal accuracy** | The GPS's own estimate of how far off its position might be, in meters (`gps_h_acc_m`, `hacc_m`). A better guide than the fix type, but it can lag badly when the GPS loses track during a hard boost. |
+| **GPS fix** | Whether the GPS has worked out a position. A **3D fix** includes altitude; a **stale** fix is the last good position repeated after the GPS stopped reporting (§10.4). |
+| **Flight state** | Which stage of the flight the locator believes it is in — waiting, launched, burnout, apogee, each deployment event, landed. The numbered list is in §10.4. |
+| **Combined ("fused") solution** | An altitude and vertical-speed estimate that blends the barometer, accelerometers and GPS. Recorded for analysis only — deployments use the barometer alone — and currently unreliable; see §10.4 on `ekf_health`. |
+| **Quaternion** | Four numbers (`q_w`, `q_x`, `q_y`, `q_z`) that together describe which way the rocket is pointing. Mostly useful to plotting software; `tilt_deg` is the human-readable part. |
+| **PPS** | Pulse-per-second: a timing tick from the GPS that keeps the locator's clock accurate (`pps_status`, §10.4). |
 | **Telemetry** | Live data sent over the radio during a flight. |
 | **Archive / flight record** | The full-rate data recorded onboard. Much more detailed than telemetry, and unaffected by radio dropouts. |
 | **RSO / LCO** | Range Safety Officer / Launch Control Officer. |

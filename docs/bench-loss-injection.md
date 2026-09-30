@@ -110,7 +110,7 @@ of `kParityGroupSize`.
    4. ~5 s of nothing;
    5. **a two-channel search appears in the search section** — channel N with no hit,
       then the old channel with a hit carrying your locator's name, RSSI and SNR.
-      *This hit is what authorises the revert.* A revert without it is a bug;
+      *This hit is what authorizes the revert.* A revert without it is a bug;
    6. the receiver returns to the old channel and the link resumes;
    7. the retry goes out and is **not** dropped (`&` is one-shot);
    8. banner *"Now on channel N"*, both devices on N. **Criterion 2 passes.**

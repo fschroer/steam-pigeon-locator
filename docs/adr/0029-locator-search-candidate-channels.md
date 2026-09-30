@@ -23,7 +23,7 @@ The cost of looking is the constraint on everything below. A **disarmed** locato
 
 **1. A separate search, not a mode of the survey.** New receiver-directed message pair `LocatorSearchRequest` / `LocatorSearchResult` (MsgTypes 23/24; the locator reserves both and implements neither, as it does for 20/21). One sweep cannot answer both "where is it quiet" and "where is my locator", and sharing the state would let the shortlist rule silently decide which question was being answered.
 
-**2. Candidate channels first; the whole band only when the user asks.** The app builds the list from what it already knows: the target locator's last-heard channel first, then every other known locator's, then a channel a move was staged to but never confirmed, then channel 0 (the factory default per [ADR-0025](0025-lora-channel-plan-and-part-15-compliance.md), where a locator that lost its settings will be), then the receiver's current channel last. Four to six channels answers the usual case in seconds. The whole band is offered **only after a short run misses**, labelled with what it costs.
+**2. Candidate channels first; the whole band only when the user asks.** The app builds the list from what it already knows: the target locator's last-heard channel first, then every other known locator's, then a channel a move was staged to but never confirmed, then channel 0 (the factory default per [ADR-0025](0025-lora-channel-plan-and-part-15-compliance.md), where a locator that lost its settings will be), then the receiver's current channel last. Four to six channels answers the usual case in seconds. The whole band is offered **only after a short run misses**, labeled with what it costs.
 
 This required remembering something the app was throwing away: `KnownLocator.last_channel`, written whenever an authorized broadcast arrives. A receiver shared across several rockets has been tuned to each of them at some point, and that history is the entire reason the short list usually wins.
 
@@ -31,7 +31,7 @@ This required remembering something the app was throwing away: `KnownLocator.las
 
 **4. A named target stops the run early; no target makes it a census.** `target_locator_id` is the locator the user picked from their known list, and the receiver stops on the first frame carrying it — with its last-heard channel searched first, that is usually one dwell. With no target the run reports every hit on every listed channel, which is what finds a borrowed locator and what shows both rockets when two are powered.
 
-**5. Identity is carried and labelled as unauthenticated.** `confirmed_locator_id[5]` joins `ChannelSurveyResponse`, and the search result carries `locator_id` **plus `device_name`** — the id alone would report a borrowed locator as a bare hex number, and the name is what makes a hit readable. The receiver holds no password and still never inspects `auth_tag`; this is identity as **claimed**. It labels a channel and nothing else. Recognition happens the normal way ([ADR-0006](0006-locator-connect-password.md)) once the receiver is pointed at the channel and real broadcasts arrive.
+**5. Identity is carried and labeled as unauthenticated.** `confirmed_locator_id[5]` joins `ChannelSurveyResponse`, and the search result carries `locator_id` **plus `device_name`** — the id alone would report a borrowed locator as a bare hex number, and the name is what makes a hit readable. The receiver holds no password and still never inspects `auth_tag`; this is identity as **claimed**. It labels a channel and nothing else. Recognition happens the normal way ([ADR-0006](0006-locator-connect-password.md)) once the receiver is pointed at the channel and real broadcasts arrive.
 
 **6. A hit moves the receiver, never the locator.** The opposite of a survey pick. The survey moves the whole system because it found somewhere better to be ([ADR-0011](0011-locator-lora-channel-from-app.md) invariant 1); a search has just established that the locator is *already* on that channel, so moving it is the one action guaranteed to lose it again. The hit applies a receiver-only change (see *Choosing from a list acts* below; the first cut staged it instead, which was wrong).
 
@@ -41,11 +41,11 @@ Bench-driven. A locator on channel 57 was reported on channel 17 as well — 8 M
 
 Neither number decides alone — the artifact reads *strong*, so RSSI cannot separate it, and SNR can — which is why both are on the wire and both are on the row. They also answer the recovery question a found rocket raises: roughly how far away is it.
 
-**And the app says which hit it distrusts.** One locator cannot be on two channels, so every hit for a locator except its best is marked *· likely false hit*, ranked by `rssi + snr`. Flagged rather than hidden: the reading is real and it is the *channel attribution* that is doubtful, and the numbers beside it are what let the user check the judgement. **Validated on hardware 2026-08-28** — the flagged channel was the one that disappears when the locator is moved 15–20 ft away, so the ordering picks the real channel rather than the artifact.
+**And the app says which hit it distrusts.** One locator cannot be on two channels, so every hit for a locator except its best is marked *· likely false hit*, ranked by `rssi + snr`. Flagged rather than hidden: the reading is real and it is the *channel attribution* that is doubtful, and the numbers beside it are what let the user check the judgment. **Validated on hardware 2026-08-28** — the flagged channel was the one that disappears when the locator is moved 15–20 ft away, so the ordering picks the real channel rather than the artifact.
 
 That work also exposed a bug worth recording, because it is the mistake identity-based reasoning invites: with *Connected* gated on `locator_id` alone, **every** row for one locator read Connected, since a near-field locator's several hits all carry the same id — leaving a user parked on the false channel no way to reach the real one. A row is about a channel, so the test is now channel **and** identity (`Hit.connectedOn`). Channel alone had been wrong too, for the opposite reason: tuned is not connected while an [ADR-0006](0006-locator-connect-password.md) challenge is outstanding.
 
-An earlier comment in `LocatorSearch.kt` claimed ADR-0019 forbade displaying this. It does not: that rule governs the survey's uncalibrated **channel level** near the noise floor, not a decoded packet's RSSI, which the status panel has displayed all along. The hit row now uses the same format and the same colour scales.
+An earlier comment in `LocatorSearch.kt` claimed ADR-0019 forbade displaying this. It does not: that rule governs the survey's uncalibrated **channel level** near the noise floor, not a decoded packet's RSSI, which the status panel has displayed all along. The hit row now uses the same format and the same color scales.
 
 **7. The armed/in-flight refusal is enforced in the receiver, at the start of a run.** Same gate as the survey and against a worse version of the same hazard: a survey is ~8 s of deafness, a whole-band run is up to ~90 s.
 
@@ -97,7 +97,7 @@ It also retired a documented UX wart: the receiver's channel and the locator's c
 
 **Superseded 2026-09-04: one field and a chain, on the same reasoning.** The two buttons were right that the difference between the devices must not be hidden, and wrong that two fields were how to show it. The fields hold the **same number** in every case where nothing is broken — the receiver follows the locator — so "change the channel" opened by choosing between two identical numbers, and the label the paragraph above is pleased to have disambiguated was disambiguating a control the user had no way to choose between on any other grounds.
 
-The receiver-channel field keeps its Update button and gains a chain icon beside it. Open (grey), Update points the receiver, exactly as before. Closed, Update moves the connected locator and the receiver follows — **still one message**, never both, per ADR-0011 invariant 1. The chain is greyed with no locator connected, since a locator-directed command (ADR-0020) then has nothing to address.
+The receiver-channel field keeps its Update button and gains a chain icon beside it. Open (gray), Update points the receiver, exactly as before. Closed, Update moves the connected locator and the receiver follows — **still one message**, never both, per ADR-0011 invariant 1. The chain is grayed with no locator connected, since a locator-directed command (ADR-0020) then has nothing to address.
 
 Nothing the two buttons showed is lost: the chain's state selects the field's label, the help paragraph, the severity of the occupancy note, and **which device's message state drives the button** — so a locator move that is never acknowledged still says so under this button, and a receiver change is still confirmed from the device's own read-back. One thing had to be got right on the way: chained, the comparison that enables Update is against the **locator's** channel, not the receiver's. Against the receiver's it would go dead in the one case most worth having it, the two devices split by a failed move, where the receiver is already on the number in the field and the locator is not.
 
@@ -105,9 +105,9 @@ This is **not** ADR-0011's rejected "locator channel as the single source of tru
 
 **The two fields could never show a split, and nobody had noticed (2026-09-04).** Removing them raised the obvious objection — two numbers side by side were how you saw the receiver and the locator drift apart — and the objection turns out to be false, which is worth recording because it was believed on both sides of the change. `remoteLocatorConfig.loraChannel` is assigned from `PreLaunchData.receiverChannel`: the **receiver's own stamp** on the frame it relayed, used deliberately ("a received PreLaunchData proves the locator and receiver share a channel") so that a channel move can be confirmed by whole-object equality. The Locator channel field was therefore displaying the receiver's channel under another name, and the two fields were equal by construction whenever both held live values. The state where they genuinely differ is the state where nothing is arriving to populate one of them — at which point ADR-0011's release rule blanks it and the section goes away.
 
-So the replacement is not a like-for-like: the screen now carries a **channel-agreement indicator** that states only what the app can prove. Green means a broadcast from the connected locator is arriving, and hearing it *is* sharing a channel. Red is tied to `ChannelMove.Verdict`, and only to `NoEvidence` and `NotChecked` — the two endings where the receiver followed and where the locator went is what nobody knows. `LocatorStayed` is deliberately not red: there the receiver was put back and both devices are on the old channel together, so silence after it is a range problem, and colouring it red would blame the wrong thing. Nothing is shown while a move is still running, or when the locator is simply unheard with no move behind it — a red there would be a guess dressed as a measurement, and *Find a locator* is the honest answer to it.
+So the replacement is not a like-for-like: the screen now carries a **channel-agreement indicator** that states only what the app can prove. Green means a broadcast from the connected locator is arriving, and hearing it *is* sharing a channel. Red is tied to `ChannelMove.Verdict`, and only to `NoEvidence` and `NotChecked` — the two endings where the receiver followed and where the locator went is what nobody knows. `LocatorStayed` is deliberately not red: there the receiver was put back and both devices are on the old channel together, so silence after it is a range problem, and coloring it red would blame the wrong thing. Nothing is shown while a move is still running, or when the locator is simply unheard with no move behind it — a red there would be a guess dressed as a measurement, and *Find a locator* is the honest answer to it.
 
-**The occupancy hint next to the manual field had to exclude by identity, not by channel (fixed 2026-08-25).** Shipped, it warned *"Twist 0 is on channel 34 — moving here would put two locators on one channel"* while sitting on 34 with Twist 0 connected: it fired with no move staged, and it counted the user's own rocket as the collision. Two fixes. The hint is a claim about a *move*, so it only renders when a change is staged. And the occupant is now filtered on **who** rather than **where**: `ChannelSurvey.Result.occupied` drops the home channel wholesale, which was the closest ADR-0019 could get when the sweep reported a count and no id, but it is lossy in both directions — it hides a genuine neighbour on your channel, and it does not help at all on the search path. Decision 5's `locator_id` is what makes the direct question askable, so the rule reads `confirmed` and excludes the connected locator by id. A locator reporting no id resolves to no name and so to no warning; naming nobody is a warning with nothing in it.
+**The occupancy hint next to the manual field had to exclude by identity, not by channel (fixed 2026-08-25).** Shipped, it warned *"Twist 0 is on channel 34 — moving here would put two locators on one channel"* while sitting on 34 with Twist 0 connected: it fired with no move staged, and it counted the user's own rocket as the collision. Two fixes. The hint is a claim about a *move*, so it only renders when a change is staged. And the occupant is now filtered on **who** rather than **where**: `ChannelSurvey.Result.occupied` drops the home channel wholesale, which was the closest ADR-0019 could get when the sweep reported a count and no id, but it is lossy in both directions — it hides a genuine neighbor on your channel, and it does not help at all on the search path. Decision 5's `locator_id` is what makes the direct question askable, so the rule reads `confirmed` and excludes the connected locator by id. A locator reporting no id resolves to no name and so to no warning; naming nobody is a warning with nothing in it.
 
 The logic moved out of the composable into `ChannelOccupancy` with its own tests, because the same distinction had then been got wrong twice in two different ways.
 
@@ -121,7 +121,7 @@ The rule is now the nature of the gesture, not the device it targets. A channel 
 
 Applying immediately is safe here for a reason worth stating: the receiver-only change still arms ADR-0011's recognition first, so pointing at an unknown locator raises the password challenge and a channel with nothing on it reverts. Nothing is bypassed; the confirmation simply happens where it belongs, against what actually arrives on the new channel, rather than as a second button press before anything is known.
 
-ADR-0019's staging rule is **not** overturned. It applies to a survey pick that moves the *locator*, which is a different and less reversible act. What was wrong was generalising it to a receiver-only change.
+ADR-0019's staging rule is **not** overturned. It applies to a survey pick that moves the *locator*, which is a different and less reversible act. What was wrong was generalizing it to a receiver-only change.
 
 All three receiver-channel call sites — the search's pick, the survey's pick with no locator connected, and the manual field's Update — now go through one `pointReceiverAtChannel`. They were three copies of the same four steps, which is how one of them came to behave differently from the other two without anyone deciding that it should.
 
@@ -161,7 +161,7 @@ That case is far more reachable than it looks, and the reason is in the receiver
 
 One trap for anyone re-deriving the fix: both ports `return` from inside the search branch, so making it yield *nothing* would skip the survey fallback entirely and answer "nobody knows" over the top of a name the app already holds — worse than the `00000000` it replaces. It falls through instead.
 
-**A hit the run itself distrusts is not an occupant.** Decision 8 flags all but the best hit for a locator as *· likely false hit*, and the occupancy hint beside the channel fields did not consult that judgement. So the near-field artifact — a locator on 57 reported on 17 — was announced as the occupant of a free channel, **in red**, under the words *"moving here would put two locators on one channel"*, while the hit row three inches above flagged the very same reading as probably false. The screen contradicted itself and talked the user out of a channel that was fine. `ChannelOccupancy` now excludes suspect channels; since the firmware reports at most one hit per channel per run, dropping it leaves the channel to the survey rather than to a second hit.
+**A hit the run itself distrusts is not an occupant.** Decision 8 flags all but the best hit for a locator as *· likely false hit*, and the occupancy hint beside the channel fields did not consult that judgment. So the near-field artifact — a locator on 57 reported on 17 — was announced as the occupant of a free channel, **in red**, under the words *"moving here would put two locators on one channel"*, while the hit row three inches above flagged the very same reading as probably false. The screen contradicted itself and talked the user out of a channel that was fine. `ChannelOccupancy` now excludes suspect channels; since the firmware reports at most one hit per channel per run, dropping it leaves the channel to the survey rather than to a second hit.
 
 This is decision 8's caveat reaching further than decision 8 did. The rule to carry: **anywhere the app acts on a hit, it must ask the same question the hit row asks — is this attribution trustworthy — and not only where the hits are listed.**
 
@@ -240,13 +240,13 @@ change wants a run against the four-locator bench that produced the report.
 
 fschroer, running bench 4: the receiver's armed/in-flight refusal was reachable only by
 pressing a scan button whose one possible outcome was a refusal. Both scan buttons are now
-greyed while the locator is armed or flying, with the reason on screen above them.
+grayed while the locator is armed or flying, with the reason on screen above them.
 
 **The app-side gate mirrors the receiver's condition exactly** — armed, or a flight state
 that is neither `WaitingLaunch` nor `Landed` — rather than reusing the flight map's
 `isInFlight`, which counts `Landed` as flying. The receiver excludes `Landed` deliberately,
 so a rocket on the ground is refused for being *armed* and not for flying; disabling on a
-stricter rule would have greyed out a scan the receiver would have run.
+stricter rule would have grayed out a scan the receiver would have run.
 
 **It is an affordance, not enforcement.** The receiver's gate is unchanged and remains the
 real one — app-side gating is soft ([ADR-0006](0006-locator-connect-password.md) Decision 5)
@@ -255,7 +255,7 @@ real one — app-side gating is soft ([ADR-0006](0006-locator-connect-password.m
 **The armed flag deliberately does not expire — decided 2026-08-30 (fschroer).**
 `locator_armed_` is assigned only from received broadcasts and nothing clears it on silence,
 so a locator that arms and then goes out of range leaves the receiver refusing both scans
-indefinitely. **That is the wanted behaviour: once the connected locator is armed, the
+indefinitely. **That is the wanted behavior: once the connected locator is armed, the
 system locks in on it.**
 
 Raised as an open question because it looks like it blocks the recovery case, and it does
@@ -326,7 +326,7 @@ pressing again works.
 anything is queued for the locator — right for a command that *arrives* during a run, and
 wrong for one that was **already waiting** when the run started. Such a message is not the
 operator asking for the sweep to stop; it is a message that has not reached its forwarding
-window yet. The run was therefore cancelled on its very first service pass, before a single
+window yet. The run was therefore canceled on its very first service pass, before a single
 channel was dwelt, and the app rendered the `Cancelled` terminator with the text written
 for a deliberate abort — *"If you did not stop it, a command you sent to the locator did"* —
 which was, ironically, true and useless.
@@ -340,7 +340,7 @@ The app meanwhile re-enables its button on the terminator, which arrives immedia
 "beat" the user waits is that broadcast.
 
 **`BeginLocatorSearch` and `BeginChannelSurvey` now refuse to start while
-`pending_tx_.ready`**, rather than starting and being cancelled. Refusing rather than
+`pending_tx_.ready`**, rather than starting and being canceled. Refusing rather than
 deferring is the point: the operator's command keeps its place at the front and goes out at
 the next window, instead of waiting out a run that can be 90 s long — which is the hazard
 decision 7 exists to prevent, and which "just ignore the pre-existing message" would have
@@ -370,10 +370,10 @@ more than the 5 s of silence that edge is measured against — so *every scan lo
 matter makes the app queue a `VersionRequest` about a second after it ends*. Start another
 scan inside that window and the abort fires on housekeeping. The user is then told
 *"a command you sent to the locator did"* about a message they never sent, generated by the
-gap the previous scan created. A self-sustaining loop of the app cancelling its own scans.
+gap the previous scan created. A self-sustaining loop of the app canceling its own scans.
 
 **Only an operator command ends a sweep, and only an operator command stops one starting.**
-`IsOperatorCommand` — a blacklist, so an unrecognised or newly added message still ends the
+`IsOperatorCommand` — a blacklist, so an unrecognized or newly added message still ends the
 sweep and fails toward the operator. `VersionRequest` is its only entry today, and anything
 added must be something the app sends on its own initiative rather than something a person
 asked for. The safety property is untouched: Arm, Disarm, a config change, a deployment
@@ -392,7 +392,7 @@ nothing about this was reachable from a unit test.
 
 **Radio and settings on different channels, and nothing downstream could tell.** Both `ReceiverInfo` and the `receiver_lora_channel` stamped on every relayed frame are read from the settings, never the live radio, so the app was confidently wrong about where its own receiver pointed. Seven unrelated-looking symptoms came out of that one split, including two that read as separate bugs: messages still arriving (from the *original* locator, on the channel the radio was really on) and a conflicting-traffic banner that was firing **correctly** while everything around it was wrong.
 
-Both scans now end on a receiver channel change, then apply it. Deferring was rejected for the reason decision 7 gives: a whole-band run is up to ~90 s, and a tap that silently does nothing for that long is the failure this screen was reorganised to eliminate. The restore trace prints the home channel **and** the persisted setting together, because a mismatch between them is the bug and printing either alone could not show it.
+Both scans now end on a receiver channel change, then apply it. Deferring was rejected for the reason decision 7 gives: a whole-band run is up to ~90 s, and a tap that silently does nothing for that long is the failure this screen was reorganized to eliminate. The restore trace prints the home channel **and** the persisted setting together, because a mismatch between them is the bug and printing either alone could not show it.
 
 ## Alternatives considered
 

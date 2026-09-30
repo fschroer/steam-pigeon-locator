@@ -115,7 +115,7 @@ needs only two things:
 Nothing else gates it. In a coasting airframe `kApogeeMaxThrustG = 1.3 g`
 inhibits apogee under thrust, but by this point the synthetic pulse is long over
 and the locator is sitting at 1 g — so **the gate is wide open**. Take the vacuum
-off for half a second and the reading retreats a couple of metres; that is a
+off for half a second and the reading retreats a couple of meters; that is a
 textbook apogee and the detector will take it. Correctly.
 
 ### Worked example — bench flight 2026-09-01 134123
@@ -160,7 +160,7 @@ which un-stages the harness and drops the pyro bus) and start again.
 
 Worth being explicit, because the record looks alarming: the detector did exactly
 what it is specified to do, on an input that genuinely met its criteria. The
-real-flight analogue — a transonic shock artefact reading as descent — occurs
+real-flight analog — a transonic shock artifact reading as descent — occurs
 **under thrust**, which the 1.3 g ceiling already inhibits. A coasting rocket does
 not produce half a second of sustained 1 m/s descent before apogee. Do not
 "fix" this by tightening the apogee window; that would move it outside
@@ -194,7 +194,7 @@ are live inside a sealed pressure vessel.**
 > metering the channels or watching the LEDs.
 
 [ADR-0027](adr/0027-deployment-test-is-app-only.md) removed the console
-deployment test because a wired firing path puts the operator's hand a metre from
+deployment test because a wired firing path puts the operator's hand a meter from
 the e-match. A vacuum chamber is worse: a sealed vessel under pressure
 differential. The mitigation is not distance — it is **that there is nothing to
 fire.**
@@ -229,7 +229,7 @@ bar, where launch is declared by the dual-sensor path at the same instant the
 harness triggers. Launch still happens; the cost is ~300 ms of overwritten accel
 in the record and a slightly delayed burnout.
 
-That is a real property worth having, but it is **not** a licence to fly the flag.
+That is a real property worth having, but it is **not** a license to fly the flag.
 Default 0, asserted 0 by `check-bench-flags.sh`, announced by `?`, and a locator
 that has been in the chamber gets **reflashed from a clean build before it
 flies** — already the standing rule for `SP_LOSS_INJECT`.
@@ -309,7 +309,7 @@ almost always one of those two, not a detector.
 4. **Arm from the app.** The harness stages; nothing has happened yet.
 5. **Apply the vacuum** and take it up into the band the arm line named,
    **without pausing**. Launch declares as it crosses the trigger; burnout
-   ~450 ms later. A few hundred metres is plenty — a shop vac held over the lid
+   ~450 ms later. A few hundred meters is plenty — a shop vac held over the lid
    hole will pass the trigger in the first second or two. ⚠️ **If the climb
    stalls for even half a second the locator will declare apogee** — see
    "Do not pause the climb" above. Abandon the run and restart rather than
@@ -335,7 +335,7 @@ one anyway:
   keeps reading the real ~1 g. A genuine 2 g boost moves both. This is the
   reliable tell, and it costs no format change.
 - **The pulse is a 300 ms rectangle at exactly 2.0 g.** No motor does that.
-- **The flight starts at tens of metres AGL** rather than 0, per the offset above.
+- **The flight starts at tens of meters AGL** rather than 0, per the offset above.
 
 Beyond the pulse every column is real, which is the point.
 
@@ -349,7 +349,7 @@ Beyond the pulse every column is real, which is the point.
   telemetry packet at the state change — up to ~1.5 s after the true peak. On
   2026-09-01 134309 it said *"Apogee, 1710 meters"* where the peak was **1937 m**,
   because the chamber was descending at 121 m/s by then. Harmless in flight
-  (vertical speed near apogee is ~0, so the gap is metres); badly wrong here. The
+  (vertical speed near apogee is ~0, so the gap is meters); badly wrong here. The
   locator archives the true `MaxAltitudeM` — trust the record, not the callout.
 - **Physical drogue/main detections mean nothing in a chamber.** There is no
   canopy; the velocity-change test just catches the ambient rate change. On

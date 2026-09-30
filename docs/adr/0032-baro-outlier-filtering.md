@@ -36,16 +36,16 @@ the flat plateau that latched `SelectDeployVspeed` for 213 s.
 
 Swept over the **2026 (MS5611) flight archive** — earlier years used a BMP280 and
 are not comparable hardware. 20 recordings; **3 excluded as data-integrity
-failures, not sensor behaviour** (see Consequences); **17 analysed**.
+failures, not sensor behavior** (see Consequences); **17 analyzed**.
 
-**Outlier population** (deviation > 8 m from a centred median-7):
+**Outlier population** (deviation > 8 m from a centered median-7):
 
 - **78 events.** By phase: **descent 50 (64 %)**, ascent 17, coast 11.
 - Amplitude: median 44 m, p90 163 m, max 214 m. Descent only: median 35 m, p90
   119 m, max 214 m.
 - Duration: 38 one-sample, 21 two, 15 three, 3 four, 1 five.
 
-**The multi-sample events are mostly artefacts of the IIR itself.** The IIR is
+**The multi-sample events are mostly artifacts of the IIR itself.** The IIR is
 exactly invertible (`x[n] = 4y[n] − 3y[n−1]`), so the pre-filter signal can be
 recovered from the archive. Doing so exposes **188 pre-IIR events, predominantly
 single-sample**, and the smearing is visible directly in the raw context of every
@@ -118,7 +118,7 @@ airframe exists.
 6. **The jerk bound is rejected.** It accumulates offset (98 m RMS over static
    stretches): a bounded double integrator with no correction term drifts.
 
-7. **The ADR-0003 ladder remains the last line of defence.** 25 events still
+7. **The ADR-0003 ladder remains the last line of defense.** 25 events still
    survive this chain; filtering reduces the problem, it does not remove it.
 
 ## Consequences
@@ -136,9 +136,9 @@ events are on descent, and 25 survive the new chain. This is the case to watch.
 
 **Three of twenty 2026 recordings are corrupt loads, not noisy sensors.** The
 `Mod Black Dual Deploy` record jumps to 20 km and back every ~70 samples;
-`Frank Tomach ... Bad Data Load` is already labelled; and **`Shane Swizzle Stick
+`Frank Tomach ... Bad Data Load` is already labeled; and **`Shane Swizzle Stick
 2026-08-02` has 9,669 rows for 1,997 distinct timestamps — 4.8× duplication with
-14 backwards steps — and is not labelled.** That one is also cited by
+14 backwards steps — and is not labeled.** That one is also cited by
 [ADR-0018](0018-landing-detection-quiescence-window.md) as one of its three
 landing-validation flights, so its quoted 79-sample quiet run needs re-checking
 against a clean load. Tracked separately; **filtering is the wrong fix for a
@@ -173,13 +173,13 @@ shape. **Re-run `Tests/BaroFilter` and the offline sweep, and revisit, when:**
   ADR is most concerned with.
 - **Raw pressure logs become available.** The pre-IIR signal here is
   *reconstructed* by deconvolution — exact in principle, but it amplifies
-  quantisation noise ×4. Logging pre-filter pressure (even briefly, behind a
+  quantization noise ×4. Logging pre-filter pressure (even briefly, behind a
   bench flag) would let the ordering and window choices be confirmed directly
   rather than inferred.
 - **A descent-phase outlier survives the median-5 and reaches a deployment
   decision.** 25 events still get through; the question then is whether N should
   grow, or whether descent noise needs a different mechanism entirely.
-- **The residual events turn out to be sensor behaviour rather than transport
+- **The residual events turn out to be sensor behavior rather than transport
   corruption.** Given three of twenty recordings were corrupt loads, some
   fraction of what is counted here as "baro noise" may not be.
 - **A pyro-shock transient is ever observed lasting more than two samples**,
@@ -195,14 +195,14 @@ which is all of them, since the observed amplitudes are 8–214 m.
 **Keep the clamp as a backstop below the median.** Rejected: the clamp's failure
 mode is not "too tight", it is *structural* — it rewrites the sample pushed into
 the ring, so while saturated its internal state diverges from reality. A backstop
-that can silently desynchronise is not a backstop.
+that can silently desynchronize is not a backstop.
 
 **Hampel / MAD-scaled rejection.** See Decision 5.
 
 **An alpha-beta tracker with innovation gating.** The most capable option:
 reject against a *predicted* trajectory rather than a local statistic. Deferred,
 not rejected — it needs a policy call, since ADR-0005 retired the EKF and NFR-1
-speaks of proven sources, and a 2-state tracker sits in a grey area that deserves
+speaks of proven sources, and a 2-state tracker sits in a gray area that deserves
 its own decision rather than arriving as a filtering tweak.
 
 **Do nothing to the filters and rely on the ADR-0003 amendment.** That amendment
@@ -243,7 +243,7 @@ counted as baro noise and used to size the window. A rank filter **cannot** reje
 sustained oscillation; it is not an outlier. So some fraction of the descent population
 the sizing rests on is an airframe property that no window width would have removed, in
 the same way that [#42](https://github.com/fschroer/steam-pigeon-locator/issues/42)'s
-corrupt loads were not sensor behaviour either. **N = 5 is not wrong; the descent half of
+corrupt loads were not sensor behavior either. **N = 5 is not wrong; the descent half of
 its justification is weaker than it reads.**
 
 📋 **No change to the filter chain.** Nothing here argues for a different N or a

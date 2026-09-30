@@ -37,12 +37,29 @@ All system docs live **here**, under `docs/`. The other two repos carry only a s
   load-bearing, and reflected in `SteamPigeon_SystemSummary.md`. Don't edit the summary to
   contradict a decided issue without a new decision.
 
+## Spelling: US English, everywhere a person reads
+
+Write **US English** in docs, UI strings, spoken callouts and accessibility labels,
+code comments and commit messages, in all four repos. The users are US flyers reading
+at a launch site, and the manual is read alongside NAR rules.
+
+- `-ize` not `-ise` (initialize, recognize, analyze), `-or` not `-our` (color, behavior),
+  `-er` not `-re` (**meter**, center, fiber), single `-l-` (canceled, labeled, modeled),
+  and gray, judgment, acknowledgment, license (noun), defense, artifact, analog, math.
+- **Never respell identifiers**, API names, enum values, file names, quoted log output or
+  anything code depends on — `ChannelSurveyStatus.Cancelled`, a Swift `colour:` parameter
+  and the like stay as they are. A spelling fix must not be a rename.
+- Units stay SI: this is a spelling rule, not a units rule (`altitude_m`, `m/s` unchanged).
+
+All `.md` docs in the four repos were swept to US spelling on 2026-09-29. Keep them that
+way. A British form found later in prose is a bug to fix in passing.
+
 ## The `/sp-*` commands live in this repo
 
 `.claude/commands/` holds `sp-spec`, `sp-docs`, `sp-commit` and `sp-handoff`. They are
 **versioned here on purpose.** They encode rules this project learned the hard way — the
 docs gates, the cross-repo commit discipline, the secret scan — and while they sat in
-`~/.claude/commands/` those rules travelled with one machine rather than with the code.
+`~/.claude/commands/` those rules traveled with one machine rather than with the code.
 A rule that only exists on one laptop is not a rule the project has.
 
 They are Locator-rooted: run them from this repo, which is where `Scripts/sp-status.sh`

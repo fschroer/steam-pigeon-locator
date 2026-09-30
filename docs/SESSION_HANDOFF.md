@@ -108,12 +108,12 @@ a **genuine apogee by every criterion the detector has**, and it took it. It the
 straight to main in the *same cycle*, because `main_primary` fires on
 `deploy_agl <= 130` with **no descent term** and 117 m was already below the gate — hence
 `Apogee`/`Noseover`/`Drogue primary`/`Main primary` all stamped `5849` in that record.
-**Do not tighten the apogee window over this:** the real-flight analogue (transonic shock
+**Do not tighten the apogee window over this:** the real-flight analog (transonic shock
 reading as descent) happens *under thrust*, which the 1.3 g ceiling already inhibits.
 [bench-vacuum-sim.md](bench-vacuum-sim.md) now carries a "Do not pause the climb" section
 with the trace — that gap in the procedure doc is what cost the run.
 
-📋 **Two chamber artefacts worth knowing.** The app's spoken apogee is the AGL in the
+📋 **Two chamber artifacts worth knowing.** The app's spoken apogee is the AGL in the
 telemetry packet at the state change, **not the peak** — it said *"Apogee, 1710 meters"*
 where the peak was **1937 m**, because the chamber was descending at 121 m/s by then
 (harmless in flight, where vertical speed near apogee is ~0; the locator archives the true
@@ -123,7 +123,7 @@ there is no canopy, so the velocity-change test just catches the ambient rate ch
 ## 2026-08-31 (analysis) — baro filtering rebuilt from the 2026 archive: median-5 ahead of the IIR, ±200 m/s clamp REMOVED — [ADR-0032](adr/0032-baro-outlier-filtering.md), closes [#41](https://github.com/fschroer/steam-pigeon-locator/issues/41)
 
 Swept every 2026 (MS5611) recording — earlier years are BMP280 and not comparable hardware.
-**20 recordings, 3 excluded as corrupt loads, 17 analysed.**
+**20 recordings, 3 excluded as corrupt loads, 17 analyzed.**
 
 🔧 **The chain is now `median-5 on pressure → IIR(4) → altitude`, and `VelocityEstimator` filters
 nothing.** New `MedianFilter<N>` in `Rocket/Common/Inc` — HAL-free and header-only so it is
@@ -157,7 +157,7 @@ p90 119 m, max 214 m — confirming the descent noise observed on the bench.
 
 ❌ **Rejected:** raising `kMaxStepMps` (keeps a magnitude test; every observed spike is 8–214 m, so
 all of them slip under any usable ceiling); keeping the clamp as a backstop (its failure is
-structural — it rewrites the sample pushed INTO the ring and desynchronises silently); **Hampel**
+structural — it rewrites the sample pushed INTO the ring and desynchronizes silently); **Hampel**
 (underperforms a plain median — the MAD inflates during a clustered excursion and loosens its own
 threshold); a **jerk bound** (accumulates 98 m RMS offset). **No Mach lockout added** — per
 fschroer, spurious transonic descent signals occur *under thrust* for ~0.5 s, which
@@ -165,7 +165,7 @@ fschroer, spurious transonic descent signals occur *under thrust* for ~0.5 s, wh
 
 ⚠️ **3 of 20 recordings are corrupt LOADS, not noisy sensors — [#42](https://github.com/fschroer/steam-pigeon-locator/issues/42).**
 `Shane Swizzle Stick 2026-08-02` has **9,669 rows for 1,997 distinct timestamps** (4.8×
-duplication, 14 backwards steps) and is **not labelled as bad**. It alone contributed 206 of an
+duplication, 14 backwards steps) and is **not labeled as bad**. It alone contributed 206 of an
 initial 394 events and would have badly skewed the filter sizing. **It is also one of
 [ADR-0018](adr/0018-landing-detection-quiescence-window.md)'s three landing-validation flights** —
 its quoted 79-sample quiet run is nearer 16 true samples, which still clears the 13 lower bound but
@@ -258,7 +258,7 @@ enough) and to let it settle at ambient rather than snatching the seal off. Cont
 went to **1818 m at ~200 m/s** when the gates need ~150 m. A pump at constant volumetric rate decays
 pressure exponentially, which in ALTITUDE terms is an **accelerating** climb: 31 m/s at 5 s,
 92 at 6 s, 186 at 8 s, clipped by 9 s. My guidance said "take it ABOVE 150 m" and gave **no
-ceiling** — now it says climb to a few hundred metres, keep it under ~100 m/s, and close the
+ceiling** — now it says climb to a few hundred meters, keep it under ~100 m/s, and close the
 valve rather than leaving it open.
 
 🔧 **New diagnostic (`SP_VACUUM_SIM`).** The trace printed RAW baro, which looked healthy the whole
@@ -307,12 +307,12 @@ already covers #36's disarmed criteria.
 sits at AGL~0 so nothing triggers; real launch declares on the accel-only path within ~200 ms;
 Factory un-stages on the next cycle; the rocket reaches 30 m at ~1 s, ~750 ms after un-staging.
 **It never fires.** Only a weak motor that misses the 5 g bar reaches the injector, costing
-~300 ms of overwritten accel. This is *not* a licence to fly the flag — reflash clean, as with
+~300 ms of overwritten accel. This is *not* a license to fly the flag — reflash clean, as with
 `SP_LOSS_INJECT`.
 
 📋 **Reported altitudes are offset, and ADR-0018's "no AGL ceiling" is now load-bearing here.**
 The reference freezes at pulse start while lagging by `R x 2.5 s`, so the flight "launches" from
-tens of metres and **reported AGL goes negative** on venting back to ambient. Landing still
+tens of meters and **reported AGL goes negative** on venting back to ambient. Landing still
 detects only because [ADR-0018](adr/0018-landing-detection-quiescence-window.md) Decision 2
 refuses an absolute AGL gate. Re-introducing one would break chamber runs as well as uphill
 landing sites.
@@ -327,7 +327,7 @@ target; printed, not enforced.
 📋 **A sim record is NOT marked in the archive** (deliberate — no `ARCHIVE_VERSION` break for a
 bench-only concern). Three tells: the pulse is a **300 ms rectangle at exactly 2.0 g**; it injects
 the *selected* accel channel only, so `accel` and `accel_alt_cg` **disagree** where a real boost
-moves both; and the flight starts at tens of metres AGL. **Revisit if a sim record is ever
+moves both; and the flight starts at tens of meters AGL. **Revisit if a sim record is ever
 mistaken for flight evidence** — ADR-0018's window rests on three flights.
 
 ✅ **Run in a chamber three times since** (2026-08-31 `205322`, 2026-09-01 `134123`/`134309`); the last produced a complete correctly-sequenced flight. Superseded text follows. On the first run,
@@ -362,7 +362,7 @@ other direction, where `ServicePendingTx` ends a sweep for a queued operator com
 than letting it wait. A Connect tap is an operator command by every test that rule applies; it
 just arrives receiver-local over BLE instead of through `pending_tx_`, and so missed the guard.
 Deferring instead would leave a tap silently pending for up to ~90 s, which is the failure this
-screen was reorganised to eliminate.
+screen was reorganized to eliminate.
 
 **The app half is the part still open:** `canConnect` is gated on the receiver config state and
 not on `run.running`. Either let the tap through and be honest that it ends the scan, or refuse
@@ -392,12 +392,12 @@ the restore path against the config path and asking which one wrote last.
 **The first survey confirmation run showed the diagnostic itself was one step short** (receiver
 `265dce3`, and `65344ca` before it). The run was right — a survey `Cancelled` at 2030 ms with
 `restored channel / setting 55 55` — but **under the fix that line can only ever read old/old**,
-because the scan is cancelled *before* the new channel is assigned. It can show the split on a
+because the scan is canceled *before* the new channel is assigned. It can show the split on a
 buggy build and can never show where the receiver ended up on a fixed one. So `[cfg] channel
 applied N` now prints after the assignment; read the two lines together and the sequence is
 covered end to end.
 
-**And a bare `Cancelled` did not say what cancelled it.** Two causes look identical from
+**And a bare `Cancelled` did not say what canceled it.** Two causes look identical from
 outside — a queued operator command in `ServicePendingTx`, and a receiver channel change. Both
 sites now name themselves, carrying the msg_type and the requested channel respectively.
 
@@ -425,7 +425,7 @@ Every side effect goes through an `Ops` interface; the runner holds no state, no
 flows and no Android types. `RocketViewModel.channelMoveOps` supplies the live half: the
 search, the two BLE writes, the two waits, the clock.
 
-**This is a refactor of code bench-validated four passes ago, and it is behaviour-preserving
+**This is a refactor of code bench-validated four passes ago, and it is behavior-preserving
 by intent — a move, not a rewrite.** Verified by reading the original against the extraction
 step by step (probe order, refusal retry, `NoEvidence` re-probe, revert/relink/resend/confirm
 order, the second look, and the timestamp taken *before* the receiver is pointed), by compile
@@ -434,7 +434,7 @@ hardware against this build.
 
 **That re-run mattered for more than the refactor.** Criterion 2's earlier confirmations were
 all on `e399104`, and four commits had landed on the move path since: `ec6ff50` and `fe5064c`
-are **behaviour changes** (the refusal retry, the `NoEvidence` re-probe, the held banner, the
+are **behavior changes** (the refusal retry, the `NoEvidence` re-probe, the held banner, the
 message reading the receiver's actual channel), not just the two refactors. A green suite
 would not have covered those, because the tests drive a fake clock and a scripted probe.
 
@@ -478,7 +478,7 @@ ordering, timeouts, service calls — and that is where the next one will be.
 
 **`sp-docs` Gate 2 now names string resources** — and the commands are versioned in the repo
 as of 2026-08-30 (`.claude/commands/`, CLAUDE.md points at them). They had been in
-`~/.claude/commands/`, so every rule they encode travelled with one machine rather than with
+`~/.claude/commands/`, so every rule they encode traveled with one machine rather than with
 the code; the string-resources requirement was added and landed immediately in the least
 durable place in the system. Home copies removed, so there is one definition rather than two
 that can diverge. The Receiver (`96afaf3`) and app (`1dd3f62`) carry **pointer stubs** —
@@ -487,7 +487,7 @@ the definitions moved. Stubs rather than copies for the same reason the move hap
 all; `sp-commit` and `sp-handoff` act on this repo's own files and their stubs say to run
 them from here. The app's CLAUDE.md also names the one gate rule specific to it: **Gate 2
 covers `strings.xml`.** Three of the six defects were sentences left
-behind when behaviour changed under them, and the gate caught none of them because the manual
+behind when behavior changed under them, and the gate caught none of them because the manual
 and the summary were checked and `strings.xml` was not. The gate carries the rule and all
 three examples, and the Report section now asks explicitly whether the strings were opened.
 `~/.claude/commands/sp-docs.md` at the time, outside all four repos and **not covered by
@@ -522,13 +522,13 @@ while the locator is quiet — no reliance on the transmit receipt, whose absenc
 ambiguous against older receivers.
 
 **And "nothing moved" now says so, without alarm**, in ordinary text rather than error
-colour: *"The locator did not respond, so nothing was moved. The receiver is still on
+color: *"The locator did not respond, so nothing was moved. The receiver is still on
 channel N — power the locator up and the link should resume."* That is a much smaller
 problem than a stranded locator, and the user should not have to work out which one they
 have from a sentence describing the other.
 
 **The pattern across this whole amendment, worth carrying forward:** three of its defects
-were messages rather than logic. The behaviour was changed under sentences that were left
+were messages rather than logic. The behavior was changed under sentences that were left
 alone, twice, plus a banner whose outcome was legible for 2 s. The docs gate has a Gate 2
 for user-visible change and it did not catch any of them, because I checked the manual and
 the summary and never opened `strings.xml`. **Add string resources to Gate 2.**
@@ -645,7 +645,7 @@ to tell a gap the app created from a gap the world created.* Here it is one mess
 serving two purposes, and the app could not tell the receiver's spontaneous receipt from
 its own poll's reply. Expect a fifth.
 
-**A message that became false under a behaviour change.**
+**A message that became false under a behavior change.**
 `channel_move_not_acknowledged` said *"It has been left on its previous channel"* — true
 after an evidenced revert, false on `NoEvidence`, where the receiver is deliberately left
 on the **new** channel. Both endings share `NotAcknowledged` and leave the hardware in
@@ -719,14 +719,14 @@ ADR where this number does regulatory work.** Corrected there in full; the short
 ## 2026-08-30 (later) — ADR-0011's recovery created the split it repairs; now fixed — RECEIVER + ANDROID LAND, UNCOMMITTED, NOT BENCH-MEASURED, iOS OWES THE PORT
 
 Started as a question — *what happens if the locator switches channels but the
-acknowledgement is lost?* — read out of the three codebases, and ended as a fix in two of
+acknowledgment is lost?* — read out of the three codebases, and ended as a fix in two of
 them. **Nothing has been flashed or measured.** Written up as an addendum to
 [ADR-0011](adr/0011-locator-lora-channel-from-app.md) (Consequences, "Recovery fires on the
 absence of confirmation, not on evidence of failure") and added to
 [#20](https://github.com/fschroer/steam-pigeon-locator/issues/20#issuecomment-5471593049),
 which already held this path open as unvalidated.
 
-**The finding.** There is no acknowledgement message — invariant 3 confirms by inference, so
+**The finding.** There is no acknowledgment message — invariant 3 confirms by inference, so
 what can go missing is a *broadcast*. Invariant 4 fires on "no `PreLaunchData` carrying the
 new channel within 5 s", and that condition does not distinguish **the locator missed the
 command** (receiver moved, locator did not — split link, revert is correct) from
@@ -923,7 +923,7 @@ time. Four of them were owed to iOS and are now ported:
   and `WireLayoutTests.swift` now pins the 35-byte body field by field, so the third leg
   of the triad covers that message at all for the first time.
 - **`b209671` — naming a locator heard only while armed** was already on iOS (it was the
-  iOS-first behaviour Android implemented from the description). One asymmetry came back
+  iOS-first behavior Android implemented from the description). One asymmetry came back
   the other way: Android notes the name **before** its `mayConnect` check, so it names an
   authorized locator it declines to connect to. iOS noted it only on accept, which lost
   exactly the two-rocket case. Closed on iOS.
@@ -931,7 +931,7 @@ time. Four of them were owed to iOS and are now ported:
 Plus one defect reported off the phone: **the rocket icon on the map's status panel said
 nothing about being armed.** It was tinted by GPS fix quality, so armed and disarmed
 looked identical — and that glyph is the only thing on that screen reporting armed state,
-in colour alone. Now Android's rule value for value, including that the blink stops on
+in color alone. Now Android's rule value for value, including that the blink stops on
 the locator's own change of broadcast rather than running out a 2 s timeout.
 
 **Confirmed on hardware 2026-08-24 by fschroer:** a config change AND a channel move
@@ -973,7 +973,7 @@ place below.
 
 The flight map gained its whole camera model — Android's per-frame Kalman filter with
 latched anchors and deadbands, the gesture backoff, auto-zoom, track persistence and the
-landing freeze — plus the centre banner, the ADR-0021 pad alert with voice and haptics,
+landing freeze — plus the center banner, the ADR-0021 pad alert with voice and haptics,
 and the app's first working TTS. Then Receiver Settings (form, ADR-0019 channel survey,
 ADR-0011 channel move, ADR-0006 conflict banner) and Locator Settings, on top of parsers
 for the three receiver-sourced messages. The ADR-0019 polled noise floor now reaches the
@@ -983,7 +983,7 @@ available during locator silence.
 ### The lesson, and it cost the most
 
 **Every defect fschroer reported came from not reading the Kotlin before writing Swift**,
-in three flavours that do not look alike from the inside: assuming behaviour (three map
+in three flavours that do not look alike from the inside: assuming behavior (three map
 controls defaulting off against `mutableStateOf(true)`; a missing gesture backoff that
 surfaced as three unrelated-looking bugs), building to iOS idiom (settings screens as a
 SwiftUI `Form`, which renders as a list of labels with nothing editable), and drifting a
@@ -991,7 +991,7 @@ detail at a time (bold on five type styles — nothing in the Android app is bol
 one glyph).
 
 **ADR-0016 has been clarified as a result**: the sanctioned-departure list covers controls
-that look *broken* when imitated, not a general licence to prefer a more idiomatic
+that look *broken* when imitated, not a general license to prefer a more idiomatic
 control. The bar is to mirror Android's functionality **and** its UI — structure, widgets,
 wording, field order, type weights — and record any unavoidable departure in
 `UI_PARITY.md` with what would close it. Five exist today (2026-08-24).
@@ -1015,11 +1015,11 @@ wording, field order, type weights — and record any unavoidable departure in
    on arming), and `telemetry ?? prelaunch` latches the other way once a flight has
    happened (deployment continuity needed an app restart — and so did **position**).
    Android has neither bug because it merges both messages into one `rocketState`. The
-   three-way categorisation every broadcast field belongs to is in `UI_PARITY.md`.
+   three-way categorization every broadcast field belongs to is in `UI_PARITY.md`.
 
 ## 2026-08-19 session — iOS app built out to a working flight screen — COMMITTED + PUSHED, PARTLY HARDWARE-CONFIRMED (both bugs below are resolved by the 2026-08-20 session)
 
-App-side only; **no firmware changed**. The iOS app now connects, recognises and authenticates locators, decodes both broadcasts, and puts them on a live map with the panels, controls and menu. **Detail and resume instructions live in `steam-pigeon-ios/docs/NEXT_SESSION.md`** — this is the summary.
+App-side only; **no firmware changed**. The iOS app now connects, recognizes and authenticates locators, decodes both broadcasts, and puts them on a live map with the panels, controls and menu. **Detail and resume instructions live in `steam-pigeon-ios/docs/NEXT_SESSION.md`** — this is the summary.
 
 ### Two bugs reported here — both closed on 2026-08-20; read that section, not this one
 
@@ -1456,8 +1456,8 @@ The strapdown drives the orientation display correctly (pitch/roll/yaw track the
 The app's earlier run is the 3D flight-path work, `3cabbb3`..`7a4d48e` — curtain smoothing, one-second markers, an archived-path view, and two root-cause fixes (a duplicate-collector leak and a noise-driven riser bug). **Read the App repo bullet before touching the curtain**: three separate attempts at "smoothing" it were spent on the wrong variable, and the reasons are recorded there.
 
 - **`master` = this handoff commit** — **pushed; working tree deliberately dirty** (`SP_VACUUM_SIM = 1`, see above). Beneath it, newest first: **`e6d2e7e`** (docs(parity): the back-to-the-pad half is ported, not owed), **`57413de`** + **`98efbc0`** + **`2e7c135`** (the ADR-0033 serialized-BLE-writes set, from a parallel session), and **`1d25783`** (fix(rocket): **back to the pad on disarm** — [ADR-0021](adr/0021-arming-gates-pyro-only.md) amendment 2026-09-01). **`1d25783` is CONFIRMED ON HARDWARE by fschroer (2026-09-01):** a real flight, landed, disarmed — and the pre-launch information came back, which it could not do while the locator went on broadcasting `TelemetryData` until power-cycled. **Three things in it are NOT yet confirmed and each is worth a deliberate look:** (1) the **recovery beacon surviving the disarm** — it moved to its own `landed_beacon_` latch precisely so the reset would not silence it, and nothing has yet reported hearing it after a disarm; (2) the **`!landed_beacon_` guard on the Decision 5 alert**, which needs a recovered rocket stood upright with continuity on a channel; (3) the **deferred pad reset**, which only shows itself if a disarm beats the ~2 s post-landing sample tail and would otherwise strand an open record. Compile-verified in both `SP_VACUUM_SIM` configurations; no host suite covers `Factory.cpp`. Beneath that set, **`b0724ea`** (fix(nav): baro outlier filtering — median-5 on pressure ahead of the IIR and the ±200 m/s clamp removed — plus the `SelectDeployVspeed` permanent-latch fix, both found by the new `SP_VACUUM_SIM` vacuum-chamber harness; [ADR-0031](adr/0031-vacuum-chamber-flight-simulation.md), [ADR-0032](adr/0032-baro-outlier-filtering.md), the [ADR-0003](adr/0003-priority1-deployment-raw-baro.md) amendment, issues [#41](https://github.com/fschroer/steam-pigeon-locator/issues/41)/[#42](https://github.com/fschroer/steam-pigeon-locator/issues/42). Suites 100/636/48; **host-verified only — one bench chamber run, has not flown**), `ae341ff` (the ADR-0006 amendment recording the Android password field's keyboard configuration — counterpart to app `7472000`), `8c3e43f`, `8c73cf7` (ADR-0030 + manual §10.7 + the parity row for the app flight log), `e45955d`/`a568e3f`/`8f93e02` (the `/sp-*` commands versioned in this repo, pointer stubs in the satellites), `9ec6ba3` and `d6b063a` (#40 closed, all six criteria on hardware). **`b0724ea` (2026-08-31) is the newest firmware change**; everything between it and `e551970` is docs-only. An earlier handoff commit beneath them carries the [ADR-0011](adr/0011-locator-lora-channel-from-app.md) addendum and amendment, the [ADR-0025](adr/0025-lora-channel-plan-and-part-15-compliance.md) occupancy correction, the ADR-0029 qualification, the summary's corrected recovery sentence and the user-manual section on an unconfirmed move. **One logical change across four repos — grep `channel move evidence v1`:** receiver **`d7ec833`** (1 commit), app through **`6a9a6eb`** (6), iOS through **`e8c0463`** (2), and this repo (8). **All pushed 2026-08-30.** The locator firmware in that set is bench-only (`SP_LOSS_INJECT` reporting); the shipped guard value is 0 and the device was reflashed from a clean build after testing. Beneath it, `9552846` (fix(scripts): sp-status finds the iOS repo, and says so when it cannot), and beneath that `5de767c`, which carries the 2026-08-29/30 doc set: the corrected ADR-0029 dwell arithmetic, ADR-0019's confirm-phase note, the ADR-0006/0011 connection fixes, the armed-lock-in decision, three new bench procedures, and the user-manual pass. The newest **code** commit in this repo is still `e551970`, which only reserves MsgTypes 23/24 for the locator search and needs no reflash; everything else on top is docs (ADR-0029 and the user manual). Beneath that, `9c3d7e7` (docs: refresh SESSION_HANDOFF app state for the map camera commits) — **clean, pushed**. The two commits above the newest firmware change are docs-only refreshes of this file (`9c3d7e7`, `0e74131`); the newest **code** commit remains `6bb9ed8` (fix(time): hold or recover the PPS tick rate across dropouts — [#30](https://github.com/fschroer/steam-pigeon-locator/issues/30)). On top of `708aedc` (docs: flight-2026-07-17 validation, EKF seed finding, replay harness), `662a783` (fix(nav): seed EKF attitude from NEGATED accel, matching the strapdown, [#28](https://github.com/fschroer/steam-pigeon-locator/issues/28)), `901a766` (offline EKF replay harness + shared flight-CSV reader), `121de3b` (propagate inertial position during powered flight, [#27](https://github.com/fschroer/steam-pigeon-locator/issues/27)), the docs commit carrying the previous handoff refresh, and `41e8a4b` (feat(comm): FlightEvents message (MsgType 19) + raw-baro profile altitude). Further back: `4fff4e1` (ADR-0015 drop-rejection launch gate), `bb4ff1f`/`bb57942` (ADR-0014 + map/summary docs), `e5b61b4` (log ~2 s of Landed samples), `c137a39` (Release config buildable), `a5337e4` (ADR-0013 live EKF), `71c8f7e` (cycle profiler), `2bc988e` (ITM/SPI/covariance perf), `4758b01` (UART2 921600 baud, IWDG init, radio RX CRC handling), `390f9bf` (pre-launch ring + monotonic clock + re-arm reset, ADR-0007), `942ab15` (`Unused` deploy mode), `9bad55b` (connect-password), `cb11f95` (runtime LoRa channel apply), and the ADR-0009 commits (`d2c1808`, `47fd7ed`, `2446fa5`). The archival/reliability code (`FlightManager`/`Factory`/`usart.c`/`radio_driver.c`/`Locator.ioc`/`FlightArchive.hpp` + the `FaultLog` module from `7c325c7`) is all committed; the `.ld` `.noinit` section is present. Firmware builds clean; archive host suite 638/638, FlightReplay **97/97** (44/44 through `662a783`; Part D added by `6bb9ed8`). **No firmware is flight-validated.** The FlightEvents/raw-baro change (`41e8a4b`), the three nav commits (`121de3b`, `901a766`, `662a783`), and the PPS clock fix (`6bb9ed8`) are **host-verified only — not bench- or flight-tested.** Earlier line — orientation display bench-verified `8f61a1e`.
-- **Receiver repo** (`steam-pigeon-receiver`) `master` = **`96afaf3`** (docs: pointer stubs for the /sp-* commands) — **clean, pushed**. Docs-only: **the firmware is unchanged since `265dce3`** (diag(comm): trace the channel actually applied, and why a scan was cancelled), `text 117108`. **`265dce3` is the build #40 was confirmed on**, so no reflash is owed. Beneath it `65344ca` (one restore line per scan) and `988b409` (the #40 fix). Beneath those, **`d7ec833`** (feat(comm): report the channel follow, and drop a forward nobody is waiting on) — **clean, pushed**. ⚠️ **Reflash for any ADR-0011 bench work**: the transmit receipt and the `pending_tx_` staleness drop are both in this build and neither is exercised. No wire change; `text 116500` (+96 B). Beneath it, `5498391` (fix(comm): size the dwell for the frame a scan actually hunts) — **clean, pushed**. Builds clean, `text 116404`. ⚠️ **Reflash before trusting any bench result**: no wire change, but the dwell went 1200 → 1400 ms, a search dwell now ends early on a hit, `kSearchDeadlineMs` went 90 → 105 s, and a sweep neither starts on nor is ended by anything but an operator command. **All seven procedures in [bench-locator-search.md](bench-locator-search.md) now pass on hardware** — the four that predate this session were re-run against the new constants. Beneath it, `aa9edc6`/`0bc99c0` (the locator search itself, ADR-0029, `locator search wire v1`), whose census case was bench-validated with three locators. Beneath it, `08a0fb0` (feat(comm): relay FlightEvents (MsgType 19) to the app — counterpart to locator `41e8a4b`) — **clean, pushed**. On top of `5128130` (UART2 921600 baud + radio RX CRC-discard removal, counterpart to locator `4758b01`), `6a00e89` (mirror PreLaunchData `locator_id`+`auth_tag`), `b49d1f7`/`9d74b7e` (follow locator LoRa channel change), and `8f416d2` (flight-profile-mode command forwarding). `version.h`/`language.settings.xml` gitignored. Firmware links clean; `08a0fb0` is **not bench-validated**.
-- **App repo** (`rocket-flight-manager`) `main` = **`a9e0eae`** (fix(map): the 3D path collapsed to 2D, and the panel never left the flight layout) — **clean, pushed**. **397 tests, 30 suites, 0 failures.** **BOTH halves CONFIRMED ON HARDWARE by fschroer (2026-09-01)** — the 3D flight path behaves under map manipulation, and the pre-launch rows appear after a post-flight disarm. Neither was reachable from the suite, so this is the only check either could have had. The curtain defect was a **rebuild rate**, not geometry: all three path sources were re-serialized and re-tiled from an effect keyed on the rocket's *position*, so a track that never changes — an archived record is up to `CURTAIN_MAX_QUADS` quads — was rebuilt once a second for as long as the map was open, and a pan or zoom's tiles were invalidated before they finished. Keyed on the path alone now, and built on `Dispatchers.Default`. The panel half is the app end of locator `1d25783`: `flightState` rides in `TelemetryData` alone, so it latched at `Landed` for the life of the process; `PreLaunchData` now resets it, which is sound only because the locator sends that message **iff disarmed and at `WaitingLaunch`**. Beneath it, **`e4ca260`** (fix(bluetooth): serialize GATT writes, ADR-0033, from a parallel session) and **`7472000`** (fix(auth): the password keyboard appended a space, and the app called it a wrong password). The locator password field now declares `KeyboardType.Password` + `autoCorrectEnabled = false`: it had carried no `keyboardType`, so the IME offered completions and appended a trailing space when one was accepted, which FNV-1a turned into a different key and the dialog reported as a wrong password. **Confirmed on the Pixel by fschroer** (the suggestion strip is gone) — and it has to be, because **no test can see IME configuration**; the suite does not cover this change at all. Docs counterpart locator `ae341ff`; iOS was already correct, so this closed a parity gap rather than opening one. Beneath it, `9fa68a9` (keep Cancel at the bottom of App Flight Logs when the list is empty) and `069986f` (**a launch crash** — an init block ran before its dependencies; the build and the whole suite were green while the app died on start — **a green suite is not evidence that the app launches**, and `RocketViewModel` is where that gap keeps showing up). Beneath those, `d56b13f` (comment-only 1 Hz correction) and `74f0785` (feat(log): the app-side flight log — ADR-0030, manual §10.7). Beneath those, `1dd3f62` (docs: pointer stubs for the /sp-* commands) and `4dc7c32` (feat(comm): say that connecting to a search result stops the scan, #40). Beneath them, `0e4ab36` (test(comm): extract the channel-move sequence so it can be tested, and test it), where **374 tests passed in 29 suites**. Behaviour-preserving refactor of bench-validated code, **re-confirmed on hardware 2026-08-30** (fschroer): a forced-miss channel move on this build behaves as it did before the four commits of churn. Beneath it, `6a9a6eb` (test(comm): pin the three channel-move decisions that each shipped a defect), where 357 tests passed in 28 suites. Beneath it, `fe5064c` (fix(comm): the no-answer messages named the channel we aimed at, not the one we are on). Beneath it, `ec6ff50` (fix(comm): a refused probe is not an empty one, and the outcome must be readable). Beneath it, `e399104` (fix(comm): the retry can be lost too — probe again rather than ending split). Beneath it, `99f4d91` (fix(comm): latch the channel-move receipt once — a repeat re-base hung the move). **341 unit tests pass, 27 suites, 0 failures.** Beneath it, `56d77c2` (fix(comm): revert a channel move on evidence, not on silence). Not verified on a device: the probe populates the ordinary search section, so a failed move now shows search results and a widen offer the user did not ask for. Beneath it, `cbb3cd3` (fix(comm): nine defects from two days at the bench, and the rule they share) — **clean, pushed**, where **330 unit tests passed** (`assembleDebug` + `testDebugUnitTest`, 0 failures, 26 suites). **Not verified on a device:** both `ChannelOccupancy` changes, the in-flight pick gating, deterministic candidate ordering (not observable below ~14 remembered locators; unit test only), and two armed-locator branches — a password changed while armed, and a receiver move while the connected locator is armed. Beneath it, `e9f93d7`/`f372b6c` (feat(app): the app can say which build it is), where 309 tests passed. The locator-search run sits beneath it: `0a391c0` (the search, survey identity and the Communication screen), then `612d5af`, `62a44f2`, `def347e`, `d647fb4` — three of those are fixes to bugs the bench found in the two before them. **Not verified on a device:** the icon's appearance, the menu order as rendered, the version line's placement, and the occupancy hint after its fix. Beneath that, `7a4d48e` (fix(map): stop sensor noise coarsening the 3D path's steps) — **clean, pushed**. The 3D flight-path run, oldest first: `3cabbb3` (curtain subdivision by altitude change + cyan one-second markers), `0c56dfc` (keep pre-timestamp paths), `339916e` (record one point per distinct fix), `c8e6dc3` (cancel prior inbound collectors), `20a4358` + `9b3a5e1` (archived flight path), `ea9e18b` (shape-preserving spline), `8274695` + `7a4d48e` (opacity experiment reverted; riser fixed).
+- **Receiver repo** (`steam-pigeon-receiver`) `master` = **`96afaf3`** (docs: pointer stubs for the /sp-* commands) — **clean, pushed**. Docs-only: **the firmware is unchanged since `265dce3`** (diag(comm): trace the channel actually applied, and why a scan was canceled), `text 117108`. **`265dce3` is the build #40 was confirmed on**, so no reflash is owed. Beneath it `65344ca` (one restore line per scan) and `988b409` (the #40 fix). Beneath those, **`d7ec833`** (feat(comm): report the channel follow, and drop a forward nobody is waiting on) — **clean, pushed**. ⚠️ **Reflash for any ADR-0011 bench work**: the transmit receipt and the `pending_tx_` staleness drop are both in this build and neither is exercised. No wire change; `text 116500` (+96 B). Beneath it, `5498391` (fix(comm): size the dwell for the frame a scan actually hunts) — **clean, pushed**. Builds clean, `text 116404`. ⚠️ **Reflash before trusting any bench result**: no wire change, but the dwell went 1200 → 1400 ms, a search dwell now ends early on a hit, `kSearchDeadlineMs` went 90 → 105 s, and a sweep neither starts on nor is ended by anything but an operator command. **All seven procedures in [bench-locator-search.md](bench-locator-search.md) now pass on hardware** — the four that predate this session were re-run against the new constants. Beneath it, `aa9edc6`/`0bc99c0` (the locator search itself, ADR-0029, `locator search wire v1`), whose census case was bench-validated with three locators. Beneath it, `08a0fb0` (feat(comm): relay FlightEvents (MsgType 19) to the app — counterpart to locator `41e8a4b`) — **clean, pushed**. On top of `5128130` (UART2 921600 baud + radio RX CRC-discard removal, counterpart to locator `4758b01`), `6a00e89` (mirror PreLaunchData `locator_id`+`auth_tag`), `b49d1f7`/`9d74b7e` (follow locator LoRa channel change), and `8f416d2` (flight-profile-mode command forwarding). `version.h`/`language.settings.xml` gitignored. Firmware links clean; `08a0fb0` is **not bench-validated**.
+- **App repo** (`rocket-flight-manager`) `main` = **`a9e0eae`** (fix(map): the 3D path collapsed to 2D, and the panel never left the flight layout) — **clean, pushed**. **397 tests, 30 suites, 0 failures.** **BOTH halves CONFIRMED ON HARDWARE by fschroer (2026-09-01)** — the 3D flight path behaves under map manipulation, and the pre-launch rows appear after a post-flight disarm. Neither was reachable from the suite, so this is the only check either could have had. The curtain defect was a **rebuild rate**, not geometry: all three path sources were re-serialized and re-tiled from an effect keyed on the rocket's *position*, so a track that never changes — an archived record is up to `CURTAIN_MAX_QUADS` quads — was rebuilt once a second for as long as the map was open, and a pan or zoom's tiles were invalidated before they finished. Keyed on the path alone now, and built on `Dispatchers.Default`. The panel half is the app end of locator `1d25783`: `flightState` rides in `TelemetryData` alone, so it latched at `Landed` for the life of the process; `PreLaunchData` now resets it, which is sound only because the locator sends that message **iff disarmed and at `WaitingLaunch`**. Beneath it, **`e4ca260`** (fix(bluetooth): serialize GATT writes, ADR-0033, from a parallel session) and **`7472000`** (fix(auth): the password keyboard appended a space, and the app called it a wrong password). The locator password field now declares `KeyboardType.Password` + `autoCorrectEnabled = false`: it had carried no `keyboardType`, so the IME offered completions and appended a trailing space when one was accepted, which FNV-1a turned into a different key and the dialog reported as a wrong password. **Confirmed on the Pixel by fschroer** (the suggestion strip is gone) — and it has to be, because **no test can see IME configuration**; the suite does not cover this change at all. Docs counterpart locator `ae341ff`; iOS was already correct, so this closed a parity gap rather than opening one. Beneath it, `9fa68a9` (keep Cancel at the bottom of App Flight Logs when the list is empty) and `069986f` (**a launch crash** — an init block ran before its dependencies; the build and the whole suite were green while the app died on start — **a green suite is not evidence that the app launches**, and `RocketViewModel` is where that gap keeps showing up). Beneath those, `d56b13f` (comment-only 1 Hz correction) and `74f0785` (feat(log): the app-side flight log — ADR-0030, manual §10.7). Beneath those, `1dd3f62` (docs: pointer stubs for the /sp-* commands) and `4dc7c32` (feat(comm): say that connecting to a search result stops the scan, #40). Beneath them, `0e4ab36` (test(comm): extract the channel-move sequence so it can be tested, and test it), where **374 tests passed in 29 suites**. Behavior-preserving refactor of bench-validated code, **re-confirmed on hardware 2026-08-30** (fschroer): a forced-miss channel move on this build behaves as it did before the four commits of churn. Beneath it, `6a9a6eb` (test(comm): pin the three channel-move decisions that each shipped a defect), where 357 tests passed in 28 suites. Beneath it, `fe5064c` (fix(comm): the no-answer messages named the channel we aimed at, not the one we are on). Beneath it, `ec6ff50` (fix(comm): a refused probe is not an empty one, and the outcome must be readable). Beneath it, `e399104` (fix(comm): the retry can be lost too — probe again rather than ending split). Beneath it, `99f4d91` (fix(comm): latch the channel-move receipt once — a repeat re-base hung the move). **341 unit tests pass, 27 suites, 0 failures.** Beneath it, `56d77c2` (fix(comm): revert a channel move on evidence, not on silence). Not verified on a device: the probe populates the ordinary search section, so a failed move now shows search results and a widen offer the user did not ask for. Beneath it, `cbb3cd3` (fix(comm): nine defects from two days at the bench, and the rule they share) — **clean, pushed**, where **330 unit tests passed** (`assembleDebug` + `testDebugUnitTest`, 0 failures, 26 suites). **Not verified on a device:** both `ChannelOccupancy` changes, the in-flight pick gating, deterministic candidate ordering (not observable below ~14 remembered locators; unit test only), and two armed-locator branches — a password changed while armed, and a receiver move while the connected locator is armed. Beneath it, `e9f93d7`/`f372b6c` (feat(app): the app can say which build it is), where 309 tests passed. The locator-search run sits beneath it: `0a391c0` (the search, survey identity and the Communication screen), then `612d5af`, `62a44f2`, `def347e`, `d647fb4` — three of those are fixes to bugs the bench found in the two before them. **Not verified on a device:** the icon's appearance, the menu order as rendered, the version line's placement, and the occupancy hint after its fix. Beneath that, `7a4d48e` (fix(map): stop sensor noise coarsening the 3D path's steps) — **clean, pushed**. The 3D flight-path run, oldest first: `3cabbb3` (curtain subdivision by altitude change + cyan one-second markers), `0c56dfc` (keep pre-timestamp paths), `339916e` (record one point per distinct fix), `c8e6dc3` (cancel prior inbound collectors), `20a4358` + `9b3a5e1` (archived flight path), `ea9e18b` (shape-preserving spline), `8274695` + `7a4d48e` (opacity experiment reverted; riser fixed).
 
 - **iOS repo** (`steam-pigeon-ios`) `main` = **`a75a56c`** (fix(flight): the panel never left the flight layout — flight state from the newest broadcast) — **clean, pushed**, and **NOT COMPILED**: written on Windows, where there is no Swift toolchain, so it is unverified beyond reading. Parity port of app `a9e0eae`'s panel half. `isInFlight` read `telemetry?.flightState`, and that frame is the last one ever received — so it said `Landed` forever once a locator had flown. **This is the second time the same trap has been sprung on this file:** `armed` had already been moved to a newest-broadcast reading for exactly this reason, and its doc comment says so; flight state now follows it. **A test is owed and iOS is the platform that can have one** — `ingestForTesting` with a telemetry-then-pre-launch pair pins it directly, which Android's suite cannot reach. Not written here rather than written blind: each test file carries its own private frame builders including the auth `seal`, and an uncompilable test file is worse than none. Beneath it, **`bdd4d76`** (fix(ble): queue outbound writes, ADR-0033, from a parallel session) and **`ccaab73`** (docs(comments): the locator transmits at 1 Hz, not ~5 Hz). **iOS owes nothing from the 2026-08-31 password-keyboard fix** — `PasswordChallengeView` has carried `.disableAutocorrection(true)` and `.textInputAutocapitalization(.never)` since it was written, so that was an Android-only gap. Beneath it, `bc1adfe` (docs(parity): the channel-move port is three files now, not one) — **NOT COMPILED**. Beneath it, `e8c0463` (docs(parity): rewrite the owed channel-move port for the design the bench settled on) — **NOT COMPILED** (no Mac; markdown only). **iOS owes five items**, the newest being ADR-0011's evidence-based channel move — whose entry was rewritten because the first version described a design four bench passes have since replaced. Beneath it, `cbed91c`. Beneath it, `f61768e` (docs(parity): follow the receiver's new timings, and four items iOS owes) — **clean, pushed**. ⚠️ **NOT COMPILED** — no Mac in that session; the Swift changes are string edits reviewed by eye only. Beneath it, `8cb92fc` (the ADR-0029 port). **iOS owes four items**, each written up in that repo's `docs/UI_PARITY.md` with the reasoning a port needs: the channel being left reclaiming the connection mid-move, the status panel reading a scan as a missing locator, the survey section hiding its own scan, and `ChannelOccupancy`.
 

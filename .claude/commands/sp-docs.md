@@ -59,7 +59,7 @@ qualify:
    new recorded artifact. Goes in the divergence table with *what would close it*, in
    the inventory table, and — if it is a whole screen — in the header status line, which
    otherwise keeps claiming every screen is ported.
-2. **A behaviour change to something already ported.** The other app now owes it. There
+2. **A behavior change to something already ported.** The other app now owes it. There
    is a section for each direction; put it in the right one.
 3. **A change to the SHAPE of an unported port target.** The subtlest kind and the one
    most easily missed, because the feature itself did not change. Routing nineteen

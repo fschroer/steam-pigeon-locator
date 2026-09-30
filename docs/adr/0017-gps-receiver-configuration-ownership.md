@@ -90,7 +90,7 @@ Sixteen records from Pasco 2026-09-04..07 — see
 ✅ Across **28 689 samples**, only **128 (0.45 %)** lacked a 3D fix, and the 3D fix
 **held to 376 m/s** (`Ken 132857`, ≈ Mach 1.1) and 202 m/s (`Ken_6`). The 2026-08-02
 failure that motivated this decision — 7.75 s of loss with recovery on the first sample
-back under the Portable model's 50 m/s ceiling — has no analogue in this set.
+back under the Portable model's 50 m/s ceiling — has no analog in this set.
 
 ✅ The residual losses are **not velocity-correlated**. The longest, 3.90 s on
 `Ken 132857`, occurred at **11–47 m/s** near apogee. Two more were on the ground or under
