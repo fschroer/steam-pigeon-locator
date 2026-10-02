@@ -2,6 +2,20 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-10-01 (fix) — #49 whole-record transfer, background completion and resume: BENCH-VALIDATED on Android
+
+✅ **Firmware `f41f5f8` + Android `bf40c53` and the follow-up fix (this session) pass fschroer's bench tests.** Covered:
+- a whole long record downloads;
+- leaving the chart continues it in the background ("Downloading N%", ring, gray marker);
+- Locator Settings pauses it and backing out resumes it;
+- a Bluetooth off/on resumes it from where it stopped;
+- ✕ discards it;
+- the locator returns to broadcasting at the end.
+
+🔧 **The first Android version failed one bench run in two, and the reason generalizes.** The `DisarmRequest` sent on leaving Flight Profiles is a single frame. The locator's half-duplex radio is transmitting ~4 s of every ~5 s burst, so that frame is often lost. When it was, the chart's transfer kept running, but the controller counted a download as in flight only if *it* had requested it. So it showed "paused", and at completion sent no hand-back, leaving the locator silent for its 5-minute complete-state timeout. Fixed by deciding "in flight" from arriving frames, and retrying every hand-back every 2 s until PreLaunchData is heard (30 s cap). The decisions now live in `BackgroundDownloadController`, a plain class with 11 tests including the bench failure. **Any app→locator command sent while the locator is bursting is unreliable** — keep that in mind for anything else sent during a transfer.
+
+📋 **iOS still cancels on leaving the chart** (see `UI_PARITY.md`); it charts the new planned records correctly.
+
 ## 2026-09-28 (analysis) — Gerlach BALLS: a Mach 1.2 motor burn-through reconstructed, coast attitude VALIDATED, the app has only ever seen the first 102 s of any record — [flight-analysis-2026-09-gerlach.md](flight-analysis-2026-09-gerlach.md)
 
 Three ride-along records (Red Ryder, Shane, Nike Smoke) plus their app logs. **Ride-alongs: the deployment events are logic only.** Separate flight computers fired the charges.
