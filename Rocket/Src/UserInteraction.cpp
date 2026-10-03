@@ -4,6 +4,7 @@ extern "C" {
 }
 
 #include <UserInteraction.hpp>
+#include "SettingsBounds.hpp"
 #include "CubeMonitorGlobals.hpp"
 #include "CycleProfiler.hpp"
 #include "Constants.hpp"
@@ -13,11 +14,10 @@ extern "C" {
 #include "Units.hpp"
 
 constexpr uint8_t century = 100;
-constexpr uint16_t max_drogue_primary_deploy_delay = 20;
-constexpr uint16_t max_drogue_backup_deploy_delay = 40;
-constexpr uint16_t max_main_primary_deploy_altitude = 400;
-constexpr uint16_t max_main_backup_deploy_altitude = 400;
-constexpr uint16_t max_lora_channel = 63;
+// The deployment limits are ADR-0034's single bounds table (SettingsBounds.hpp),
+// shared with the config-request check and the boot repair.  The console's own
+// main maximum was 400 m while the app's was 500; there is now one.
+constexpr uint16_t max_lora_channel = SettingsBounds::kLoraChannelMax;
 
 UserInteraction::UserInteraction(FlightManager &flight, Communication::Communication &comm, Archive &archive,
 		UART_HandleTypeDef &huart2, ConsoleBaud &console_baud) :
@@ -204,17 +204,28 @@ void UserInteraction::ProcessChar(uint8_t uart_char, DeviceState &device_state) 
 	case UserInteractionState::EditDeployChannel4Mode:
 		AdjustDeploymentChannelMode(uart_char, &deployment_ch4_mode_);
 		break;
+	// Each primary/backup pair is stepped through SettingsBounds so the console
+	// keeps the pair in order and applies ADR-0034's push rule, exactly as the
+	// app does.  Drogue: primary is the lower member.  Main: backup is.
 	case UserInteractionState::EditDroguePrimaryDeployDelay:
-		AdjustConfigNumericSetting(uart_char, &drogue_primary_deploy_delay_, max_drogue_primary_deploy_delay, true);
+		AdjustPairedSetting(uart_char, drogue_primary_deploy_delay_, drogue_backup_deploy_delay_,
+				true, SettingsBounds::kDroguePrimaryMax, SettingsBounds::kDrogueBackupMax,
+				drogue_primary_deploy_delay_, true);
 		break;
 	case UserInteractionState::EditDrogueBackupDeployDelay:
-		AdjustConfigNumericSetting(uart_char, &drogue_backup_deploy_delay_, max_drogue_backup_deploy_delay, true);
+		AdjustPairedSetting(uart_char, drogue_primary_deploy_delay_, drogue_backup_deploy_delay_,
+				false, SettingsBounds::kDroguePrimaryMax, SettingsBounds::kDrogueBackupMax,
+				drogue_backup_deploy_delay_, true);
 		break;
 	case UserInteractionState::EditMainPrimaryDeployAltitude:
-		AdjustConfigNumericSetting(uart_char, &main_primary_deploy_altitude_, max_main_primary_deploy_altitude, false);
+		AdjustPairedSetting(uart_char, main_backup_deploy_altitude_, main_primary_deploy_altitude_,
+				false, SettingsBounds::kMainBackupStepMax, SettingsBounds::kMainPrimaryMax,
+				main_primary_deploy_altitude_, false);
 		break;
 	case UserInteractionState::EditMainBackupDeployAltitude:
-		AdjustConfigNumericSetting(uart_char, &main_backup_deploy_altitude_, max_main_backup_deploy_altitude, false);
+		AdjustPairedSetting(uart_char, main_backup_deploy_altitude_, main_primary_deploy_altitude_,
+				true, SettingsBounds::kMainBackupStepMax, SettingsBounds::kMainPrimaryMax,
+				main_backup_deploy_altitude_, false);
 		break;
 	case UserInteractionState::EditLoraChannel:
 		AdjustConfigNumericSetting(uart_char, &lora_channel_, max_lora_channel, false);
@@ -604,6 +615,36 @@ void UserInteraction::AdjustConfigNumericSetting(uint8_t uart_char, int *config_
 		HAL_UART_Transmit(&huart2_, (uint8_t*) uart_line_, uart_line_len, uart_timeout);
 	}
 }
+
+// Size-optimized for the same flash stopgap as SettingsBounds.hpp (#50);
+// remove when the build moves off -O0 (#57).
+#pragma GCC push_options
+#pragma GCC optimize("Os")
+// One member of a primary/backup pair, stepped with [ and ] (ADR-0034).
+// `editing_lower` says which member the operator is editing; `shown` is that
+// member, echoed after each step.  Raising the lower member to meet the upper
+// pushes the upper along — the operator sees only the field being edited move,
+// and the other is shown again when they return to the menu.
+void UserInteraction::AdjustPairedSetting(uint8_t uart_char, int& lower, int& upper, bool editing_lower,
+		int lower_max, int upper_max, const int& shown, bool tenths) {
+	switch (uart_char) {
+	case 13: // Enter key
+	case 27: // Esc key
+		user_interaction_state_ = UserInteractionState::ConfigHome;
+		DisplayConfigSettingsMenu();
+		return;
+	case 91: // [ = decrease value
+	case 93: { // ] = increase value
+		const int delta = (uart_char == 93) ? 1 : -1;
+		if (editing_lower) SettingsBounds::StepLower(lower, upper, delta, lower_max, upper_max);
+		else               SettingsBounds::StepUpper(lower, upper, delta, upper_max);
+		const uint16_t uart_line_len = MakeLine(uart_line_, cr_, ToStr(shown, tenths));
+		HAL_UART_Transmit(&huart2_, (uint8_t*) uart_line_, uart_line_len, uart_timeout);
+		return;
+	}
+	}
+}
+#pragma GCC pop_options
 
 void UserInteraction::AdjustConsoleBaudSetting(uint8_t uart_char) {
 	switch (uart_char) {

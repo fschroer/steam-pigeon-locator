@@ -9,6 +9,7 @@ extern "C" {
 #include "CubeMonitorGlobals.hpp"
 #include "StRadioAdapter.hpp"
 #include "RocketSettings.hpp"
+#include "SettingsBounds.hpp"
 #include "Format.hpp"
 #include "Units.hpp"
 #include "UserInteraction.hpp"
@@ -371,6 +372,19 @@ void Communication::OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
 			const RocketPersistentSettings& held = archive_.GetLocatorSettings();
 			pending_cfg_settings_.launch_detect_altitude = held.launch_detect_altitude;
 			pending_cfg_settings_.deploy_signal_duration = held.deploy_signal_duration;
+
+			// ADR-0034 decision 4: any deployment setting out of range or out of
+			// order rejects the WHOLE request — no partial apply, no clamping.
+			// This was a bare memcpy-and-save, which is how a 2,500 m main
+			// (typed as feet) reached Red Ryder's locator.  The app confirms by
+			// reading back the next broadcast, so a rejection shows there as
+			// "not confirmed".  If the request also moved the channel, the
+			// receiver has followed and we have not: the same split as a lost
+			// request, which ADR-0011's recovery already handles.  The name is
+			// not a deployment setting, so a missing terminator is repaired.
+			SettingsBounds::TerminateName(pending_cfg_settings_);
+			if (!SettingsBounds::IsValid(pending_cfg_settings_))
+				break;
 
 			pending_cfg_save_ = true;
 			break;

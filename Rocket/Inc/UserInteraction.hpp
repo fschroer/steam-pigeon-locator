@@ -273,6 +273,8 @@ private:
   const char* NoseAxisString(NoseAxis nose_axis_value);
   void AdjustNoseAxis(uint8_t uart_char);
   void AdjustConfigNumericSetting(uint8_t uart_char, int *config_mode_setting, int max_setting_value, bool tenths);
+  void AdjustPairedSetting(uint8_t uart_char, int& lower, int& upper, bool editing_lower,
+      int lower_max, int upper_max, const int& shown, bool tenths);
   void AdjustConfigTextSetting(uint8_t uart_char, char *config_mode_setting);
   void AdjustPasswordSetting(uint8_t uart_char);
   void AdjustConsoleBaudSetting(uint8_t uart_char);

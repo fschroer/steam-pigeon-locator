@@ -1,6 +1,7 @@
 #include "Archive.hpp"
 #include "ConsoleBaudRates.hpp"
 #include "CompactConfigJournal.hpp"
+#include "SettingsBounds.hpp"
 #include "Types.hpp"
 #include <Math.hpp>   // RocketNav::Math::norm — accel channel identification
 #include "Units.hpp"  // G0_F
@@ -121,6 +122,15 @@ bool Archive::Init() {
 	default_settings_.device_name[16] = 0;
 	if (!persistentStore_.LoadOrDefault(locator_settings_, default_settings_)) {
 		return false;
+	}
+	// ADR-0034 decision 5: a stored deployment setting outside the bounds table
+	// (Red Ryder held a 2,500 m main, typed as feet) is reset to its default —
+	// not clamped, which would invent a value nobody chose — and saved, so the
+	// app shows the repaired value the next time it connects.
+	if (SettingsBounds::Sanitize(locator_settings_, default_settings_)) {
+		if (!persistentStore_.SaveIfChanged(locator_settings_, settings_saved_)) {
+			return false;
+		}
 	}
 	if (!runtimeStore_.LoadOrDefault(runtime_, runtime_defaults_)) {
 		return false;

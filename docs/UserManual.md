@@ -318,10 +318,10 @@ Note how the redundant pairs are separated: the backup drogue fires 2 seconds af
 
 | Setting | Range | Default | What it does |
 |---|---|---|---|
-| **Drogue Primary Deploy Delay** | 0.0 s up to just under the backup delay | 0.0 s | Delay from apogee detection to firing the primary drogue charge. |
-| **Drogue Backup Deploy Delay** | just above the primary delay, up to 3.0 s | 2.0 s | Same, for the backup charge. Must be longer than the primary. |
+| **Drogue Primary Deploy Delay** | 0.0 s to 2.0 s, and below the backup delay | 0.0 s | Delay from apogee detection to firing the primary drogue charge. |
+| **Drogue Backup Deploy Delay** | above the primary delay, up to 4.0 s | 2.0 s | Same, for the backup charge. Must be longer than the primary. |
 | **Main Primary Deploy Altitude** | just above the backup altitude, up to 500 m | 130 m | Altitude above ground at which the primary main charge fires. |
-| **Main Backup Deploy Altitude** | 0 m up to just below the primary altitude | 100 m | Same, for the backup charge. Must be lower than the primary. |
+| **Main Backup Deploy Altitude** | 0 m up to just below the primary altitude (499 m at most) | 100 m | Same, for the backup charge. Must be lower than the primary. |
 | **Launch Detect Altitude** | *fixed* | 30 m | How far the rocket must climb before the locator will call it a launch. **Not adjustable** — see the note below. |
 | **Deploy Signal Duration** | *fixed* | 1.0 s | How long each channel stays energized when it fires. 1.0 s is plenty for an e-match. **Not adjustable** — see the note below. |
 | **Sensor Axis Along Rocket** | Auto / X / Y / Z | X | Which of the locator's own axes runs along the length of the airframe. A property of how you mounted it, not of the flight. The default assumes the standard installation; if yours runs along Y or Z, change it. Auto disables the not-armed pad alert entirely (§1.7). |
@@ -334,7 +334,21 @@ Note how the redundant pairs are separated: the backup drogue fires 2 seconds af
 >
 > Making either adjustable again means carrying it in the broadcast, which is a change to all three pieces of firmware. Until then the defaults are the values, and they are the right ones for ordinary flying.
 
-The app enforces the primary/backup relationships for you — it won't let you set a backup drogue delay shorter than the primary, or a backup main altitude higher than the primary.
+**Each primary/backup pair stays in order, and moving one value onto the other pushes the other along.** The app and the USB-C console both work this way:
+
+- Raise the drogue primary until it meets the backup, and the backup moves up 0.1 s with it. Lower the drogue backup onto the primary, and the primary moves down 0.1 s.
+- Raise the main backup until it meets the primary, and the primary moves up 1 m. Lower the main primary onto the backup, and the backup moves down 1 m.
+- Each value stops at its own limit. The main backup can therefore go no higher than 499 m, because the primary stops at 500 m. The drogue backup and main primary go no lower than 0.1 s and 1 m, because their partners stop at 0.
+
+A typed value pushes in the same way. Typing a drogue primary of 1.9 s with the backup at 1.5 s makes the backup 2.0 s.
+
+**A typed value outside the range is refused, not corrected.** The field turns red and says why (for example *Max 500 m*), and **Update** stays disabled until you fix it. The app will not quietly change 2,500 to 500, because a number that far out is usually a units mistake (feet typed into a meters field), and 500 m would be just as wrong.
+
+> ⚠️ **Settings are in meters and seconds.** In September 2026 a rocket flew with its mains set to 2,500 m and 2,400 m — meant as feet — and both came due at apogee. That can no longer happen: the app refuses the value, and the locator itself refuses any settings change containing an out-of-range value.
+
+The locator also checks what it has stored every time it powers on. **Any setting found out of range is reset to its default** (a primary/backup pair is reset together), so a locator that had a bad value saved before this check existed comes up with 130 m / 100 m mains, or 0.0 s / 2.0 s drogues. Check your settings after updating the firmware.
+
+If you send a settings change from an older app and the locator refuses it, the app reports the update as **not received** and the locator keeps its previous settings.
 
 **All altitudes are above ground level (AGL)**, zeroed at the pad when you arm.
 
@@ -532,7 +546,7 @@ The prompt names the locator it is asking about — *Enter the password to conne
 - [ ] Phone charged
 - [ ] Versions checked and noted — locator, receiver **and app** (§3.3)
 - [ ] Deployment channel modes set for **this** flight (§3.4)
-- [ ] Delays and altitudes set for **this** flight (§3.4)
+- [ ] Delays and altitudes set for **this** flight, altitudes **in meters** (§2.3, §3.4)
 - [ ] **Sensor axis along rocket** matches this installation — the default X is right only if X runs along the tube (§1.7, §3.4)
 - [ ] LoRa channel chosen (§3.4)
 - [ ] Bench deployment test passed on every channel you will use (§3.5)
@@ -1781,10 +1795,10 @@ AT THE FLIGHT LINE
 | Setting | Where | Range | Default | Notes |
 |---|---|---|---|---|
 | Deployment Channel 1–4 Mode | App, USB-C | Drogue Primary / Drogue Backup / Main Primary / Main Backup / Unused | Ch1 DP, Ch2 DB, Ch3 MP, Ch4 MB | `Unused` excludes the channel from firing |
-| Drogue Primary Deploy Delay | App, USB-C | 0.0 s → just under backup delay | 0.0 s | From apogee detection |
-| Drogue Backup Deploy Delay | App, USB-C | just over primary delay → 3.0 s | 2.0 s | Must exceed the primary |
+| Drogue Primary Deploy Delay | App, USB-C | 0.0 s → 2.0 s, below the backup delay | 0.0 s | From apogee detection |
+| Drogue Backup Deploy Delay | App, USB-C | just over primary delay → 4.0 s | 2.0 s | Must exceed the primary |
 | Main Primary Deploy Altitude | App, USB-C | just above backup → 500 m | 130 m | AGL |
-| Main Backup Deploy Altitude | App, USB-C | 0 m → just below primary | 100 m | AGL, must be below the primary |
+| Main Backup Deploy Altitude | App, USB-C | 0 m → just below primary (≤ 499 m) | 100 m | AGL, must be below the primary |
 | Launch Detect Altitude | *neither* | fixed | 30 m | Climb required to declare launch. Not adjustable (§2.4) |
 | Deploy Signal Duration | *neither* | fixed | 1.0 s | How long a channel stays energized. Not adjustable (§2.4) |
 | Sensor Axis Along Rocket | App, USB-C | Auto / X / Y / Z | X | Which locator axis runs along the airframe. The default assumes the standard installation. Auto disables the not-armed alert and off-pad calibration (§1.7) |
@@ -1934,6 +1948,8 @@ None of these affects flight behavior.
 | `]` | Increase the value |
 | Enter | Save |
 | Esc | Cancel |
+
+For the four delays and altitudes (`4`–`7`), `[` and `]` follow the same limits and the same push rule as the app (§2.3): stepping one value of a pair onto the other moves the other one along. The console's main altitude limit is 500 m, the same as the app's.
 
 For text fields (name, password), just type; Enter saves, Esc cancels.
 
