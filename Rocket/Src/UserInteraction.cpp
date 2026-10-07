@@ -616,10 +616,6 @@ void UserInteraction::AdjustConfigNumericSetting(uint8_t uart_char, int *config_
 	}
 }
 
-// Size-optimized for the same flash stopgap as SettingsBounds.hpp (#50);
-// remove when the build moves off -O0 (#57).
-#pragma GCC push_options
-#pragma GCC optimize("Os")
 // One member of a primary/backup pair, stepped with [ and ] (ADR-0034).
 // `editing_lower` says which member the operator is editing; `shown` is that
 // member, echoed after each step.  Raising the lower member to meet the upper
@@ -644,7 +640,6 @@ void UserInteraction::AdjustPairedSetting(uint8_t uart_char, int& lower, int& up
 	}
 	}
 }
-#pragma GCC pop_options
 
 void UserInteraction::AdjustConsoleBaudSetting(uint8_t uart_char) {
 	switch (uart_char) {

@@ -361,8 +361,12 @@ private:
 	// -----------------------------------------------------------------------
 
 	uint16_t next_msg_count_ = 0;
-	bool     radio_busy_     = false;
-	uint32_t last_radio_tx_end_ms_ = 0;
+	// Both written by OnRadioTxDone() in the radio ISR and read by the main
+	// loop, so volatile like the pending_* flags.  At -O0 every access went to
+	// memory regardless; since the build moved to -Og (#57) the compiler may
+	// keep a value in a register, and these two gate every transmission.
+	volatile bool     radio_busy_     = false;
+	volatile uint32_t last_radio_tx_end_ms_ = 0;
 
 	// -----------------------------------------------------------------------
 	// Internal helpers

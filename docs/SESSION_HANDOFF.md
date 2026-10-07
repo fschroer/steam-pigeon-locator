@@ -2,6 +2,14 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-10-06 (build) — #57 flight build moved -O0 → -Og, ~87 KB of flash free — [ADR-0035](adr/0035-flight-build-at-og.md). Builds; NOT yet on hardware
+
+✅ **Decided by fschroer: -Og everywhere.** `.cproject` (C and C++) and the generated `Debug/` makefiles are on -Og. Whole image measured at each level: -O0 262,132 B (12 B free), **-Og 173,200 B (~87 KB free)**, -Os 153,596 B, -O2 175,828 B. #50's two `#pragma GCC optimize("Os")` stopgaps are removed. No new warnings at -Og.
+- **ISR audit:** `Communication::radio_busy_` and `last_radio_tx_end_ms_` are written by the radio TX-done ISR and gate every send, and were not `volatile`. They are now. Everything else the ISRs hand over was already `volatile` (`pending_*`, the UART2 ring, `main.c`'s PPS/TIM17 globals, the MS5611 flags). Every busy-wait waits on a timer or HAL flag, not an instruction count.
+- **If the IDE was open:** STM32CubeIDE regenerates `Debug/` from `.cproject` on its next build. If it still shows `-O0`, refresh the project (F5) or re-select Project → Properties → C/C++ Build → Settings → Optimization.
+
+🧪 **Bench re-validation before the -Og build flies** (ADR-0035): a vacuum-chamber flight; a deployment test; a whole-record download; `Tests/FlightReplay` on hardware via `SP_BENCH_REPLAY`; a console session (`config` stepping, a `data` export). Faster code can surface a race that -O0's slowness had been hiding.
+
 ## 2026-10-01 (fix) — #50 deployment settings bounds: one table, refused not clamped — [ADR-0034](adr/0034-deployment-settings-bounds.md). BENCH-VALIDATED on Android
 
 ✅ **Firmware `0fff919` + Android `92e349b` pass fschroer's bench test (2026-10-06)**, on top of the host suites (`Tests/SettingsBounds` 42/0, Android `LocatorSettingsBoundsTest` 15/0). Covered: a stored out-of-range main resets to defaults at boot; a typed 2500 holds Update; each pair pushes its partner both ways in the app and the console.
@@ -10,7 +18,7 @@ Orientation note for resuming work. Detail lives in the linked artifacts; this i
 - **App:** an out-of-range typed value is shown with its reason and Update is held. The Channels screen's channel field (0–63) had the same flaw and is fixed too.
 - **Locator:** rejects a whole `LocatorCfgChgRequest` that fails the table (shows as *not received*), and resets out-of-range stored fields to defaults at boot, a pair together. **Red Ryder's stored 2,500/2,400 m mains become 130/100 m on first boot.**
 
-⚠️ **Flash is full: 12 bytes free.** `SettingsBounds.hpp` and `AdjustPairedSetting` are compiled `-Os` by pragma as a stopgap; the flight build is still `-O0`. **[#57](https://github.com/fschroer/steam-pigeon-locator/issues/57)** (needs a decision) moves it off `-O0`. Any firmware change before #57 will probably not link.
+~~⚠️ **Flash is full: 12 bytes free.** `SettingsBounds.hpp` and `AdjustPairedSetting` are compiled `-Os` by pragma as a stopgap; the flight build is still `-O0`.~~ **Resolved 2026-10-06:** [#57](https://github.com/fschroer/steam-pigeon-locator/issues/57) moved the build to -Og (above), and the pragmas are gone.
 
 📋 **iOS lags** (`UI_PARITY.md`): still commits typed values unchecked and allows a 3.0 s drogue backup. The locator refuses what it sends out of range, so it is not a safety gap, but the user is not told why.
 

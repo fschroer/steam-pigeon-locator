@@ -23,14 +23,6 @@
 
 #include "RocketSettings.hpp"
 
-// Flash stopgap (#50): the flight build compiles at -O0 and the 256 KB flash
-// had under 800 B free, so this header alone (~1.1 KB at -O0) overflowed it.
-// Only the functions between push_options and pop_options are size-optimized;
-// every other translation unit is unaffected.  Remove when the build moves off
-// -O0 (#57).
-#pragma GCC push_options
-#pragma GCC optimize("Os")
-
 namespace SettingsBounds {
 
 // Drogue delays, in tenths of a second.
@@ -153,5 +145,3 @@ inline void StepUpper(int& lower, int& upper, int delta, int upperMax) {
 constexpr int kMainBackupStepMax = kMainPrimaryMax - 1;
 
 }  // namespace SettingsBounds
-
-#pragma GCC pop_options
