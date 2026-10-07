@@ -2,9 +2,9 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
-## 2026-10-01 (fix) — #50 deployment settings bounds: one table, refused not clamped — [ADR-0034](adr/0034-deployment-settings-bounds.md). Host-tested, NOT on hardware
+## 2026-10-01 (fix) — #50 deployment settings bounds: one table, refused not clamped — [ADR-0034](adr/0034-deployment-settings-bounds.md). BENCH-VALIDATED on Android
 
-✅ **Implemented on firmware + Android; host suites pass** (`Tests/SettingsBounds` 42/0, Android `LocatorSettingsBoundsTest` 15/0). Not yet flashed or run on a phone.
+✅ **Firmware `0fff919` + Android `92e349b` pass fschroer's bench test (2026-10-06)**, on top of the host suites (`Tests/SettingsBounds` 42/0, Android `LocatorSettingsBoundsTest` 15/0). Covered: a stored out-of-range main resets to defaults at boot; a typed 2500 holds Update; each pair pushes its partner both ways in the app and the console.
 - **One table:** drogue primary 0–2.0 s, drogue backup ≤ 4.0 s, main primary ≤ 500 m, main backup 0 to primary − 1. Firmware `SettingsBounds.hpp`, Android `LocatorSettingsBounds.kt`; change both together.
 - **Push rule both ways** (fschroer): moving one member of a pair onto the other moves the other a step, until a limit. Console `[`/`]`, app arrows and typed values all apply it. A typed value pushes from the pair **as it stood when typing began**, so typing 300 through 3 and 30 does not drag the backup down.
 - **App:** an out-of-range typed value is shown with its reason and Update is held. The Channels screen's channel field (0–63) had the same flaw and is fixed too.
@@ -14,7 +14,7 @@ Orientation note for resuming work. Detail lives in the linked artifacts; this i
 
 📋 **iOS lags** (`UI_PARITY.md`): still commits typed values unchecked and allows a 3.0 s drogue backup. The locator refuses what it sends out of range, so it is not a safety gap, but the user is not told why.
 
-🧪 **Bench test:** before flashing, use the OLD app to type a main of 2500 into the locator; flash, and confirm it boots to 130/100 m; type 2500 into a main field and confirm Update stays disabled; walk each pair onto its partner with the arrows, both directions, in the app and in the console.
+🧪 **Bench test (passed 2026-10-06):** before flashing, use the OLD app to type a main of 2500 into the locator; flash, and confirm it boots to 130/100 m; type 2500 into a main field and confirm Update stays disabled; walk each pair onto its partner with the arrows, both directions, in the app and in the console.
 
 ## 2026-10-01 (fix) — #49 whole-record transfer, background completion and resume: BENCH-VALIDATED on Android
 
