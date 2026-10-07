@@ -64,6 +64,13 @@ the locator's archive in name, storage and presentation.**
    flight is signed off at the pad), the **receiver channel** changing, a **different
    locator** connecting, the **app stopping**, or the **next launch**.
 
+   "The receiver channel changing" means **a known channel replaced by a different
+   known channel** (amended 2026-10-06, [#51](https://github.com/fschroer/steam-pigeon-locator/issues/51)). The app learning a channel it did not
+   know is not a change, and nor is it forgetting one. The Nike Smoke log opened
+   before the receiver had reported its channel, carried a placeholder 0, and closed
+   itself when the first real report said 44, losing the landing and the walk-in on a
+   flight that never left channel 44. See decision 9.
+
 4. **A dropped BLE link does not close the log.** The connected-locator id goes null on
    a disconnect as well as on a deliberate switch (2026-08-30), and those are not alike:
    a dropout during recovery is the case this log exists to capture. Only a *different*
@@ -108,6 +115,17 @@ the locator's archive in name, storage and presentation.**
    pad for an hour that distinction is the whole value of the number. Never having
    heard one is reported as `batteries=unknown` rather than omitted, so it cannot be
    confused with an older app that wrote no clause.
+
+9. **An unknown is written as `unknown`, never as 0** (2026-10-06, [#51](https://github.com/fschroer/steam-pigeon-locator/issues/51)). 0 is a
+   real LoRa channel, so a placeholder 0 is indistinguishable from data. The app's
+   receiver channel is now *unknown* (null) until the receiver reports one, in a
+   `PreLaunchData` stamp or a `ReceiverInfo`. The header writes
+   `receiver_channel=unknown` and `locator_id=unknown`. The rows already wrote
+   unknowns as blank (decision 6).
+   - The same placeholder had wider reach than the log. A receiver rename carries the
+     channel in the same message, so a rename sent before the channel was known would
+     have moved the receiver to channel 0. The app now refuses to send one until the
+     channel is known.
 
 ## Consequences
 

@@ -2,6 +2,20 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-10-06 (fix) — #51 the receiver channel is unknown until reported, not 0 — Android only; NOT on a phone
+
+✅ **Android:** `ReceiverConfig.channel` is now `Int?` (null = not yet reported). Unit tests pass (6 new).
+- **Flight-log close rule:** `FlightLog.receiverChannelTransition` closes the log only when one known channel is replaced by a different known one. Unknown → known is learning, not changing. This was the Nike Smoke log, closed mid-recovery by `0 -> 44`.
+- **Header:** `receiver_channel=unknown` and `locator_id=unknown` instead of `0`.
+- **Found while fixing:**
+  - A receiver **rename** sends name and channel together, so a rename before the channel was known would have moved the receiver to channel 0. `changeReceiverConfig` now refuses without a channel, and Receiver Settings' Update waits for one.
+  - The Channels screen's Update now needs a typed channel while the receiver's is unknown.
+  - "Nothing moved" is no longer claimed with the receiver's channel unknown.
+  - Search candidates leave out an unknown current channel.
+- ADR-0030 is amended (decision 3, and a new decision 9). The manual's event table no longer warns about a spurious `0 -> N`.
+
+📋 **iOS has the same bug** (`ReceiverConfig.channel: Int = 0`, the `didSet` watcher, `locator_id=\(… ?? 0)`). Recorded in `UI_PARITY.md`; not ported.
+
 ## 2026-10-06 (build) — #57 flight build moved -O0 → -Og, ~87 KB of flash free — [ADR-0035](adr/0035-flight-build-at-og.md). Builds; NOT yet on hardware
 
 ✅ **Decided by fschroer: -Og everywhere.** `.cproject` (C and C++) and the generated `Debug/` makefiles are on -Og. Whole image measured at each level: -O0 262,132 B (12 B free), **-Og 173,200 B (~87 KB free)**, -Os 153,596 B, -O2 175,828 B. #50's two `#pragma GCC optimize("Os")` stopgaps are removed. No new warnings at -Og.

@@ -1585,7 +1585,7 @@ A log still being written says so on its row, and can be shared while it is open
 
 | Event | Meaning |
 |---|---|
-| `session_opened` | The first row of every file: which locator and receiver, the app version, and the last battery readings heard before launch (see below). |
+| `session_opened` | The first row of every file: which locator and receiver, the receiver's channel, the app version, and the last battery readings heard before launch (see below). Anything the app had not heard yet reads `unknown`, never 0, since 0 is a real channel. |
 | `session_closed` | The last row: why the log stopped (`detail` says which of the reasons in the list above). |
 | `launch_detected` | The rocket left the pad. The file is named for this moment. |
 | `flight_state_changed` | The locator moved to a new flight state, e.g. `Burnout -> DroguePrimaryEvent`. With about one message a second, fast states in between are often never seen. |
@@ -1594,7 +1594,7 @@ A log still being written says so on its row, and can be shared while it is open
 | `link_quality_changed` | The `link_quality` verdict changed, e.g. `Normal -> Congested`. |
 | `connection_changed` | The phone's Bluetooth link to the receiver went up or down. A gap in the rows with this nearby is the phone, not the rocket. |
 | `armed_state_changed` | The locator was armed or disarmed. Disarming also closes the log. |
-| `receiver_channel_changed` | The receiver's channel changed; closes the log. ⚠️ On current app versions this can appear **spuriously** as `0 -> N` when the app hears the receiver's channel for the first time, and close the log early ([#51](https://github.com/fschroer/steam-pigeon-locator/issues/51)). |
+| `receiver_channel_changed` | The receiver moved from one channel to another; closes the log. The app learning the channel for the first time is not a change and does not close it. (App versions before October 2026 could log a spurious `0 -> N` here and close the log early — [#51](https://github.com/fschroer/steam-pigeon-locator/issues/51).) |
 | `locator_changed` | The app switched to a different locator; closes the log. |
 
 ⚡ **The battery columns are blank on an armed flight, and that is not a fault.** Battery levels ride only on the locator's on-pad message, and the locator stops sending that the moment you arm it — so a log, which begins two seconds before launch, never contains one. **Read the batteries off the `session_opened` row instead:** it carries `locator_batt_mv`, `receiver_batt_mv` and `batt_age_s`, the last reading heard before arming and how long before the launch it arrived. If the app was started after the rocket was already armed it never heard one at all, and that row says `batteries=unknown` rather than guessing.
