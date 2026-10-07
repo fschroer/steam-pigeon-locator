@@ -2,6 +2,21 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-10-06 (fix) — #52 deployment status byte: masked per channel, archived, decoded once — firmware + Android; NOT on hardware
+
+✅ **Firmware:** builds at -Og. New suite `Tests/DeployStats` passes 30/0.
+- All 20 fire and reset writes go through `DeployStats::MarkFired` / `MarkPostFire`, which take only the channel's own continuity bit. The old shifts put the whole nibble into each byte. **Channel 1's `status << 4` also wrote channels 2–4 into bits 5–7**, which the issue didn't list.
+- The landing event now archives the real stat bytes instead of the mode. Same one-byte slot; mode is still bits 0–2.
+
+✅ **Android:** `DeployChannelStats.fromByte` is the one decoder, and gains `continuity` (bit 6, live). Telemetry's fired flags, the channel-continuity colors, and the log's `deploy_fired_mask` / `deploy_armed_mask` all use it. `DeployChannelStatsTest` adds 4 tests.
+- **Wider than the issue said:** telemetry's "continuity" was bit 5, which is 0 until a charge fires. And `Unused` is mode 7, which has bit 2 set, so every unused channel decoded as fired. Neither showed on screen: the panel's channel list is drawn only from pre-launch frames, which decode `deployStatus` correctly, and the charge callouts filter by mode. **The visible damage was the two log columns.**
+
+📋 **Old records** carry the mode only: every channel reads "not fired" in the app. The manual §10.2 says so.
+
+📋 **iOS** has the same decode (`& 4`, `& 0x20` in `Broadcasts.swift` and `LinkViewModel.swift`). Recorded in `UI_PARITY.md`; not ported.
+
+🧪 **Bench:** deployment test or vacuum flight with e-matches on all four channels. Check that each channel's archived byte in Flight Profiles shows fired, pre-fire continuity yes and post-fire continuity no; and that the app log's `deploy_fired_mask` reads 1, 3, 7, 15 through the four events, while `deploy_armed_mask` drops each channel's bit as its match burns.
+
 ## 2026-10-06 (fix) — #51 the receiver channel is unknown until reported, not 0 — Android only; NOT on a phone
 
 ✅ **Android:** `ReceiverConfig.channel` is now `Int?` (null = not yet reported). Unit tests pass (6 new).

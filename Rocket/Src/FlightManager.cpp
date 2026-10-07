@@ -9,6 +9,7 @@ extern "C" {
 #include "Units.hpp"
 #include "Constants.hpp"
 #include "Deployment.hpp"
+#include "DeployStats.hpp"
 #include "Math.hpp"
 
 constexpr int8_t  free_fall_threshold              = -40;
@@ -501,30 +502,22 @@ void FlightManager::UpdateFlightState() {
             uint8_t status = DeploymentChannelContinuity();
             if (locator_settings.deployment_ch1_mode == DeployMode::DroguePrimary) {
                 deploy_ch1_time_ = 0;
-                deployment_ch1_stats_ = (deployment_ch1_stats_ | (1 << bit_shift_fired));
-                deployment_ch1_stats_ = (deployment_ch1_stats_ & ~(1 << bit_shift_pre_fire_continuity))
-                    | (status << bit_shift_pre_fire_continuity);
+                deployment_ch1_stats_ = DeployStats::MarkFired(deployment_ch1_stats_, status, 1);
                 DeployIfClear(1);
             }
             if (locator_settings.deployment_ch2_mode == DeployMode::DroguePrimary) {
                 deploy_ch2_time_ = 0;
-                deployment_ch2_stats_ = (deployment_ch2_stats_ | (1 << bit_shift_fired));
-                deployment_ch2_stats_ = (deployment_ch2_stats_ & ~(1 << bit_shift_pre_fire_continuity))
-                    | (status << (bit_shift_pre_fire_continuity - 1));
+                deployment_ch2_stats_ = DeployStats::MarkFired(deployment_ch2_stats_, status, 2);
                 DeployIfClear(2);
             }
             if (locator_settings.deployment_ch3_mode == DeployMode::DroguePrimary) {
                 deploy_ch3_time_ = 0;
-                deployment_ch3_stats_ = (deployment_ch3_stats_ | (1 << bit_shift_fired));
-                deployment_ch3_stats_ = (deployment_ch3_stats_ & ~(1 << bit_shift_pre_fire_continuity))
-                    | (status << (bit_shift_pre_fire_continuity - 2));
+                deployment_ch3_stats_ = DeployStats::MarkFired(deployment_ch3_stats_, status, 3);
                 DeployIfClear(3);
             }
             if (locator_settings.deployment_ch4_mode == DeployMode::DroguePrimary) {
                 deploy_ch4_time_ = 0;
-                deployment_ch4_stats_ = (deployment_ch4_stats_ | (1 << bit_shift_fired));
-                deployment_ch4_stats_ = (deployment_ch4_stats_ & ~(1 << bit_shift_pre_fire_continuity))
-                    | (status << (bit_shift_pre_fire_continuity - 3));
+                deployment_ch4_stats_ = DeployStats::MarkFired(deployment_ch4_stats_, status, 4);
                 DeployIfClear(4);
             }
             m_drogue_primary_fired_ = true;
@@ -539,30 +532,22 @@ void FlightManager::UpdateFlightState() {
             uint8_t status = DeploymentChannelContinuity();
             if (locator_settings.deployment_ch1_mode == DeployMode::DrogueBackup) {
                 deploy_ch1_time_ = 0;
-                deployment_ch1_stats_ = (deployment_ch1_stats_ | (1 << bit_shift_fired));
-                deployment_ch1_stats_ = (deployment_ch1_stats_ & ~(1 << bit_shift_pre_fire_continuity))
-                    | (status << bit_shift_pre_fire_continuity);
+                deployment_ch1_stats_ = DeployStats::MarkFired(deployment_ch1_stats_, status, 1);
                 DeployIfClear(1);
             }
             if (locator_settings.deployment_ch2_mode == DeployMode::DrogueBackup) {
                 deploy_ch2_time_ = 0;
-                deployment_ch2_stats_ = (deployment_ch2_stats_ | (1 << bit_shift_fired));
-                deployment_ch2_stats_ = (deployment_ch2_stats_ & ~(1 << bit_shift_pre_fire_continuity))
-                    | (status << (bit_shift_pre_fire_continuity - 1));
+                deployment_ch2_stats_ = DeployStats::MarkFired(deployment_ch2_stats_, status, 2);
                 DeployIfClear(2);
             }
             if (locator_settings.deployment_ch3_mode == DeployMode::DrogueBackup) {
                 deploy_ch3_time_ = 0;
-                deployment_ch3_stats_ = (deployment_ch3_stats_ | (1 << bit_shift_fired));
-                deployment_ch3_stats_ = (deployment_ch3_stats_ & ~(1 << bit_shift_pre_fire_continuity))
-                    | (status << (bit_shift_pre_fire_continuity - 2));
+                deployment_ch3_stats_ = DeployStats::MarkFired(deployment_ch3_stats_, status, 3);
                 DeployIfClear(3);
             }
             if (locator_settings.deployment_ch4_mode == DeployMode::DrogueBackup) {
                 deploy_ch4_time_ = 0;
-                deployment_ch4_stats_ = (deployment_ch4_stats_ | (1 << bit_shift_fired));
-                deployment_ch4_stats_ = (deployment_ch4_stats_ & ~(1 << bit_shift_pre_fire_continuity))
-                    | (status << (bit_shift_pre_fire_continuity - 3));
+                deployment_ch4_stats_ = DeployStats::MarkFired(deployment_ch4_stats_, status, 4);
                 DeployIfClear(4);
             }
             m_drogue_backup_fired_ = true;
@@ -577,30 +562,22 @@ void FlightManager::UpdateFlightState() {
             pre_main_velocity_ = deploy_vspeed;
             if (locator_settings.deployment_ch1_mode == DeployMode::MainPrimary) {
                 deploy_ch1_time_ = 0;
-                deployment_ch1_stats_ = (deployment_ch1_stats_ | (1 << bit_shift_fired));
-                deployment_ch1_stats_ = (deployment_ch1_stats_ & ~(1 << bit_shift_pre_fire_continuity))
-                    | (status << bit_shift_pre_fire_continuity);
+                deployment_ch1_stats_ = DeployStats::MarkFired(deployment_ch1_stats_, status, 1);
                 DeployIfClear(1);
             }
             if (locator_settings.deployment_ch2_mode == DeployMode::MainPrimary) {
                 deploy_ch2_time_ = 0;
-                deployment_ch2_stats_ = (deployment_ch2_stats_ | (1 << bit_shift_fired));
-                deployment_ch2_stats_ = (deployment_ch2_stats_ & ~(1 << bit_shift_pre_fire_continuity))
-                    | (status << (bit_shift_pre_fire_continuity - 1));
+                deployment_ch2_stats_ = DeployStats::MarkFired(deployment_ch2_stats_, status, 2);
                 DeployIfClear(2);
             }
             if (locator_settings.deployment_ch3_mode == DeployMode::MainPrimary) {
                 deploy_ch3_time_ = 0;
-                deployment_ch3_stats_ = (deployment_ch3_stats_ | (1 << bit_shift_fired));
-                deployment_ch3_stats_ = (deployment_ch3_stats_ & ~(1 << bit_shift_pre_fire_continuity))
-                    | (status << (bit_shift_pre_fire_continuity - 2));
+                deployment_ch3_stats_ = DeployStats::MarkFired(deployment_ch3_stats_, status, 3);
                 DeployIfClear(3);
             }
             if (locator_settings.deployment_ch4_mode == DeployMode::MainPrimary) {
                 deploy_ch4_time_ = 0;
-                deployment_ch4_stats_ = (deployment_ch4_stats_ | (1 << bit_shift_fired));
-                deployment_ch4_stats_ = (deployment_ch4_stats_ & ~(1 << bit_shift_pre_fire_continuity))
-                    | (status << (bit_shift_pre_fire_continuity - 3));
+                deployment_ch4_stats_ = DeployStats::MarkFired(deployment_ch4_stats_, status, 4);
                 DeployIfClear(4);
             }
             m_main_primary_fired_ = true;
@@ -616,30 +593,22 @@ void FlightManager::UpdateFlightState() {
                 pre_main_velocity_ = deploy_vspeed;
             if (locator_settings.deployment_ch1_mode == DeployMode::MainBackup) {
                 deploy_ch1_time_ = 0;
-                deployment_ch1_stats_ = (deployment_ch1_stats_ | (1 << bit_shift_fired));
-                deployment_ch1_stats_ = (deployment_ch1_stats_ & ~(1 << bit_shift_pre_fire_continuity))
-                    | (status << bit_shift_pre_fire_continuity);
+                deployment_ch1_stats_ = DeployStats::MarkFired(deployment_ch1_stats_, status, 1);
                 DeployIfClear(1);
             }
             if (locator_settings.deployment_ch2_mode == DeployMode::MainBackup) {
                 deploy_ch2_time_ = 0;
-                deployment_ch2_stats_ = (deployment_ch2_stats_ | (1 << bit_shift_fired));
-                deployment_ch2_stats_ = (deployment_ch2_stats_ & ~(1 << bit_shift_pre_fire_continuity))
-                    | (status << (bit_shift_pre_fire_continuity - 1));
+                deployment_ch2_stats_ = DeployStats::MarkFired(deployment_ch2_stats_, status, 2);
                 DeployIfClear(2);
             }
             if (locator_settings.deployment_ch3_mode == DeployMode::MainBackup) {
                 deploy_ch3_time_ = 0;
-                deployment_ch3_stats_ = (deployment_ch3_stats_ | (1 << bit_shift_fired));
-                deployment_ch3_stats_ = (deployment_ch3_stats_ & ~(1 << bit_shift_pre_fire_continuity))
-                    | (status << (bit_shift_pre_fire_continuity - 2));
+                deployment_ch3_stats_ = DeployStats::MarkFired(deployment_ch3_stats_, status, 3);
                 DeployIfClear(3);
             }
             if (locator_settings.deployment_ch4_mode == DeployMode::MainBackup) {
                 deploy_ch4_time_ = 0;
-                deployment_ch4_stats_ = (deployment_ch4_stats_ | (1 << bit_shift_fired));
-                deployment_ch4_stats_ = (deployment_ch4_stats_ & ~(1 << bit_shift_pre_fire_continuity))
-                    | (status << (bit_shift_pre_fire_continuity - 3));
+                deployment_ch4_stats_ = DeployStats::MarkFired(deployment_ch4_stats_, status, 4);
                 DeployIfClear(4);
             }
             m_main_backup_fired_ = true;
@@ -670,10 +639,15 @@ void FlightManager::UpdateFlightState() {
             // captured in the Landed state before the record is closed.
             m_landed_tail_remaining_ = kLandedTailSamples;
             archive_.WriteEvent(FlightArchive::Statistic::LandingTimestampMs, flight_time_ms);
-            archive_.WriteEvent(FlightArchive::Statistic::DeploymentCh1Stats, locator_settings.deployment_ch1_mode);
-            archive_.WriteEvent(FlightArchive::Statistic::DeploymentCh2Stats, locator_settings.deployment_ch2_mode);
-            archive_.WriteEvent(FlightArchive::Statistic::DeploymentCh3Stats, locator_settings.deployment_ch3_mode);
-            archive_.WriteEvent(FlightArchive::Statistic::DeploymentCh4Stats, locator_settings.deployment_ch4_mode);
+            // The whole status byte, not just the configured mode (#52): which
+            // channels fired, and their continuity before and after, is the
+            // question a failure investigation asks first, and the archive held no
+            // answer to it.  The mode is still bits 0-2, so readers of the old
+            // mode-only value are unaffected; the slot is the same one byte.
+            archive_.WriteEvent(FlightArchive::Statistic::DeploymentCh1Stats, deployment_ch1_stats_);
+            archive_.WriteEvent(FlightArchive::Statistic::DeploymentCh2Stats, deployment_ch2_stats_);
+            archive_.WriteEvent(FlightArchive::Statistic::DeploymentCh3Stats, deployment_ch3_stats_);
+            archive_.WriteEvent(FlightArchive::Statistic::DeploymentCh4Stats, deployment_ch4_stats_);
         }
 
         noseover_time_++;
@@ -682,26 +656,22 @@ void FlightManager::UpdateFlightState() {
     // Deployment channel continuity sensing and signal reset
     if (deploy_ch1_reset_) {
         uint8_t status = DeploymentChannelContinuity();
-        deployment_ch1_stats_ = (deployment_ch1_stats_ & ~(1 << bit_shift_post_fire_continuity))
-            | (status << bit_shift_post_fire_continuity);
+        deployment_ch1_stats_ = DeployStats::MarkPostFire(deployment_ch1_stats_, status, 1);
         deploy_ch1_reset_ = false;
     }
     if (deploy_ch2_reset_) {
         uint8_t status = DeploymentChannelContinuity();
-        deployment_ch2_stats_ = (deployment_ch2_stats_ & ~(1 << bit_shift_post_fire_continuity))
-            | (status << (bit_shift_post_fire_continuity - 1));
+        deployment_ch2_stats_ = DeployStats::MarkPostFire(deployment_ch2_stats_, status, 2);
         deploy_ch2_reset_ = false;
     }
     if (deploy_ch3_reset_) {
         uint8_t status = DeploymentChannelContinuity();
-        deployment_ch3_stats_ = (deployment_ch3_stats_ & ~(1 << bit_shift_post_fire_continuity))
-            | (status << (bit_shift_post_fire_continuity - 2));
+        deployment_ch3_stats_ = DeployStats::MarkPostFire(deployment_ch3_stats_, status, 3);
         deploy_ch3_reset_ = false;
     }
     if (deploy_ch4_reset_) {
         uint8_t status = DeploymentChannelContinuity();
-        deployment_ch4_stats_ = (deployment_ch4_stats_ & ~(1 << bit_shift_post_fire_continuity))
-            | (status << (bit_shift_post_fire_continuity - 3));
+        deployment_ch4_stats_ = DeployStats::MarkPostFire(deployment_ch4_stats_, status, 4);
         deploy_ch4_reset_ = false;
     }
 

@@ -1392,6 +1392,8 @@ And per channel:
 
 ⚡ **Fired = yes, pre-fire continuity = yes, post-fire continuity = yes** is the signature of a channel that was commanded, had a good igniter, and still didn't light. Investigate the igniter and the charge, not the locator.
 
+⚠️ **Flights recorded before the October 2026 locator firmware show every channel as not fired**, with no continuity, whatever actually happened. Those records stored only each channel's mode ([#52](https://github.com/fschroer/steam-pigeon-locator/issues/52)). For those flights, the deployment *times* above are the evidence: they say when the locator's logic decided to fire, not whether a charge went off.
+
 ## 10.3 Export flight path
 
 > ⚠️ **WORK IN PROGRESS.** Flight-path export is not currently reachable from the app's menu. Use the USB-C CSV export (§10.4) for the locator's own record, or the app flight log (§10.7) for what the phone received and announced — the two hold different things.
@@ -1565,7 +1567,7 @@ A log still being written says so on its row, and can be shared while it is open
 | `bad_frames` | Frames the receiver heard but could not decode since the previous row — another transmitter, or ours arriving damaged. |
 | `link_quality` | The app's verdict for that moment (§2.5): `Normal` — nothing to report; `Congested` — the channel is busy but our messages are still clean; `Interference` — loud messages arriving damaged, something is degrading the link. |
 | `armed` | 1 if the locator reported itself armed, 0 if not. |
-| `deploy_armed_mask`, `deploy_fired_mask` | Meant to show, one bit per channel (1 = channel 1, 2 = channel 2, 4 = channel 3, 8 = channel 4), which channels had continuity and which had fired. ⚠️ **Do not rely on these yet** — the app reads the wrong bits from the locator's message, so they do not mean what their names say ([#52](https://github.com/fschroer/steam-pigeon-locator/issues/52)). |
+| `deploy_armed_mask`, `deploy_fired_mask` | One bit per channel (1 = channel 1, 2 = channel 2, 4 = channel 3, 8 = channel 4). `deploy_armed_mask` is which channels had **continuity** at that moment; `deploy_fired_mask` is which channels the locator had **fired**. ⚠️ In logs from Android app versions before October 2026 (and from the iOS app until it is updated), both columns are wrong: the app read the wrong bits ([#52](https://github.com/fschroer/steam-pigeon-locator/issues/52)). |
 | `drogue_detected`, `main_detected` | 1 once the locator has *inferred* from the descent rate that that parachute is working. An inference, not a measurement: it can be set with no working parachute at all ([#54](https://github.com/fschroer/steam-pigeon-locator/issues/54)). |
 | `pad_alert` | The not-armed alert (§6.6): `Quiet`, `Alerting`, or `Snoozed`. On-pad messages only. |
 | `locator_batt_mv`, `receiver_batt_mv` | Battery voltages, millivolts. **Blank on an armed flight — see below.** |
