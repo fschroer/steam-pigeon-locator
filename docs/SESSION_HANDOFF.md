@@ -2,6 +2,16 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-10-14 (fix) — #54 physical deployment inferred from a sustained slowdown; app says "opening detected" — [ADR-0036](adr/0036-deployment-opening-inference.md). NOT on hardware
+
+✅ **Decided by fschroer:** velocity only. Drogue should catch most real drogues even though Nike reads as one. The wording is hedged.
+- **Old detectors replayed over 25 records:** the drogue fired on every one at about 3.6 s, which was the near-apogee window expiring. The main reference was one sample, which on Nike was an oscillation trough.
+- **New detector** (`DescentSlowdown.hpp`, `Tests/DescentSlowdown` 20/0): a 1 s mean, held for 1.5 s while still descending. Drogue needs 5 m/s slower than the fastest descent since drogue primary; main needs 8 m/s slower than the mean at main primary. Replayed through the real `FlightManager` on 28 records: drogue on 26, main on 3, Nike's main no longer inferred. `Tests/FlightReplay` now prints both inferences.
+- **Rejected alternative:** a ≥4 g spike + slowdown rule had no false positive in the corpus, Nike included, but was declined. It's recorded in the ADR in case accelerometer corroboration is revisited.
+- **Apps:** both say "Drogue opening detected." / "Main opening detected." The iOS change is the string plus its one test assertion. It wasn't compiled (no Xcode here).
+
+🧪 **Bench:** `SP_BENCH_REPLAY` a record with a known main opening (Steam Pigeon Gold 2026-08-01) and listen for "Main opening detected."
+
 ## 2026-10-06 (fix) — #53 GPS velocity archived in dm/s, ARCHIVE_VERSION 7 — firmware; NOT on hardware
 
 ✅ **Decided by fschroer: dm/s everywhere, with a version bump.** I'd recommended a flag in a reserved byte, to avoid the bump. `gps_vel_{n,e,d}_cms` → `_dms` in the same bytes; `FlightSample` stays 88 B and 9 records. ±3,276.7 m/s at 0.1 m/s. `PackVelDms` clamps at ±32,767 and keeps −32,768 as "no velocity". The CSV export divides by 10 and prints one decimal; column names are unchanged.

@@ -1131,14 +1131,16 @@ With **Enable Speech** on (§2.8), the app announces:
 | "*Drogue backup charge*" | The drogue backup charge has been fired. |
 | "*Main charge*" | The main primary charge has been fired. |
 | "*Main backup charge*" | The main backup charge has been fired. |
-| "*Drogue deployed*" | The locator has *detected the parachute actually taking hold* — a change in descent rate. |
-| "*Main deployed*" | Same, for the main. |
+| "*Drogue opening detected*" | After the drogue charge, the descent has slowed by at least 5 m/s from its fastest and stayed slower for 1.5 s. An inference from the descent rate, not a sighting of the canopy. |
+| "*Main opening detected*" | After the main charge, the descent has slowed by at least 8 m/s from its rate when the main charge fired, and stayed slower for 1.5 s. |
 | "*Descent warning, [number] meters per second…*" | Descending faster than **50 m/s** — fast enough that no chute is holding. Repeated at most every 10 s, with the distance and direction from the launch point when the rocket has a GPS fix. |
 | "*Landing…*" | Touchdown, with the distance and direction from the launch point. Said once. If the link died on the way down, the app works out when the rocket must have reached the ground from the last altitude and descent rate it heard, and calls the landing then — you get the callout even though nothing was received for the last part of the descent. |
 | "*GPS fix lost*" / "*GPS fix restored*" | The locator is still being heard but has stopped (or resumed) reporting a good fix. |
 | "*Telemetry lost*" / "*Telemetry restored*" | More than 3 s with no valid message from the locator (see §8.4), and its recovery. |
 
-⚡ **"Charge" and "deployed" are two different things.** "*Main charge*" means the locator energized the channel. "*Main deployed*" means it then detected the rocket slowing down. Hearing the charge but not the deployment is exactly the signature of a charge that fired but didn't open the bay — worth knowing in real time.
+⚡ **"Charge" and "opening detected" are two different things.** "*Main charge*" means the locator energized the channel. "*Main opening detected*" means the descent then slowed and stayed slower. Hearing the charge but not the opening is worth knowing in real time, with two caveats:
+- **Silence is not proof of failure.** A drogue that opens right at apogee, before the rocket has built any speed, leaves no slowdown to measure.
+- **A detection is not proof of a good canopy.** Anything that adds drag reads the same way. In September 2026 a rocket that broke up at Mach 1.2 fell in pieces under a shredded main, and its descent read as a drogue opening. Watch the descent rate too: the app's descent warning above 50 m/s does not depend on this inference.
 
 📍 **A spoken distance always means a real GPS fix.** Any callout that quotes a distance and direction only does so when the locator reports a good fix and a real launch position was captured. When either is missing the app says "*location unknown*" or simply omits the distance — it will never read out a position it does not have.
 
@@ -1375,7 +1377,7 @@ The profile is marked with the events the locator recorded:
 | **Apogee** | The highest point the barometer recorded. |
 | **Noseover** | The moment the locator *decided* the rocket had stopped climbing — and the trigger for the drogue timing. |
 | **Drogue Primary** / **Drogue Backup** | Each drogue charge firing. |
-| **Drogue Deploy** | Where the locator detected the drogue actually taking hold — a change in descent rate. |
+| **Drogue Deploy** | Where the locator inferred a drogue opening: the descent slowed and stayed slower (§7, "*Drogue opening detected*"). An inference, not a sighting. |
 | **Main Primary** / **Main Backup** | Each main charge firing. |
 | **Main Deploy** | Same, for the main. |
 | **Landing** | Touchdown. |
@@ -1417,7 +1419,7 @@ This gives you everything the locator recorded, at full rate, for analysis in a 
 | `Burnout time:` | §10.2 **Burnout**. On fast rockets this runs several seconds late ([#45](https://github.com/fschroer/steam-pigeon-locator/issues/45)). |
 | `Apogee time:`, `Noseover time:` | §10.2 **Apogee** and **Noseover**. |
 | `Drogue primary time:`, `Drogue backup time:` | When each drogue charge was due, per the settings. |
-| `Drogue velocity threshold time:` | §10.2 **Drogue Deploy** — where the locator concluded the drogue had taken hold. |
+| `Drogue velocity threshold time:` | §10.2 **Drogue Deploy** — where the locator inferred a drogue opening. |
 | `Main primary time:`, `Main backup time:` | When each main charge was due. |
 | `Main velocity threshold time:` | §10.2 **Main Deploy**. |
 | `Landing time:` | §10.2 **Landing**. |
@@ -1570,7 +1572,7 @@ A log still being written says so on its row, and can be shared while it is open
 | `link_quality` | The app's verdict for that moment (§2.5): `Normal` — nothing to report; `Congested` — the channel is busy but our messages are still clean; `Interference` — loud messages arriving damaged, something is degrading the link. |
 | `armed` | 1 if the locator reported itself armed, 0 if not. |
 | `deploy_armed_mask`, `deploy_fired_mask` | One bit per channel (1 = channel 1, 2 = channel 2, 4 = channel 3, 8 = channel 4). `deploy_armed_mask` is which channels had **continuity** at that moment; `deploy_fired_mask` is which channels the locator had **fired**. ⚠️ In logs from Android app versions before October 2026 (and from the iOS app until it is updated), both columns are wrong: the app read the wrong bits ([#52](https://github.com/fschroer/steam-pigeon-locator/issues/52)). |
-| `drogue_detected`, `main_detected` | 1 once the locator has *inferred* from the descent rate that that parachute is working. An inference, not a measurement: it can be set with no working parachute at all ([#54](https://github.com/fschroer/steam-pigeon-locator/issues/54)). |
+| `drogue_detected`, `main_detected` | 1 once the locator has *inferred* an opening from the descent rate: slowed and held slower for 1.5 s ([ADR-0036](https://github.com/fschroer/steam-pigeon-locator/blob/master/docs/adr/0036-deployment-opening-inference.md)). An inference, not a measurement: anything that adds drag sets it, including a broken-up rocket with no working parachute. |
 | `pad_alert` | The not-armed alert (§6.6): `Quiet`, `Alerting`, or `Snoozed`. On-pad messages only. |
 | `locator_batt_mv`, `receiver_batt_mv` | Battery voltages, millivolts. **Blank on an armed flight — see below.** |
 | `receiver_channel` | The LoRa channel the receiver was on. |

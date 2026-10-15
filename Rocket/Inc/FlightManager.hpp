@@ -10,6 +10,7 @@ extern "C" {
 #include "Navigation.hpp"
 #include "PowerManagement.hpp"
 #include "AirStart.hpp"
+#include "DescentSlowdown.hpp"
 
 class FlightManager {
 public:
@@ -154,7 +155,10 @@ private:
     bool         deploy_ch2_reset_      = false;
     bool         deploy_ch3_reset_      = false;
     bool         deploy_ch4_reset_      = false;
-    float        pre_main_velocity_     = 0.0f;
+    // #54: physical drogue / main inference from the descent rate.
+    DescentSlowdown::TrailingMean descent_mean_;
+    DescentSlowdown::Detector     drogue_slowdown_ = DescentSlowdown::Drogue();
+    DescentSlowdown::Detector     main_slowdown_   = DescentSlowdown::Main();
     bool         deployment_queued_[4]  = { false };
 
     // Launch detection debounce

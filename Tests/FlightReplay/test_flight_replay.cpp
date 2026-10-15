@@ -887,6 +887,10 @@ static int replayCsv(int argc, char** argv) {
     rep("Main primary",  Stat::MainPrimaryDeployTimestampMs);
     rep("Main backup",   Stat::MainBackupDeployTimestampMs);
     rep("Landing",       Stat::LandingTimestampMs);
+    // #54: the physical-deployment inference (DescentSlowdown.hpp), so a change
+    // to it can be checked against real flights rather than argued about.
+    rep("Drogue opening inferred", Stat::DrogueVelocityThresholdTimestampMs);
+    rep("Main opening inferred",   Stat::MainVelocityThresholdTimestampMs);
     printf("  Max altitude               %.1f m\n", ar.Event(Stat::MaxAltitudeM));
     printf("  Channels fired:");
     for (uint8_t ch = 1; ch <= 4; ++ch) if (g_bench.FiredOn(ch)) printf(" ch%u@%.0fms", ch, (double)g_bench.FirstOnMs(ch));

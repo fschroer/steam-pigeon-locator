@@ -13,8 +13,9 @@ extern "C" {
 #include "Math.hpp"
 
 constexpr int8_t  free_fall_threshold              = -40;
+// Sizes the near-apogee window only (time to fall to 30 m/s from rest, +0.5 s).
+// It was also the physical drogue test until #54; see DescentSlowdown.hpp.
 constexpr int8_t  drogue_velocity_threshold        = -30;
-constexpr uint8_t parachute_velocity_change_threshold = 5;
 
 constexpr DeployMode default_deploy_ch1_mode            = DeployMode::DroguePrimary;
 constexpr DeployMode default_deploy_ch2_mode            = DeployMode::DrogueBackup;
@@ -495,6 +496,7 @@ void FlightManager::UpdateFlightState() {
         const DeploySource dsrc   = SelectDeploymentSource(nav_solution, baro_raw);
         const float deploy_agl    = dsrc.agl_m;
         const float deploy_vspeed = dsrc.vspeed_mps;
+        descent_mean_.Add(deploy_vspeed);   // #54: the physical-deployment inference
 
         // Drogue primary
         if (!m_drogue_primary_fired_
@@ -559,7 +561,6 @@ void FlightManager::UpdateFlightState() {
         if (!m_main_primary_fired_
                 && deploy_agl <= locator_settings.main_primary_deploy_altitude) {
             uint8_t status = DeploymentChannelContinuity();
-            pre_main_velocity_ = deploy_vspeed;
             if (locator_settings.deployment_ch1_mode == DeployMode::MainPrimary) {
                 deploy_ch1_time_ = 0;
                 deployment_ch1_stats_ = DeployStats::MarkFired(deployment_ch1_stats_, status, 1);
@@ -589,8 +590,6 @@ void FlightManager::UpdateFlightState() {
         if (!m_main_backup_fired_
                 && deploy_agl <= locator_settings.main_backup_deploy_altitude) {
             uint8_t status = DeploymentChannelContinuity();
-            if (deploy_vspeed < pre_main_velocity_)
-                pre_main_velocity_ = deploy_vspeed;
             if (locator_settings.deployment_ch1_mode == DeployMode::MainBackup) {
                 deploy_ch1_time_ = 0;
                 deployment_ch1_stats_ = DeployStats::MarkFired(deployment_ch1_stats_, status, 1);
@@ -616,17 +615,14 @@ void FlightManager::UpdateFlightState() {
             archive_.WriteEvent(FlightArchive::Statistic::MainBackupDeployTimestampMs, flight_time_ms);
         }
 
-        // Physical drogue deployment detection
-        if (flight_state_ >= FlightStates::DroguePrimaryEvent
-                && !near_apogee_
-                && deploy_vspeed > drogue_velocity_threshold) {
+        // Physical drogue / main inference (#54, DescentSlowdown.hpp): the 1 s mean
+        // descent rate slower than its reference by a margin, held for 1.5 s while
+        // still descending.  Observational only -- nothing is gated on these bits.
+        if (flight_state_ >= FlightStates::DroguePrimaryEvent && drogue_slowdown_.Update(descent_mean_)) {
             physical_deployment_stats_ = (physical_deployment_stats_ | (1 << bit_shift_drogue_deployed));
             archive_.WriteEvent(FlightArchive::Statistic::DrogueVelocityThresholdTimestampMs, flight_time_ms);
         }
-
-        // Physical main deployment detection
-        if (flight_state_ >= FlightStates::MainPrimaryEvent
-                && deploy_vspeed > pre_main_velocity_ + parachute_velocity_change_threshold) {
+        if (flight_state_ >= FlightStates::MainPrimaryEvent && main_slowdown_.Update(descent_mean_)) {
             physical_deployment_stats_ = (physical_deployment_stats_ | (1 << bit_shift_main_deployed));
             archive_.WriteEvent(FlightArchive::Statistic::MainVelocityThresholdTimestampMs, flight_time_ms);
         }
@@ -844,7 +840,9 @@ void FlightManager::ResetFlight() {
     deploy_ch2_reset_       = false;
     deploy_ch3_reset_       = false;
     deploy_ch4_reset_       = false;
-    pre_main_velocity_      = 0.0f;
+    descent_mean_.Reset();
+    drogue_slowdown_.Reset();
+    main_slowdown_.Reset();
     flight_time_ms          = 0;
     m_launch_candidate_ms_  = 0;
     m_last_freefall_ms_     = 0;

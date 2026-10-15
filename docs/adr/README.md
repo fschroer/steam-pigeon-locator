@@ -50,5 +50,6 @@ Write an ADR for a decision that is costly to reverse, or that future work must 
 | [0033](0033-serialized-ble-writes.md) | Outbound BLE writes are serialized by the app — a busy transport is not a device failure | Accepted |
 | [0034](0034-deployment-settings-bounds.md) | Deployment settings have one bounds table, enforced at every boundary — typed values are refused, not clamped | Accepted |
 | [0035](0035-flight-build-at-og.md) | The locator's flight build compiles at -Og, not -O0 | Accepted |
+| [0036](0036-deployment-opening-inference.md) | A parachute opening is inferred from a sustained descent slowdown, and the app says "opening detected", not "deployed" | Accepted |
 
 > **Numbering note (resolved 2026-08-03):** the iOS-port ADR and the launch-detection ADR were both filed as **0015**. Launch detection was filed first (2026-07-17) and keeps the number; the iOS port moved to **0016**. Commit `4b6bb45` and any external reference calling the iOS port "ADR-0015" mean [0016](0016-ios-port-corebluetooth-and-platform-parity.md) — a note in that file records the change. When picking the next number, check this table rather than the highest number you remember.
