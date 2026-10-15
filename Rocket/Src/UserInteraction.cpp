@@ -792,11 +792,12 @@ void UserInteraction::ExportData(uint16_t archive_position) {
 				// fields first, trailing commas included.
 				StaticString<48> gps_vel_fields;
 				for (int axis = 0; axis < 3; ++axis) {
-					const int16_t cms = (axis == 0) ? sample_buffer[i].gps_vel_n_cms
-							    : (axis == 1) ? sample_buffer[i].gps_vel_e_cms
-							                  : sample_buffer[i].gps_vel_d_cms;
-					if (FlightArchive::GpsVelValid(cms))
-						gps_vel_fields.Append(Fmt(cms / 100.0f, 0, 2));
+					// dm/s since ARCHIVE_VERSION 7 (#53); one decimal is its resolution.
+					const int16_t dms = (axis == 0) ? sample_buffer[i].gps_vel_n_dms
+							    : (axis == 1) ? sample_buffer[i].gps_vel_e_dms
+							                  : sample_buffer[i].gps_vel_d_dms;
+					if (FlightArchive::GpsVelValid(dms))
+						gps_vel_fields.Append(Fmt(dms / 10.0f, 0, 1));
 					gps_vel_fields.Append(',');
 				}
 				// Same treatment for the non-selected accel channel: empty, not 0, when

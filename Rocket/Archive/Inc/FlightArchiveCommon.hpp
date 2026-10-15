@@ -15,7 +15,12 @@ namespace FlightArchive
     // reads as -98 m/s north.  Bumping is therefore mandatory, and it orphans every
     // record already on a device: ValidateHeaderForConfig rejects them and the data
     // menu will not list them.  Download anything you still want BEFORE flashing.
-    static constexpr uint16_t ARCHIVE_VERSION    = 0x0006u; // v6: + GPS velocity/h_acc, EKF health bits (#38)
+    //
+    // v7 (#53): GPS velocity cm/s -> dm/s, same bytes.  cm/s in an int16 pinned at
+    // 327.67 m/s, below what these rockets fly.  Same consequence as v6: old
+    // records would decode 10x too slow, so the bump is mandatory and orphans
+    // every record on a device.  Download first.
+    static constexpr uint16_t ARCHIVE_VERSION    = 0x0007u; // v7: GPS velocity in dm/s (#53)
     static constexpr uint16_t INVALID_RECORD_ID  = 0xFFFFu;
 
     static constexpr uint16_t SAMPLES_PER_SEC    = 20u;

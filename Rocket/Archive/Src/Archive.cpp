@@ -32,14 +32,15 @@ namespace {
     }
 
     // ── GPS velocity / accuracy packers (ARCHIVE_VERSION 6, #38) ──────────────
-    // cm/s in an int16 spans ±327 m/s, comfortably past any hobby trajectory.
-    // INT16_MIN is reserved as the "no velocity fix" sentinel so a genuine 0 cm/s
+    // dm/s in an int16 spans ±3,276.7 m/s (ARCHIVE_VERSION 7, #53).  cm/s spanned
+    // ±327.67 m/s, which this project's rockets have flown past: it pinned there.
+    // INT16_MIN is reserved as the "no velocity fix" sentinel so a genuine 0
     // (stationary on the pad) is not confused with an absent fix — the distinction
     // matters when replaying, because feeding a fabricated 0 into updateGpsVelocity
     // would act as a spurious ZUPT.
-    int16_t PackVelCms(float mps, bool valid) {
+    int16_t PackVelDms(float mps, bool valid) {
         if (!valid) return FlightArchive::kGpsVelInvalid;
-        float s = mps * 100.0f;
+        float s = mps * 10.0f;
         s += (s >= 0.0f) ? 0.5f : -0.5f;
         if (s >  32767.0f) s =  32767.0f;
         // Clamp one LSB above the sentinel so a saturating negative velocity can
@@ -281,9 +282,9 @@ FlightArchive::FlightSample Archive::BuildSample(const SampleInputs &in) {
 	if (in.gps) {
 		s.lat_1e7       = PackDeg1e7(in.gps->lat_rad);
 		s.lon_1e7       = PackDeg1e7(in.gps->lon_rad);
-		s.gps_vel_n_cms = PackVelCms(in.gps->vel_n_mps, in.gps->velocity_valid);
-		s.gps_vel_e_cms = PackVelCms(in.gps->vel_e_mps, in.gps->velocity_valid);
-		s.gps_vel_d_cms = PackVelCms(in.gps->vel_d_mps, in.gps->velocity_valid);
+		s.gps_vel_n_dms = PackVelDms(in.gps->vel_n_mps, in.gps->velocity_valid);
+		s.gps_vel_e_dms = PackVelDms(in.gps->vel_e_mps, in.gps->velocity_valid);
+		s.gps_vel_d_dms = PackVelDms(in.gps->vel_d_mps, in.gps->velocity_valid);
 		s.gps_h_acc_cm  = PackHAccCm(in.gps->h_acc_m);
 		s.gps_num_sv    = in.gps->num_sv;
 		s.gps_fix_type  = in.gps->fix_type;

@@ -670,7 +670,7 @@ The locator holds **9 flights**. When it's full, you can't record a new one.
 
 ⚡ **If you update the locator's firmware and the flight-record format changed, you must erase all flight memory.** Old records become unreadable and will confuse the app. **Export first, then erase.** The release notes for a firmware update will tell you if this applies.
 
-> **This applies to the current update.** The record format changed and the locator now stores **9 flights instead of 10** — see §10.4. Export anything you want to keep, then erase.
+> **This applies to the October 2026 update** (GPS velocity range, §10.4), as it did to the September 2026 one (9 flights instead of 10). Export anything you want to keep, then erase.
 
 > ⚠️ **Update the phone app at the same time.** The list of stored flights is sent over the radio in a message whose size depends on how many flights the locator holds. A locator on the new firmware talking to an older app will show an **empty flight list** — not an error, just nothing. Updating both together avoids it.
 
@@ -1439,7 +1439,7 @@ This gives you everything the locator recorded, at full rate, for analysis in a 
 | `flight_state` | Which state the flight state machine was in — a number; see **Flight state values** below. |
 | `armed` | Whether the locator was armed for this sample — 1 or 0. Because a disarmed locator now records a full flight (§7.1), this is the column that tells you whether the charges were ever going to fire. |
 | `ekf_health` | **0 means the combined solution was working on that sample.** Anything else means `fused_agl_m` and `fused_vspeed_mps` on that row cannot be trusted — see the note below. |
-| `gps_vel_n_mps`, `gps_vel_e_mps`, `gps_vel_d_mps` | GPS velocity north / east / **down** (so a climbing rocket has a *negative* `gps_vel_d_mps`). **Blank** when that fix carried no velocity — blank is not zero. ⚠️ The record cannot hold more than **±327.67 m/s**; a faster rocket shows exactly that value, which is a ceiling, not a reading ([#53](https://github.com/fschroer/steam-pigeon-locator/issues/53)). |
+| `gps_vel_n_mps`, `gps_vel_e_mps`, `gps_vel_d_mps` | GPS velocity north / east / **down** (so a climbing rocket has a *negative* `gps_vel_d_mps`). **Blank** when that fix carried no velocity — blank is not zero. Recorded to 0.1 m/s, up to ±3,276.7 m/s. ⚠️ Flights recorded before the October 2026 locator firmware could hold no more than **±327.67 m/s**. In those, a faster rocket shows exactly that value, which is a ceiling, not a reading ([#53](https://github.com/fschroer/steam-pigeon-locator/issues/53)). |
 | `gps_h_acc_m` | How accurate the GPS thought its own position was, in meters. |
 | `tilt_deg` | Angle off vertical, from the locator's gyros. **Trustworthy through boost and coast; not under the canopy.** On two 2026-09-26 flights it matched the direction GPS said the rocket was traveling to within a few degrees all the way to apogee — including the steady tip-over toward horizontal a stable rocket makes as it slows. After deployment the tumbling defeats it: on flights analyzed 2026-09-07 it was wrong by more than 60° for the whole descent. Read it for boost and coast; ignore it under the canopy. |
 | `q_w`, `q_x`, `q_y`, `q_z` | Orientation, as a quaternion. |
@@ -1487,7 +1487,9 @@ The state only ever moves forward, and it can **skip**: if two events come due i
 
 > ⚡ **The timing columns are gone**, and the column order changed. `oc_start_us`, `oc_end_us`, `process_start_us` and `process_dur_us` were replaced by the GPS velocity and accuracy columns above. If you have a spreadsheet that reads columns by position rather than by name, it will need updating. Per-cycle timing is still available live from the data menu's `t` breakdown.
 
-> ⚡ **This firmware update erases your stored flights, and the locator now holds 9 instead of 10.** The record format changed enough that older records cannot be read back at all — the data menu will not list them. **Export everything you want to keep before you flash.** The flight is 8 minutes either way; only the number of stored flights changed, to make room for the extra data in each one.
+> ⚡ **The October 2026 firmware changes the record format again** ([#53](https://github.com/fschroer/steam-pigeon-locator/issues/53)): GPS velocity is now stored in tenths of a meter per second, so it can record a rocket past 327 m/s. Old records can't be read by the new firmware, and the data menu won't list them. **Export everything you want to keep before you flash, then erase (§3.6).** The number of stored flights (9) does not change.
+
+> ⚡ **The September 2026 firmware erased stored flights, and the locator now holds 9 instead of 10.** The record format changed enough that older records cannot be read back at all — the data menu will not list them. **Export everything you want to keep before you flash.** The flight is 8 minutes either way; only the number of stored flights changed, to make room for the extra data in each one.
 
 ## 10.5 Flight memory housekeeping
 

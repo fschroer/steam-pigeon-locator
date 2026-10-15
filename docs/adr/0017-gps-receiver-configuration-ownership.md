@@ -88,7 +88,11 @@ Sixteen records from Pasco 2026-09-04..07 — see
 ### Decision 3 (phase-scheduled dynamic model) — confirmed, no change
 
 ✅ Across **28 689 samples**, only **128 (0.45 %)** lacked a 3D fix, and the 3D fix
-**held to 376 m/s** (`Ken 132857`, ≈ Mach 1.1) and 202 m/s (`Ken_6`). The 2026-08-02
+**held to 376 m/s** (`Ken 132857`, ≈ Mach 1.1) and 202 m/s (`Ken_6`). *(Note 2026-10-06,
+[#53](https://github.com/fschroer/steam-pigeon-locator/issues/53): this is a claim about the fix, not the velocity. Until `ARCHIVE_VERSION` 7 the
+archived GPS velocity pinned at ±327.67 m/s, so whether the receiver's velocity
+*tracked* above that cannot be read from these records. The fix-type column is
+unaffected.)* The 2026-08-02
 failure that motivated this decision — 7.75 s of loss with recovery on the first sample
 back under the Portable model's 50 m/s ceiling — has no analog in this set.
 

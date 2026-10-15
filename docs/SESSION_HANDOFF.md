@@ -2,6 +2,16 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-10-06 (fix) — #53 GPS velocity archived in dm/s, ARCHIVE_VERSION 7 — firmware; NOT on hardware
+
+✅ **Decided by fschroer: dm/s everywhere, with a version bump.** I'd recommended a flag in a reserved byte, to avoid the bump. `gps_vel_{n,e,d}_cms` → `_dms` in the same bytes; `FlightSample` stays 88 B and 9 records. ±3,276.7 m/s at 0.1 m/s. `PackVelDms` clamps at ±32,767 and keeps −32,768 as "no velocity". The CSV export divides by 10 and prints one decimal; column names are unchanged.
+- **`ARCHIVE_VERSION` 6 → 7 orphans every stored record.** `ValidateHeaderForConfig` rejects them, so the data menu won't list them. **Export before flashing, then erase.** The manual (§3.6, §10.4) says so.
+- Builds at -Og; all host suites pass. The app never reads GPS velocity: the LoRa transfer codec doesn't carry it. So no app or iOS change.
+- ADR-0017's "3D fix held to 376 m/s" now carries a note: that's a claim about the fix, not the velocity, which the v6 archive couldn't show above 327.67 m/s.
+- Not folded into #48 (its struct re-cut is still undecided). #48 will need its own bump.
+
+🧪 **Bench:** after flashing, confirm old records are gone from the data menu (not corrupt), record a flight (vacuum or bench), and check the `gps_vel_*_mps` columns read sensible m/s with one decimal.
+
 ## 2026-10-06 (fix) — #52 deployment status byte: masked per channel, archived, decoded once — firmware + Android; NOT on hardware
 
 ✅ **Firmware:** builds at -Og. New suite `Tests/DeployStats` passes 30/0.

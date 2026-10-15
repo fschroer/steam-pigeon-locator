@@ -71,7 +71,7 @@ namespace FlightArchive
 
 	struct FlightSample // new telemetry data
 	{
-		// == ARCHIVE_VERSION 6 layout (#38) ======================================
+		// == ARCHIVE_VERSION 6 layout (#38); v7 changed only GPS velocity's unit ===
 		// 88 B, 5 samples per 512 B chunk, 9 records.  Two structural changes paid
 		// for everything added here:
 		//
@@ -99,12 +99,18 @@ namespace FlightArchive
 		// Range +/-214.7 deg, resolution 1.11 cm.
 		int32_t lat_1e7;                    // (44, +4)
 		int32_t lon_1e7;                    // (48, +4)
-		// Raw GPS velocity, cm/s.  kGpsVelInvalid marks "fix carried no velocity",
-		// so a genuine 0 (stationary on the pad) stays distinguishable from absent --
-		// feeding a fabricated 0 to updateGpsVelocity acts as a spurious ZUPT.
-		int16_t gps_vel_n_cms;              // (52, +2)
-		int16_t gps_vel_e_cms;              // (54, +2)
-		int16_t gps_vel_d_cms;              // (56, +2)
+		// Raw GPS velocity, dm/s (0.1 m/s), +/-3,276.7 m/s.  kGpsVelInvalid marks
+		// "fix carried no velocity", so a genuine 0 (stationary on the pad) stays
+		// distinguishable from absent -- feeding a fabricated 0 to updateGpsVelocity
+		// acts as a spurious ZUPT.
+		//
+		// cm/s until ARCHIVE_VERSION 7 (#53).  That pinned at 327.67 m/s, and the
+		// pinned value looked like a velocity: 58 Nike Smoke samples read exactly
+		// -327.67 while the rocket climbed past 400 m/s, and Shane reached ~545.
+		// 0.1 m/s is still far finer than a GPS velocity is good to.
+		int16_t gps_vel_n_dms;              // (52, +2)
+		int16_t gps_vel_e_dms;              // (54, +2)
+		int16_t gps_vel_d_dms;              // (56, +2)
 		uint16_t gps_h_acc_cm;              // (58, +2) horizontal accuracy, cm (0 = unknown)
 		// NFR-9 strapdown attitude, packed int16.  Decode:
 		//   tilt_deg    = tilt_cdeg / 100.0      (tilt-from-launch-vertical, 0..180)
@@ -187,10 +193,10 @@ namespace FlightArchive
         return static_cast<int32_t>(d);
     }
 
-    // GPS velocity is cm/s in an int16; INT16_MIN marks "no velocity fix" so a
-    // genuine 0 cm/s stays distinguishable from absent.
+    // GPS velocity is dm/s in an int16 (ARCHIVE_VERSION 7); INT16_MIN marks "no
+    // velocity fix" so a genuine 0 stays distinguishable from absent.
     inline constexpr int16_t kGpsVelInvalid = -32768;
-    inline constexpr bool    GpsVelValid(int16_t cms) { return cms != kGpsVelInvalid; }
+    inline constexpr bool    GpsVelValid(int16_t dms) { return dms != kGpsVelInvalid; }
     // Same convention for the non-selected accel channel.
     inline constexpr int16_t kAccelAltInvalid = -32768;
     inline constexpr bool    AccelAltValid(int16_t cg) { return cg != kAccelAltInvalid; }
