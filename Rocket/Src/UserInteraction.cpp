@@ -5,6 +5,8 @@ extern "C" {
 
 #include <UserInteraction.hpp>
 #include "SettingsBounds.hpp"
+#include "LaunchOnset.hpp"
+#include <Math.hpp>   // RocketNav::Math::norm — the export's launch-onset line
 #include "CubeMonitorGlobals.hpp"
 #include "CycleProfiler.hpp"
 #include "Constants.hpp"
@@ -886,6 +888,29 @@ void UserInteraction::ExportFlightStats(uint16_t archive_position) { //Export fl
 
 	archive_.ReadEvent(archive_position, FlightArchive::Statistic::LaunchTimestampMs, time_ms, present_out);
 	export_line.WriteMany(launch_detect_sample_index_text, time_ms, crlf_);
+	// Where thrust began, by the same rule the record anchor uses (LaunchOnset.hpp).
+	// Normally 0, since t=0 is anchored there.  Not 0 when the record kept its pad
+	// samples (#38's health-flag case, t=0 ~2 s before launch detect), or when a
+	// record from older firmware anchored on a pre-ignition jolt (Ken_6: 800).
+	// Subtract it to put any record on an ignition-zero clock.
+	{
+		const uint32_t launch_detect_ms = time_ms;
+		LaunchOnset::Finder onset;
+		FlightArchive::FlightSample batch[16];
+		uint32_t start = 0u, got = 0u;
+		bool done = false;
+		while (!done && archive_.ReadFlightDataRange(archive_position, start, batch, 16u, got) && got != 0u) {
+			for (uint32_t i = 0u; i < got; ++i) {
+				if (batch[i].timestamp_ms > launch_detect_ms) { done = true; break; }
+				onset.Add(batch[i].timestamp_ms, RocketNav::Math::norm(batch[i].accel) / G0_F);
+			}
+			start += got;
+		}
+		if (present_out && onset.Found())
+			export_line.WriteMany("Launch onset time: ", onset.OnsetMs(), crlf_);
+		else
+			export_line.WriteMany("Launch onset time: unknown", crlf_);
+	}
 
 	archive_.ReadEvent(archive_position, FlightArchive::Statistic::BurnoutTimestampMs, time_ms, present_out);
 	export_line.WriteMany(burnout_sample_index_text, time_ms, crlf_);

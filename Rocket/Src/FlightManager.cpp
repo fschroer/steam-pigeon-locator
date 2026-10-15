@@ -957,9 +957,11 @@ void FlightManager::WriteEkfDiagSnapshot(FlightArchive::Statistic slot) {
 
 // ---------------------------------------------------------------------------
 // AnchorRecordToLaunchOnset (#7)
-// Scan the retained pre-launch ring oldest-first for thrust onset — the first
-// sample whose body-accel magnitude rises out of the 1 g pad band — and drop the
-// pad samples before it, so the record epoch (t=0) is the launch instant.  Returns
+// Find thrust onset in the retained pre-launch ring and drop the pad samples
+// before it, so the record epoch (t=0) is the launch instant.  Onset is the start
+// of the unbroken above-pad-band run that leads into launch detect, found by
+// walking back from the newest sample (LaunchOnset.hpp).  It was the FIRST sample
+// above the band, which on Ken_6 was a one-sample jolt 0.8 s before ignition.  Returns
 // the absolute (monotonic-clock) timestamp of the onset sample, which the caller
 // uses as m_record_origin_ms_.  Because archived timestamps are unsigned, samples
 // older than the onset cannot be represented and are discarded here.
@@ -967,7 +969,14 @@ void FlightManager::WriteEkfDiagSnapshot(FlightArchive::Statistic slot) {
 uint32_t FlightManager::AnchorRecordToLaunchOnset() {
     uint16_t idx       = m_ring_head_;
     uint16_t onset_off = 0;                 // default: keep the oldest sample
-    for (uint16_t i = 0; i < m_ring_count_; ++i) {
+    const int walked = LaunchOnset::OnsetIndex(m_ring_count_, [this](int i) {
+        const uint16_t k = static_cast<uint16_t>((m_ring_head_ + i) % kPreLaunchRingSamples);
+        return RocketNav::Math::norm(m_ring_[k].accel) / G0_F;
+    });
+    // Fallback, the pre-walk-back rule: when the newest ring sample is itself in
+    // the pad band (a weak motor confirmed by the baro gate) there is no run to
+    // walk back along, so take the first sample above the band.
+    for (uint16_t i = 0; walked < 0 && i < m_ring_count_; ++i) {
         const float a_g = RocketNav::Math::norm(m_ring_[idx].accel) / G0_F;
         if (a_g >= kLaunchOnsetAccelG) {
             // Onset = the sample just before accel first exceeds the pad band, so
@@ -987,11 +996,13 @@ uint32_t FlightManager::AnchorRecordToLaunchOnset() {
     // the only samples that will ever show it — so the epoch stays at the oldest
     // retained sample instead and the pad phase is archived.
     //
-    // The cost is that t=0 is then pad rather than onset for that flight, which
+    // The cost is that t=0 is then pad rather than onset for that flight (the CSV
+    // export's "Launch onset time:" line says where onset is), which
     // is why it is conditional: a healthy flight keeps the launch-anchored epoch
     // every downstream consumer expects.  A flight that trips this has a bigger
     // problem than a shifted epoch, and the launch timestamp is still written as
     // a Statistic either way.
+    if (walked >= 0) onset_off = static_cast<uint16_t>(walked);
     bool health_flagged = false;
     uint16_t scan = m_ring_head_;
     for (uint16_t i = 0; i < m_ring_count_; ++i) {

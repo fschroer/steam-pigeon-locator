@@ -523,6 +523,26 @@ static void B6_WrongFrameFallsBack() {
               wrong.Event(Stat::BurnoutTimestampMs), mag.Event(Stat::BurnoutTimestampMs));
 }
 
+static void B7_PreIgnitionJoltDoesNotMoveTheEpoch() {
+    printf("\n--- B7: a jolt on the pad before ignition does not move t=0 ---\n");
+    // Ken_6: a one-sample 2.95 g jolt 0.8 s before ignition, quiet pad between.
+    // The first-sample-above-1.3 g rule anchored t=0 on the jolt, so every event
+    // time sat 0.8 s late; the walk-back rule (LaunchOnset.hpp) anchors on the
+    // thrust run that leads into launch detect.
+    const std::vector<Cycle> clean = makeNominalFlight();
+    std::vector<Cycle> jolted = clean;
+    // The nominal pad is 10 cycles; put the jolt on cycle 2, 8 cycles (0.4 s)
+    // before thrust -- well inside the 2 s pre-launch ring.
+    jolted[2].accel_mag = 2.95f * 9.81f;
+    Archive a = runFlight(clean);
+    Archive b = runFlight(jolted);
+    CHECK(a.HasEvent(Stat::LaunchTimestampMs) && b.HasEvent(Stat::LaunchTimestampMs));
+    CHECK_MSG(a.Event(Stat::LaunchTimestampMs) == b.Event(Stat::LaunchTimestampMs),
+              "launch time moved by the jolt: %.0f vs %.0f ms",
+              a.Event(Stat::LaunchTimestampMs), b.Event(Stat::LaunchTimestampMs));
+    CHECK(a.Event(Stat::NoseoverTimestampMs) == b.Event(Stat::NoseoverTimestampMs));
+}
+
 // Find the index of the first descent cycle whose true AGL <= target.
 static size_t firstDescentBelow(const std::vector<Cycle>& f, float target) {
     // find apogee index first
@@ -1024,6 +1044,7 @@ int main(int argc, char** argv) {
     B4_DrogueBackupAfterMain();
     B5_AxialBurnoutIsMotorStop();
     B6_WrongFrameFallsBack();
+    B7_PreIgnitionJoltDoesNotMoveTheEpoch();
 
     C1_DropDoesNotLaunch();
     C2_KnockDoesNotLaunch();

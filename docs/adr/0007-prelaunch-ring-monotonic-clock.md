@@ -92,3 +92,23 @@ At n ≥ 10 an in-band-but-drifting clock can round to the wrong second count an
 Mutation-tested, with one honest limitation: a mutation dropping the `÷n` drives D2 to 12.333 s — reproducing the observed ~670 ms shortfall — so the timing assertion has teeth against rate-scaling regressions. But against a faithful reconstruction of the *original* defect only D2's counter assertions fail, not its timing assertion, because the new API makes adopt-on-reject structurally impossible (rejection cannot write an output; D5 pins that contract). Part D is therefore a guard against **reintroducing a wrong-but-accepted rate**, not a re-catch of the exact original bug, which the refactor eliminated by construction. `Core/Src/main.c` is compile-checked only — the ISR wiring itself is **not** covered by any host test and remains unflown.
 
 The tail is armed **only** on the `DetectLanded` path — **not** on the `kMaxFlightMs` force-close, where the record span is already full and has no room for a tail; there `RecordComplete()` is true immediately, preserving the previous close-on-landing behavior. Consequence for consumers: on a normal landing the **recorded data span now extends ~2 s past the `LandingTimestampMs` event** (previously it ended ~1 cycle before it). `FlightSample` layout is unchanged → `ARCHIVE_VERSION` stays 5. Host-verified via `Tests/FlightReplay` (exactly 40 `Landed` samples captured; record held open at landing; full suite 36/36).
+
+## Amendment (2026-10-15) — onset is the start of the thrust run that leads into launch detect, not the first sample above 1 g
+
+The 2026-07-15 rule took the **first** ring sample whose |a| rose above the pad band (1.3 g). On Ken_6 (2026-09-06) that first sample was a one-sample jolt at 50 ms (2.95 g, 315 °/s; a knock or handling), followed by 750 ms of quiet pad. Real thrust began at 850 ms. The epoch landed on the jolt, so **every event time in that record sits about 0.8 s late relative to ignition**, and nothing in the record says so.
+
+**Decision (fschroer, 2026-10-15).**
+- **Onset is the start of the unbroken run of samples ≥ 1.3 g that ends at launch detect,** found by walking back from the newest ring sample (`LaunchOnset.hpp`). The epoch is the sample just before it, as before.
+- **Fallback:** when the newest sample is itself in the pad band (a weak motor confirmed by the altitude gate), the first-crossing scan still applies.
+- **On the 2026-08/09 corpus** the two rules agree on every record with a crossing before launch detect except Ken_6. Replayed through `FlightManager`, only Ken_6's times change, every one by exactly 800 ms, with max altitude unchanged: a pure epoch shift.
+
+**The CSV export now states onset: `Launch onset time:`** (same rule, `LaunchOnset::Finder`, over the record's samples up to launch detect).
+- **Usually 0**, because the epoch is anchored there.
+- **Nonzero** where the record kept its pad samples (the 2026-08-14 health-flag case: Shane 1,750, Mike_5 1,750, Red Ryder 250), or where older firmware anchored on a jolt (Ken_6 800).
+- **`unknown`** when no thrust run reaches launch detect.
+
+Subtract it to put any record on an ignition-zero clock. This recovers onset for records already on a locator without changing the archive format.
+
+Ken_6's lost 0.8 s of pad data cannot be recovered; it was discarded when the record was written. Its export line shows where ignition is in what remains.
+
+Tests: `Tests/LaunchOnset` (backward and forward forms agree over 5,000 random sequences; the Ken_6 shape) and `Tests/FlightReplay` B7 (a pre-ignition jolt does not move the launch time; fails under the old rule).

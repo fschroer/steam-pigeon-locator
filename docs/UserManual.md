@@ -1415,6 +1415,7 @@ This gives you everything the locator recorded, at full rate, for analysis in a 
 | Line | Meaning |
 |---|---|
 | `Flight time:` | Date and time of the flight, **UTC**, from GPS. |
+| `Launch onset time:` | Where thrust began, in the same milliseconds as `time_ms`: the start of the unbroken rise in acceleration that leads into launch detect. **Usually 0**, since the record starts there. Nonzero when the record kept pad data (the exception in §10.6), or on records from older firmware that started on a bump before ignition. Subtract it to line up records by ignition. `unknown` if no thrust rise reaches launch detect. |
 | `Launch detect time:` | When the locator decided it was flying (§10.2 **Launch**), in the same milliseconds as `time_ms`. Usually a few hundred ms after thrust onset; up to about 2 s for a slow, low-thrust motor, which is detected by altitude instead. |
 | `Burnout time:` | §10.2 **Burnout**: when the motor stopped pushing, read from the acceleration along the rocket. On flights recorded before the October 2026 locator firmware it runs several seconds late on fast rockets, because drag held the old test off ([#45](https://github.com/fschroer/steam-pigeon-locator/issues/45)). |
 | `Apogee time:`, `Noseover time:` | §10.2 **Apogee** and **Noseover**. |
@@ -1506,7 +1507,7 @@ The state only ever moves forward, and it can **skip**: if two events come due i
 **In the locator's record** (§10.1, §10.4):
 
 - **`time_ms = 0` is thrust onset.** The record starts at launch.
-- **One exception:** if the locator's combined ("fused") solution was already flagged as unhealthy on the pad (a nonzero `ekf_health` in the seconds before launch), the record deliberately keeps about **2 seconds of pad data** so the problem can be examined, and `time_ms = 0` is the start of that instead. Thrust onset is then partway in. Find it with the `Launch detect time:` summary line (§10.4) or where `accel_x_g` first rises above 1 g.
+- **One exception:** if the locator's combined ("fused") solution was already flagged as unhealthy on the pad (a nonzero `ekf_health` in the seconds before launch), the record deliberately keeps about **2 seconds of pad data** so the problem can be examined, and `time_ms = 0` is the start of that instead. Thrust onset is then partway in: the `Launch onset time:` summary line (§10.4) says where. Subtract it from `time_ms` to put the record on an ignition-zero clock.
 - Time is measured on a **GPS-disciplined clock**, so it is real elapsed time, not an assumed sample rate. Durations you measure from the data are trustworthy.
 - Data is recorded at **20 samples per second**.
 - A record is capped at **8 minutes** and includes about **2 seconds of settled data after landing**.

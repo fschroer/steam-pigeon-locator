@@ -11,6 +11,7 @@ extern "C" {
 #include "PowerManagement.hpp"
 #include "AirStart.hpp"
 #include "DescentSlowdown.hpp"
+#include "LaunchOnset.hpp"
 
 class FlightManager {
 public:
@@ -164,8 +165,10 @@ private:
     // Launch detection debounce
     uint32_t     m_launch_candidate_ms_ = 0;
     // #7: body-accel magnitude marking thrust onset when scanning the pre-launch
-    // ring for the launch epoch — just above the 1 g on-pad band.
-    static constexpr float kLaunchOnsetAccelG = 1.3f;
+    // ring for the launch epoch — just above the 1 g on-pad band.  The same
+    // threshold LaunchOnset.hpp applies; kept equal so the fallback scan and the
+    // walk-back rule agree on what "above the pad band" means.
+    static constexpr float kLaunchOnsetAccelG = LaunchOnset::kOnsetAccelG;
 
     // ── Launch detection thresholds / drop rejection ─────────────────────────
     // A locator that is armed and then dropped can momentarily exceed a bare

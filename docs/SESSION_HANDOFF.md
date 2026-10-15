@@ -2,6 +2,15 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-10-15 (fix) — record t = 0 is the start of the thrust run into launch detect; CSV export states `Launch onset time:` — ADR-0007 amendment. NOT on hardware
+
+✅ **Why:** `AnchorRecordToLaunchOnset` took the first ring sample above 1.3 g. On Ken_6 that was a one-sample jolt 0.8 s before ignition, so every Ken_6 time is 0.8 s late. Onset is now the start of the unbroken ≥ 1.3 g run ending at launch detect, walked back from the newest sample (`LaunchOnset.hpp`). If the newest sample is in the pad band, the old first-crossing scan applies.
+- **Replay (28 records):** only Ken_6 changes, every event by exactly 800 ms, with max altitude unchanged.
+- **Export:** `Launch onset time:` uses the same rule streamed forward. It's 0 on most records; nonzero where pad data was kept (Shane 1,750, Mike_5 ×2 1,750, Red Ryder 250) or on an old jolt anchor (Ken_6 800). It's `unknown` with no thrust run (Shane Swizzle Stick). This is what explains the 1,750 ms replay offset on Shane: the record kept its pad samples (health flag). It was **not** old firmware, which I had guessed earlier.
+- **Tests:** `Tests/LaunchOnset` 10/0 (backward and forward agree over 5,000 random sequences). `Tests/FlightReplay` B7 (110/0) was confirmed to fail under the old rule.
+
+🧪 **Bench:** export any record and check that `Launch onset time:` appears after `Launch detect time:`. Ken_6, if still on its locator, should read 800.
+
 ## 2026-10-14 (fix) — #45 motor burnout from axial acceleration; apogee coast gate unchanged — [ADR-0037](adr/0037-motor-burnout-vs-apogee-coast-gate.md). NOT on hardware
 
 ✅ **Burnout is now motor stop.** The axial specific force must stay < 0.5 g for 3 samples, counted once body X has shown ≥ 2 g; otherwise the old magnitude test applies. It's 1–6 s earlier on 10 of 28 records: Shane 5.9 s, CH9-F2 4.2 s, Ken 132857 3.8 s, Ken_6 3.7 s.
