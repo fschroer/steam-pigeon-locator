@@ -224,7 +224,20 @@ private:
     // Burnout detection threshold and debounce
     static constexpr float   kBurnoutAccelG        = 1.5f;  // accel drops below this at burnout
     static constexpr uint8_t kBurnoutConfirmSamples = 3;    // 150 ms sustained below threshold
+    // #45: the AXIAL test.  Thrust is positive along the nose and coast drag is
+    // negative, so the axial specific force crosses zero at motor stop while the
+    // magnitude is held up by drag for seconds on a fast rocket.  Trusted only
+    // once body X has itself shown thrust (kBurnoutAxialSeenG), so a wrong or
+    // uncommitted mounting frame falls back to the magnitude test instead of
+    // reading "no thrust" at launch.
+    static constexpr float   kBurnoutAxialG        = 0.5f;  // axial falls below this at burnout
+    static constexpr float   kBurnoutAxialSeenG    = 2.0f;  // body X must have seen this much thrust
     uint8_t m_burnout_count_ = 0;
+    uint8_t m_burnout_axial_count_ = 0;
+    float   m_boost_peak_axial_g_  = 0.0f;
+    // #45: total specific force has fallen below kBurnoutAccelG since motor
+    // burnout -- the condition apogee detection waits for (see Update).
+    bool    m_coast_gate_open_     = false;
 
     // Landing detection threshold and debounce
     static constexpr float    kLandedSpeedMps          = 0.25f;  // |fused vert speed| at rest — UNUSED, fused term retired (ADR-0005)

@@ -106,12 +106,27 @@ bool FlightManager::DetectLaunch(const NavSolution& sol) {
 
 // ---------------------------------------------------------------------------
 // DetectBurnout
-// Burnout is declared when body acceleration drops below kBurnoutAccelG
-// while in the Launched state.  Uses getRawImu() so that during bench replay
-// it sees archived sensor data and advances state correctly.
+// MOTOR burnout (#45): the axial specific force falls below kBurnoutAxialG once
+// body X has shown thrust, or -- the fallback, and the only test before #45 --
+// the total falls below kBurnoutAccelG.  The magnitude counter it maintains is
+// also the apogee coast gate; see Update().  Uses getRawImu() so that during
+// bench replay it sees archived sensor data and advances state correctly.
 // ---------------------------------------------------------------------------
 bool FlightManager::DetectBurnout(const NavSolution& sol) {
     const float accel_g = RocketNav::Math::norm(sol.body_accel_mps2) / G0_F;
+    const float axial_g = sol.body_accel_mps2.x / G0_F;
+
+    // #45: axial test, alongside the magnitude test below.  Replayed over 28
+    // records it called burnout 1-6 s earlier on every fast flight (Shane 5.9 s,
+    // Ken 132857 3.8 s, Ken_6 3.7 s) and within 0.1 s of the magnitude test on
+    // slow ones; no record had a single sub-threshold axial sample under thrust.
+    if (axial_g > m_boost_peak_axial_g_) m_boost_peak_axial_g_ = axial_g;
+    if (m_boost_peak_axial_g_ >= kBurnoutAxialSeenG && axial_g < kBurnoutAxialG) {
+        if (m_burnout_axial_count_ < kBurnoutConfirmSamples)
+            ++m_burnout_axial_count_;
+    } else {
+        m_burnout_axial_count_ = 0;
+    }
 
     // Debounce: require kBurnoutConfirmSamples consecutive sub-threshold samples
     // before declaring burnout.  A single-sample test could fire on a transient
@@ -125,7 +140,10 @@ bool FlightManager::DetectBurnout(const NavSolution& sol) {
     } else {
         m_burnout_count_ = 0;
     }
-    return m_burnout_count_ >= kBurnoutConfirmSamples;
+    // Both counters update every call: Update() keeps calling this after motor
+    // burnout so the magnitude counter can open the coast gate.
+    return m_burnout_axial_count_ >= kBurnoutConfirmSamples
+        || m_burnout_count_ >= kBurnoutConfirmSamples;
 }
 
 // ---------------------------------------------------------------------------
@@ -419,12 +437,29 @@ void FlightManager::UpdateFlightState() {
         }
     }
 
-    // --- Burnout detection ---
-    if (flight_state_ == FlightStates::Launched) {
-        if (DetectBurnout(nav_solution)) {
+    // --- Burnout detection, and the coast gate that opens apogee detection ---
+    // #45: these are two moments, not one.  MOTOR burnout is when thrust stops:
+    // the axial specific force crosses zero, which DetectBurnout now sees.  It
+    // sets the Burnout state, the archived Burnout time and the FR-P13 air-start
+    // window.  The COAST GATE is when total specific force has fallen below
+    // kBurnoutAccelG -- what burnout used to mean -- and only then does apogee
+    // detection open.  On a fast rocket the gap is seconds of high-drag coast,
+    // which is exactly where the barometer is least trustworthy (transonic jumps,
+    // a tumbling section reading hundreds of meters high, #56).  Opening apogee
+    // detection at motor burnout gave Nike Smoke a false apogee 3.3 s early, off
+    // its breakup artifact; keeping the gate where it was leaves every one of 28
+    // replayed records' apogee and deployments exactly as they were.
+    if (flight_state_ == FlightStates::Launched
+            || (flight_state_ == FlightStates::Burnout && !m_coast_gate_open_)) {
+        const bool motor_out = DetectBurnout(nav_solution);
+        if (flight_state_ == FlightStates::Launched && motor_out) {
             flight_state_ = FlightStates::Burnout;
             nav_.setPhase(FlightStates::Burnout);
             archive_.WriteEvent(FlightArchive::Statistic::BurnoutTimestampMs, flight_time_ms);
+        }
+        if (flight_state_ == FlightStates::Burnout && !m_coast_gate_open_
+                && m_burnout_count_ >= kBurnoutConfirmSamples) {
+            m_coast_gate_open_ = true;
             // #1: discard any apogee-peak state accumulated during boost.  The base/
             // ram-pressure dip plants a FALSE altitude peak under thrust (20.7 m at
             // 2700 ms on flight 2026-07-12) that the coast never exceeds until well
@@ -444,7 +479,8 @@ void FlightManager::UpdateFlightState() {
     // ~13-20 m mid-boost, pre-empting burnout and cascading every deployment (flight
     // 2026-07-12).  Gating on the Burnout state (with the peak reset above) confines
     // apogee detection to the ballistic coast where raw baro tracks the true arc.
-    if (flight_state_ == FlightStates::Burnout) {
+    // #45: and only once the coast gate has opened (see above).
+    if (flight_state_ == FlightStates::Burnout && m_coast_gate_open_) {
         const BaroSample baro_raw = nav_.getRawBaro();
         if (DetectApogee(nav_solution, baro_raw)) {
             noseover_time_ = 0;
@@ -853,6 +889,9 @@ void FlightManager::ResetFlight() {
     m_apogee_peak_agl_m_    = 0.0f;
     m_apogee_last_increase_ms_ = 0;
     m_burnout_count_        = 0;
+    m_burnout_axial_count_  = 0;
+    m_coast_gate_open_      = false;
+    m_boost_peak_axial_g_   = 0.0f;
     m_landed_count_         = 0;
     m_landed_tail_remaining_ = 0;
     m_last_raw_agl_m_       = 0.0f;

@@ -43,7 +43,9 @@ all: build run
 
 build: $(TARGET)
 
-$(TARGET): $(SRCS) $(wildcard mocks/*.hpp mocks/*.h)
+# The real headers too: a constant changed in FlightManager.hpp (#45's thresholds,
+# say) otherwise leaves a stale binary that silently tests the old value.
+$(TARGET): $(SRCS) $(wildcard mocks/*.hpp mocks/*.h) $(wildcard $(ROOT)/Rocket/Inc/*.hpp $(ROOT)/Rocket/Common/Inc/*.hpp $(ROOT)/Rocket/Common/Inc/*.h $(ROOT)/Rocket/Archive/Inc/*.hpp)
 	$(CXX) $(CXXFLAGS) $(SRCS) -o $(TARGET) $(LDFLAGS)
 
 run: $(TARGET)

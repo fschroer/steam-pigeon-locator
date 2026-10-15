@@ -91,6 +91,11 @@ struct Cycle {
     float    fused_agl    = 0.0f;   // fused altitude AGL (m)
     float    fused_vspeed = 0.0f;   // fused vertical speed (m/s, +up)
     float    accel_mag    = 9.81f;  // |body specific force| (m/s^2)
+    // The body-frame vector, when the source has one (an on-device export does).
+    // #45's axial burnout test reads body X; without the vector the replay put
+    // the whole magnitude on Z, which exercises only the magnitude fallback.
+    bool     has_vec      = false;
+    float    ax = 0.0f, ay = 0.0f, az = 0.0f;   // m/s^2
 };
 
 static void applyCycle(RocketNav::Navigation& nav, const Cycle& c) {
@@ -98,7 +103,7 @@ static void applyCycle(RocketNav::Navigation& nav, const Cycle& c) {
     sol.timestamp_ms       = c.t_ms;
     sol.altitude_agl_m     = c.fused_agl;
     sol.vertical_speed_mps = c.fused_vspeed;
-    sol.body_accel_mps2    = { 0.0f, 0.0f, c.accel_mag };
+    sol.body_accel_mps2    = c.has_vec ? Vec3f{ c.ax, c.ay, c.az } : Vec3f{ 0.0f, 0.0f, c.accel_mag };
 
     BaroSample b{};
     b.timestamp_ms   = c.t_ms;
@@ -434,6 +439,88 @@ static void B1_NominalFlight() {
               "event ordering wrong: L=%.0f B=%.0f A=%.0f M=%.0f Ld=%.0f", launch, burn, apo, mainp, land);
     printf("       L=%.0f B=%.0f A=%.0f MainP=%.0f Land=%.0f ms; maxAlt=%.1f m\n",
            launch, burn, apo, mainp, land, ar.Event(Stat::MaxAltitudeM));
+}
+
+// ===========================================================================
+// B5-B6: burnout is MOTOR stop, read from the axial component (#45); apogee
+// still waits for the old magnitude coast gate.
+// ===========================================================================
+
+// A fast flight with the body-frame vector.  Boost: 2 s at +12 g along the
+// thrust axis.  Coast: drag `drag0_g` along -thrust axis decaying linearly to
+// 0.2 g over 4 s -- the shape that held the magnitude above 1.5 g for seconds
+// after motor stop on Ken 132857, Ken_6 and Shane.  `thrust_axis` 0 = body X
+// (the nose, as the mounting frame intends), 1 = body Y (a wrong frame).
+static std::vector<Cycle> makeFastFlight(float drag0_g, int thrust_axis) {
+    std::vector<Cycle> f;
+    const float dt = 0.05f, g = 9.81f;
+    uint32_t t = 0;
+    float agl = 0.0f, vel = 0.0f;
+    auto push = [&](float along) {   // specific force along the thrust axis, m/s^2
+        Cycle c; c.t_ms = t; c.raw_agl = agl; c.raw_vel = vel; c.raw_valid = true;
+        c.fused_agl = agl; c.fused_vspeed = vel;
+        c.has_vec = true;
+        c.ax = thrust_axis == 0 ? along : 0.0f;
+        c.ay = thrust_axis == 1 ? along : 0.0f;
+        c.accel_mag = std::fabs(along);
+        f.push_back(c); t += 50;
+    };
+    for (int i = 0; i < 10; ++i) push(g);                                     // pad
+    for (int i = 0; i < 40; ++i) { vel += 11.0f * g * dt; agl += vel * dt; push(12.0f * g); }
+    for (float tc = 0.0f; vel > 0.0f; tc += dt) {                            // coast
+        const float drag_g = tc < 4.0f ? drag0_g + (0.2f - drag0_g) * tc / 4.0f : 0.2f;
+        vel -= (1.0f + drag_g) * g * dt; agl += vel * dt;
+        push(-drag_g * g);
+    }
+    for (int i = 0; i < 200 && agl > 120.0f; ++i) {                         // drogue
+        vel -= g * dt; if (vel < -30.0f) vel = -30.0f; agl += vel * dt; push(g);
+    }
+    while (agl > 0.5f) { vel = -6.0f; agl += vel * dt; if (agl < 0.0f) agl = 0.0f; push(g); }
+    vel = 0.0f; agl = 0.0f;
+    for (int i = 0; i < 30; ++i) push(g);
+    return f;
+}
+
+// The same flight with the vector collapsed to magnitude-only, as the replay
+// fed every record before #45: what the magnitude test alone would decide.
+static std::vector<Cycle> magnitudeOnly(std::vector<Cycle> f) {
+    for (auto& c : f) c.has_vec = false;
+    return f;
+}
+
+static void B5_AxialBurnoutIsMotorStop() {
+    printf("\n--- B5: high-drag coast -- burnout at motor stop, apogee unchanged (#45) ---\n");
+    // Reference motor stop: with 0.2 g of drag the magnitude falls under 1.5 g at
+    // once, so either rule declares burnout 3 samples after motor stop.
+    const double ref = runFlight(makeFastFlight(0.2f, 0)).Event(Stat::BurnoutTimestampMs);
+    Archive vec = runFlight(makeFastFlight(4.0f, 0));
+    Archive mag = runFlight(magnitudeOnly(makeFastFlight(4.0f, 0)));
+    const double b_vec = vec.Event(Stat::BurnoutTimestampMs);
+    const double b_mag = mag.Event(Stat::BurnoutTimestampMs);
+    CHECK_MSG(std::fabs(b_vec - ref) <= 100.0,
+              "axial burnout %.0f ms should be motor stop (%.0f ms)", b_vec, ref);
+    CHECK_MSG(b_mag > ref + 2000.0,
+              "magnitude-only burnout %.0f ms should lag motor stop (%.0f ms) by drag decay", b_mag, ref);
+    // The coast gate is unchanged, so apogee and the drogue are where the
+    // magnitude test alone put them -- Nike Smoke's false apogee is why.
+    CHECK(vec.HasEvent(Stat::NoseoverTimestampMs) && mag.HasEvent(Stat::NoseoverTimestampMs));
+    CHECK_MSG(vec.Event(Stat::NoseoverTimestampMs) == mag.Event(Stat::NoseoverTimestampMs),
+              "apogee moved: %.0f vs %.0f ms", vec.Event(Stat::NoseoverTimestampMs), mag.Event(Stat::NoseoverTimestampMs));
+    CHECK(vec.Event(Stat::DroguePrimaryDeployTimestampMs) == mag.Event(Stat::DroguePrimaryDeployTimestampMs));
+    printf("       motor stop ~%.0f ms; axial burnout %.0f ms; magnitude-only %.0f ms; apogee %.0f ms\n",
+           ref, b_vec, b_mag, vec.Event(Stat::NoseoverTimestampMs));
+}
+
+static void B6_WrongFrameFallsBack() {
+    printf("\n--- B6: thrust not on body X -- falls back to the magnitude test, no early burnout ---\n");
+    // A wrong or uncommitted mounting frame: body X never sees thrust, so the
+    // axial test must stay out of it rather than read "no thrust" at launch.
+    Archive wrong = runFlight(makeFastFlight(4.0f, 1));
+    Archive mag   = runFlight(magnitudeOnly(makeFastFlight(4.0f, 1)));
+    CHECK(wrong.HasEvent(Stat::BurnoutTimestampMs));
+    CHECK_MSG(wrong.Event(Stat::BurnoutTimestampMs) == mag.Event(Stat::BurnoutTimestampMs),
+              "wrong-frame burnout %.0f ms should equal the magnitude test's %.0f ms",
+              wrong.Event(Stat::BurnoutTimestampMs), mag.Event(Stat::BurnoutTimestampMs));
 }
 
 // Find the index of the first descent cycle whose true AGL <= target.
@@ -853,6 +940,8 @@ static bool loadCsv(const char* path, std::vector<Cycle>& out) {
         } else if (c_ax >= 0 || c_ay >= 0 || c_az >= 0) {
             const double ax = t.get(i, c_ax), ay = t.get(i, c_ay), az = t.get(i, c_az);
             c.accel_mag = (float)(std::sqrt(ax*ax + ay*ay + az*az) * 9.80665);  // g -> m/s^2
+            c.has_vec = true;
+            c.ax = (float)(ax * 9.80665); c.ay = (float)(ay * 9.80665); c.az = (float)(az * 9.80665);
         }
         out.push_back(c);
     }
@@ -933,6 +1022,8 @@ int main(int argc, char** argv) {
     B2_SpikeNearMainRejected();
     B3_SustainedDropoutStillDeploys();
     B4_DrogueBackupAfterMain();
+    B5_AxialBurnoutIsMotorStop();
+    B6_WrongFrameFallsBack();
 
     C1_DropDoesNotLaunch();
     C2_KnockDoesNotLaunch();

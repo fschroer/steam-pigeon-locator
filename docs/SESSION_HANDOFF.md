@@ -2,6 +2,15 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-10-14 (fix) — #45 motor burnout from axial acceleration; apogee coast gate unchanged — [ADR-0037](adr/0037-motor-burnout-vs-apogee-coast-gate.md). NOT on hardware
+
+✅ **Burnout is now motor stop.** The axial specific force must stay < 0.5 g for 3 samples, counted once body X has shown ≥ 2 g; otherwise the old magnitude test applies. It's 1–6 s earlier on 10 of 28 records: Shane 5.9 s, CH9-F2 4.2 s, Ken 132857 3.8 s, Ken_6 3.7 s.
+- **The apogee coast gate is unchanged:** magnitude < 1.5 g after motor burnout. An axial-only rule gave **Nike Smoke a false apogee 3.3 s early**, off its post-breakup baro decay; the old late burnout had been protecting it. With the gate split out, apogee, deployments, landing and max altitude are identical on all 28 replayed records.
+- **`Tests/FlightReplay` now feeds the archived X/Y/Z vector.** Before, it put the magnitude on Z, so an axial rule could not have been tested at all. New tests B5 (motor stop; apogee unchanged) and B6 (wrong frame falls back) bring it to 107/0. **The Makefile now depends on the real headers**: a header-only change used to leave a stale binary.
+- **Not changed:** `kApogeeMaxThrustG` (1.3 g magnitude) in `DetectApogee`.
+
+🧪 **Bench:** `SP_BENCH_REPLAY` a fast record (Ken 132857) and check the Burnout state arrives at about 3.0 s while apogee and drogue are unchanged.
+
 ## 2026-10-14 (data) — #56 raw (pre-filter) baro pressure and die temperature now archived — firmware; NOT on hardware
 
 ✅ **Decided by fschroer: archive raw pressure and temperature only.** Documenting the lag in ADR-0032 or the manual, and a tumble gate on baro velocity, were offered and not chosen.

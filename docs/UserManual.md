@@ -1416,7 +1416,7 @@ This gives you everything the locator recorded, at full rate, for analysis in a 
 |---|---|
 | `Flight time:` | Date and time of the flight, **UTC**, from GPS. |
 | `Launch detect time:` | When the locator decided it was flying (§10.2 **Launch**), in the same milliseconds as `time_ms`. Usually a few hundred ms after thrust onset; up to about 2 s for a slow, low-thrust motor, which is detected by altitude instead. |
-| `Burnout time:` | §10.2 **Burnout**. On fast rockets this runs several seconds late ([#45](https://github.com/fschroer/steam-pigeon-locator/issues/45)). |
+| `Burnout time:` | §10.2 **Burnout**: when the motor stopped pushing, read from the acceleration along the rocket. On flights recorded before the October 2026 locator firmware it runs several seconds late on fast rockets, because drag held the old test off ([#45](https://github.com/fschroer/steam-pigeon-locator/issues/45)). |
 | `Apogee time:`, `Noseover time:` | §10.2 **Apogee** and **Noseover**. |
 | `Drogue primary time:`, `Drogue backup time:` | When each drogue charge was due, per the settings. |
 | `Drogue velocity threshold time:` | §10.2 **Drogue Deploy** — where the locator inferred a drogue opening. |
@@ -1460,7 +1460,7 @@ They are exported in that order.
 |---|---|---|
 | 0 | Waiting for launch | On the pad. |
 | 1 | Launched | Launch detected; under thrust. |
-| 2 | Burnout | The locator has decided the motor is out and the rocket is coasting. |
+| 2 | Burnout | The locator has decided the motor is out and the rocket is coasting. On a fast rocket the locator waits a few seconds more, until drag has eased, before it starts looking for apogee: the barometer is unreliable while the rocket is still very fast. |
 | 3 | Noseover | Apogee detected. Often **never appears**: with a drogue primary delay of 0 the drogue state follows in the same instant, and the record goes straight from 2 to 4. |
 | 4 | Drogue primary | The drogue primary charge has become due. |
 | 5 | Drogue backup | The drogue backup charge has become due. |
