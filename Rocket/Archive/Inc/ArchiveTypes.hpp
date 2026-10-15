@@ -132,10 +132,17 @@ namespace FlightArchive
 		uint8_t gps_num_sv;                 // (80, +1) satellites used, saturated at 255
 		uint8_t accel_source;               // (81, +1) ImuAccelSource actually used for `accel`
 		uint8_t pps_status;                 // (82, +1) PpsStatus bits (#31)
+		// GPS speed accuracy (UBX-NAV-PVT sAcc), cm/s, 0 = unknown (#55).  The
+		// receiver's own velocity-quality figure, archived so it can be judged as
+		// a trust gate: h_acc stayed under 1.3 m for the first 2.2 s of Shane's
+		// receiver reporting garbage at ~40 g.  Took two reserved bytes, which
+		// every ARCHIVE_VERSION 7 record wrote as 0, so older v7 records read
+		// "unknown" and no version bump was needed.
+		uint16_t gps_s_acc_cms;             // (83, +2)
 		// Reserved.  Reads 0xFF on erased flash, 0 when written by this version.
 		// Present so the NEXT per-sample field does not have to repeat the whole
-		// version-bump / orphan-every-record cycle this change went through.
-		uint8_t reserved[5];                // (83, +5) = 88
+		// version-bump / orphan-every-record cycle.
+		uint8_t reserved[3];                // (85, +3) = 88
 	};
 
 #pragma pack(pop)

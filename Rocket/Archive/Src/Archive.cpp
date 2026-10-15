@@ -286,6 +286,7 @@ FlightArchive::FlightSample Archive::BuildSample(const SampleInputs &in) {
 		s.gps_vel_e_dms = PackVelDms(in.gps->vel_e_mps, in.gps->velocity_valid);
 		s.gps_vel_d_dms = PackVelDms(in.gps->vel_d_mps, in.gps->velocity_valid);
 		s.gps_h_acc_cm  = PackHAccCm(in.gps->h_acc_m);
+		s.gps_s_acc_cms = PackHAccCm(in.gps->s_acc_mps);   // same packing: x100, 0 = unknown (#55)
 		s.gps_num_sv    = in.gps->num_sv;
 		s.gps_fix_type  = in.gps->fix_type;
 	}

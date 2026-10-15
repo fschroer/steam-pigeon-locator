@@ -800,6 +800,11 @@ void UserInteraction::ExportData(uint16_t archive_position) {
 						gps_vel_fields.Append(Fmt(dms / 10.0f, 0, 1));
 					gps_vel_fields.Append(',');
 				}
+				// GPS speed accuracy (#55): blank when unknown (0), like gps_vel_*.  It is
+				// the LAST column, so a reader that goes by position keeps working.
+				StaticString<16> s_acc_field;
+				if (sample_buffer[i].gps_s_acc_cms != 0u)
+					s_acc_field.Append(Fmt(sample_buffer[i].gps_s_acc_cms / 100.0f, 0, 2));
 				// Same treatment for the non-selected accel channel: empty, not 0, when
 				// that channel had no valid reading — 0 g is a real value it can report.
 				StaticString<48> accel_alt_fields;
@@ -845,7 +850,9 @@ void UserInteraction::ExportData(uint16_t archive_position) {
 						// The accel channel that was NOT selected, pre-formatted above.
 						accel_alt_fields.CStr(),
 						static_cast<uint32_t>(sample_buffer[i].accel_source), ",",
-						static_cast<uint32_t>(sample_buffer[i].pps_status), crlf_);
+						static_cast<uint32_t>(sample_buffer[i].pps_status), ",",
+						// GPS speed accuracy (#55), pre-formatted above.
+						s_acc_field.CStr(), crlf_);
 		    }
 		    start += got;
 		}

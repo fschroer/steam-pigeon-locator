@@ -153,3 +153,25 @@ recording as evidence rather than leaving to be re-derived.
 `Mike_9`, seconds away, averaged 19.8 with p95 3.74 m and dipped to 7 satellites. That is
 an antenna or placement question, not a configuration one — but it is `h_acc` that makes
 it visible, which is the point above restated as hardware.
+
+## Amendment (2026-10-14) — `h_acc` is necessary but not sufficient; `sAcc` is now archived to judge it ([#55](https://github.com/fschroer/steam-pigeon-locator/issues/55))
+
+The 2026-09-07 amendment was half right. **`fix_type` is the wrong trust gate: that stands. `h_acc` is the right one: that does not.** It fails under high acceleration.
+
+**Shane, 2026-09-26, about 40 g boost, peak about 545 m/s.** The receiver stopped tracking at ignition (1.80 s) and did not recover until 19 s:
+- the reported position drifted to 828 m S / 402 m W while the rocket went north-northeast;
+- it reappeared at 1,987 m N / 604 m E, about 2.9 km of error;
+- through all of it `fix_type` read 3, and **`h_acc` stayed under 1.3 m for the first 2.2 s of garbage and did not pass 5 m until 6.6 s**.
+
+**Nike Smoke, 2026-09-27, broke up at Mach 1.2.** From 6.15 to 7.40 s the GPS reported 327 m/s or more upward, with `fix_type` 3 and `h_acc` 1.35–2.76 m. The accelerometer shows the section had already shed nearly all of its 415 m/s.
+
+**The failure follows acceleration and shock, not speed.** Nike's 8–10 g boost tracked integrated acceleration to within about 10 m/s up to 327 m/s, and Pasco's fast flights held at up to about 28 g. The u-blox airborne models are specified by acceleration (AIR4 = 4 g), and the receiver's navigation filter extrapolates confidently past that limit. Its own position-accuracy estimate goes along with it.
+
+**Decision (fschroer, 2026-10-14): measure first.**
+- **`sAcc` is archived** (UBX-NAV-PVT speed accuracy, `FlightSample::gps_s_acc_cms`, cm/s, 0 = unknown; CSV column `gps_s_acc_mps`, appended last).
+  - It is the receiver's own velocity-quality figure, already parsed but never recorded.
+  - It took two of the reserved bytes, which every `ARCHIVE_VERSION` 7 record wrote as 0. So older v7 records read "unknown" and **no version bump** was needed.
+- **No trust gate is chosen yet.** Whether `sAcc` would have caught Shane is unknown, because no flight has recorded it. The 2026-09-07 conclusion is corrected to: position trust needs **`h_acc` and something that sees acceleration-induced loss of tracking**.
+  - **Candidates:** `sAcc`, or a receiver-independent check such as GPS vertical velocity against accelerometer-integrated velocity, flagged on sustained disagreement.
+  - **When to decide:** once flights with `sAcc` recorded, ideally including a hard boost, exist.
+- **The codec recommendation above stands, with a caveat.** If only one quality field fits in `FlightProfileCodec`, `h_acc` is still better than `fix_type`. It is no longer the whole answer, though, and the app must not present it as one.

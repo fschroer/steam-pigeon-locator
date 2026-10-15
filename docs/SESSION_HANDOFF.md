@@ -2,6 +2,14 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-10-14 (data) — #55 GPS speed accuracy (sAcc) now archived; ADR-0017 amended — firmware; NOT on hardware
+
+✅ **Decided by fschroer: measure first, no gate yet.** `FlightSample::gps_s_acc_cms` (cm/s, 0 = unknown) took two reserved bytes. Every v7 record wrote them as 0, so there's **no `ARCHIVE_VERSION` bump** and nothing is orphaned. The struct is still 88 B, with 3 bytes reserved left. CSV gets a new **last** column, `gps_s_acc_mps`, blank when unknown. Builds; host suites pass.
+- **ADR-0017's 2026-09-07 "h_acc is the right gate" is corrected** by a new amendment. `h_acc` is necessary but not sufficient: Shane's receiver was 2.9 km off with `h_acc` < 1.3 m. The failure follows acceleration (about 40 g), not speed.
+- **Next:** a flight with a hard boost and `sAcc` recorded decides between `sAcc` and a GPS-vs-accel velocity check. No wire or app change yet.
+
+🧪 **Bench:** after flashing, a `data` export of a new record should end each row with a `gps_s_acc_mps` value (typically well under 1 m/s on the pad).
+
 ## 2026-10-14 (fix) — #54 physical deployment inferred from a sustained slowdown; app says "opening detected" — [ADR-0036](adr/0036-deployment-opening-inference.md). NOT on hardware
 
 ✅ **Decided by fschroer:** velocity only. Drogue should catch most real drogues even though Nike reads as one. The wording is hedged.
