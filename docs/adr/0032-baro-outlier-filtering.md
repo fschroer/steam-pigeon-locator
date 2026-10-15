@@ -264,3 +264,13 @@ is now partly satisfied: 16 more MS5611 flights, one at Mach 1.1, taking the pas
 count from one to two. Still thin for that regime. *"A pyro-shock transient lasting more
 than two samples"* — none observed in 16 flights with charges. **Raw pressure logging
 remains the outstanding item**, and is now the main thing that would move this decision.
+
+📋 **Raw pressure logging: in place, 2026-10-14 ([#56](https://github.com/fschroer/steam-pigeon-locator/issues/56)).** Every archived sample now carries:
+- the compensated pressure from *before* the median and IIR (`baro_raw_pressure_pa`, 2 Pa steps);
+- the MS5611 die temperature (`baro_temp_c`, 0.5 °C).
+
+They took the last three reserved bytes, so there was no `ARCHIVE_VERSION` bump. The first records with them are the next flights after flashing, and the sweep above should be re-run on them. #56 also reports two findings that bear on this ADR, recorded here and not yet acted on (fschroer chose to log first):
+- **End-to-end lag at touchdown is 0.5–0.8 s**, not the ~0.25 s of filter group delay. The rest is most plausibly the bay vent. At 15–26 m/s, main fires 8–20 m below its set altitude.
+- **A section tumbling broadside in airflow reads high by hundreds of meters.** Nike Smoke read +313 m in 0.25 s during its Mach 1.2 breakup, and its barometer derived a fictitious −551 m/s descent from the decay. Red Ryder read +45 m after separation.
+
+Raw pressure and die temperature are what will separate aerodynamic, pneumatic, thermal and light-sensitivity explanations for both.

@@ -727,6 +727,9 @@ void FlightManager::UpdateFlightState() {
         in.strapdown_quat   = nav_.getStrapdownQuat();
         in.armed            = m_armed_;
         in.pps_status       = m_pps_status_;
+        in.baro_raw_valid   = baro_raw.valid;          // #56: pre-filter pressure + die temp
+        in.baro_pressure_pa = baro_raw.pressure_pa;
+        in.baro_temp_c      = baro_raw.temperature_c;
         FlightArchive::FlightSample s = Archive::BuildSample(in);
         // A stale fix latches lat/lon at the last parsed value, so without the fix
         // type a frozen position is indistinguishable in the record from a

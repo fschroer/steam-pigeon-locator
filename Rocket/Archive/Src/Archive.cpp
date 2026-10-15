@@ -48,6 +48,23 @@ namespace {
         if (s < -32767.0f) s = -32767.0f;
         return static_cast<int16_t>(s);
     }
+    // Raw baro (#56): 2 Pa steps above 20 kPa; 0 = unknown.  Clamped to 1 at the
+    // bottom so a real reading can never be mistaken for "unknown".
+    uint16_t PackPressure2Pa(float pa) {
+        if (!(pa > 0.0f) || pa != pa) return 0u;
+        float s = (pa - 20000.0f) * 0.5f + 0.5f;
+        if (s < 1.0f) s = 1.0f;
+        if (s > 65535.0f) s = 65535.0f;
+        return static_cast<uint16_t>(s);
+    }
+    int8_t PackTempHalfC(float c) {
+        if (c != c) return 0;
+        float s = c * 2.0f;
+        s += (s >= 0.0f) ? 0.5f : -0.5f;
+        if (s >  127.0f) s =  127.0f;
+        if (s < -128.0f) s = -128.0f;
+        return static_cast<int8_t>(s);
+    }
     uint16_t PackHAccCm(float m) {              // horizontal accuracy, cm, 0 = unknown
         if (!(m > 0.0f) || m != m) return 0u;   // NaN or non-positive → unknown
         float s = m * 100.0f + 0.5f;
@@ -322,6 +339,12 @@ FlightArchive::FlightSample Archive::BuildSample(const SampleInputs &in) {
 			| (in.health.baro_update_rejected ? FlightArchive::kEkfBaroRejected       : 0u)
 			| (in.health.fused_frozen         ? FlightArchive::kEkfFusedFrozen        : 0u));
 	s.pps_status   = in.pps_status;
+	// Raw baro (#56).  Temperature is written only with a valid pressure, since
+	// 0 is both "unknown" and a real 0 C.
+	if (in.baro_raw_valid) {
+		s.baro_raw_pressure_2pa = PackPressure2Pa(in.baro_pressure_pa);
+		if (s.baro_raw_pressure_2pa != 0u) s.baro_temp_halfc = PackTempHalfC(in.baro_temp_c);
+	}
 
 	// NFR-9 strapdown attitude, packed int16.
 	s.tilt_cdeg   = PackTiltCdeg(in.tilt_rad);

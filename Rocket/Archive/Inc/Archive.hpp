@@ -49,6 +49,10 @@ public:
 		Quaternionf       strapdown_quat   {};
 		bool              armed            = false;
 		uint8_t           pps_status       = 0;        // FlightArchive::PpsStatus bits (#31)
+		// Raw (pre-filter) compensated pressure and die temperature (#56).
+		bool              baro_raw_valid   = false;
+		float             baro_pressure_pa = 0.0f;
+		float             baro_temp_c      = 0.0f;
 	};
 	bool WriteData(const SampleInputs &in);
 	// Pack a FlightSample WITHOUT writing it.  Shared by WriteData() and the

@@ -2,6 +2,17 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-10-14 (data) — #56 raw (pre-filter) baro pressure and die temperature now archived — firmware; NOT on hardware
+
+✅ **Decided by fschroer: archive raw pressure and temperature only.** Documenting the lag in ADR-0032 or the manual, and a tumble gate on baro velocity, were offered and not chosen.
+- **Layout:** `FlightSample::baro_raw_pressure_2pa` (`20000 + 2·v` Pa, 0 = unknown) and `baro_temp_halfc` (0.5 °C) took the **last three reserved bytes**. v7 wrote them as 0, so no version bump. **No reserved bytes remain:** the next field needs #48's re-cut or a bump.
+- **Unknown handling:** temperature is valid only when pressure is nonzero, because 0 °C is real.
+- **CSV:** two new last columns, `baro_raw_pressure_pa` and `baro_temp_c`, blank when unknown. The header is 385 + 11 of 415 characters. The longest real row was 338; the new fields add at most 19.
+- **Builds; host suites pass.** The `Tests/FlightReplay` mock `SampleInputs` gained the three fields.
+- **ADR-0032:** the revisit item "raw pressure logging" is marked in place. The 0.5–0.8 s touchdown lag and the tumbling over-read are recorded there as unacted findings.
+
+🧪 **Bench:** after flashing, a `data` export of a new record should end with `baro_raw_pressure_pa` near the site's pressure (about 101,000 Pa at sea level; about 86,000 at 1,300 m) and a plausible `baro_temp_c`.
+
 ## 2026-10-14 (data) — #55 GPS speed accuracy (sAcc) now archived; ADR-0017 amended — firmware; NOT on hardware
 
 ✅ **Decided by fschroer: measure first, no gate yet.** `FlightSample::gps_s_acc_cms` (cm/s, 0 = unknown) took two reserved bytes. Every v7 record wrote them as 0, so there's **no `ARCHIVE_VERSION` bump** and nothing is orphaned. The struct is still 88 B, with 3 bytes reserved left. CSV gets a new **last** column, `gps_s_acc_mps`, blank when unknown. Builds; host suites pass.

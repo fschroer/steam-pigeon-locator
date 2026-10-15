@@ -68,6 +68,9 @@ public:
         Quaternionf       strapdown_quat   {};
         bool              armed            = false;
         uint8_t           pps_status       = 0;
+        bool              baro_raw_valid   = false;   // #56: mirrors the real SampleInputs
+        float             baro_pressure_pa = 0.0f;
+        float             baro_temp_c      = 0.0f;
     };
 
     static FlightArchive::FlightSample BuildSample(const SampleInputs& in) {

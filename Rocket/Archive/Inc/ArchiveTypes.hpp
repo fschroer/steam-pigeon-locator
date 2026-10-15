@@ -139,10 +139,21 @@ namespace FlightArchive
 		// every ARCHIVE_VERSION 7 record wrote as 0, so older v7 records read
 		// "unknown" and no version bump was needed.
 		uint16_t gps_s_acc_cms;             // (83, +2)
-		// Reserved.  Reads 0xFF on erased flash, 0 when written by this version.
-		// Present so the NEXT per-sample field does not have to repeat the whole
-		// version-bump / orphan-every-record cycle.
-		uint8_t reserved[3];                // (85, +3) = 88
+		// Raw baro, BEFORE the median and IIR (#56): the compensated pressure and
+		// the MS5611 die temperature.  Every archived altitude is filtered, so the
+		// archive could not separate aerodynamic (a tumbling section reading
+		// hundreds of meters high), pneumatic (vent lag), thermal and
+		// light-sensitivity explanations -- ADR-0032 lists exactly this as a
+		// revisit condition.
+		//   pressure_pa = 20000 + 2 * baro_raw_pressure_2pa   (2 Pa ~ 0.17 m;
+		//                 valid to ~11.8 km MSL).  0 = unknown.
+		//   temp_c      = baro_temp_halfc / 2.0                (0.5 C steps)
+		// These took the LAST three reserved bytes, which every ARCHIVE_VERSION 7
+		// record wrote as 0 -- so no version bump.  A 0 temperature is a real
+		// reading, so temperature is valid only when the pressure is nonzero.
+		// No reserved bytes remain: the next field needs #48's re-cut or a bump.
+		uint16_t baro_raw_pressure_2pa;     // (85, +2)
+		int8_t   baro_temp_halfc;           // (87, +1) = 88
 	};
 
 #pragma pack(pop)

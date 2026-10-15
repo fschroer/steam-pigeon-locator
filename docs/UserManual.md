@@ -1450,6 +1450,7 @@ This gives you everything the locator recorded, at full rate, for analysis in a 
 | `accel_source` | Which accelerometer the `accel_*_g` columns came from: 0 = low-g, 1 = high-g. |
 | `pps_status` | Whether the GPS one-pulse-per-second timing reference was healthy: 1 = locked, 2 = a pulse was missed, 4 = a bad interval was rejected. These add together — 3 is "locked, but a pulse was missed", 5 is "locked, but an interval was rejected". 1 on its own is the good case. |
 | `gps_s_acc_mps` | How accurate the GPS thought its own *velocity* was, in m/s. **Blank** on flights recorded before the October 2026 locator firmware, or when the GPS gave no figure. Recorded so it can be compared with what actually happened: on a hard boost (around 40 g), a GPS can lose track while its position-accuracy figure still looks good ([#55](https://github.com/fschroer/steam-pigeon-locator/issues/55)). The last column, so spreadsheets that read by position are unaffected. |
+| `baro_raw_pressure_pa`, `baro_temp_c` | The barometer's pressure reading **before** any filtering (Pa, 2 Pa steps) and the barometer chip's own temperature (°C, 0.5 °C steps). Every altitude column is filtered; these are the unfiltered source, recorded so that odd altitude readings — a tumbling section reading hundreds of meters high, vent lag at landing — can be explained later ([#56](https://github.com/fschroer/steam-pigeon-locator/issues/56)). **Both blank** on flights recorded before the October 2026 locator firmware. The last two columns. |
 
 They are exported in that order.
 

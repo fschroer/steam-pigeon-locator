@@ -805,6 +805,17 @@ void UserInteraction::ExportData(uint16_t archive_position) {
 				StaticString<16> s_acc_field;
 				if (sample_buffer[i].gps_s_acc_cms != 0u)
 					s_acc_field.Append(Fmt(sample_buffer[i].gps_s_acc_cms / 100.0f, 0, 2));
+				// Raw baro (#56), also last-appended: both blank when the pressure is
+				// 0 (unknown, or a record from before this field existed).
+				StaticString<24> baro_raw_fields;
+				baro_raw_fields.Append(',');
+				if (sample_buffer[i].baro_raw_pressure_2pa != 0u) {
+					baro_raw_fields.Append(static_cast<uint32_t>(20000u + 2u * sample_buffer[i].baro_raw_pressure_2pa));
+					baro_raw_fields.Append(',');
+					baro_raw_fields.Append(Fmt(sample_buffer[i].baro_temp_halfc / 2.0f, 0, 1));
+				} else {
+					baro_raw_fields.Append(',');
+				}
 				// Same treatment for the non-selected accel channel: empty, not 0, when
 				// that channel had no valid reading — 0 g is a real value it can report.
 				StaticString<48> accel_alt_fields;
@@ -852,7 +863,7 @@ void UserInteraction::ExportData(uint16_t archive_position) {
 						static_cast<uint32_t>(sample_buffer[i].accel_source), ",",
 						static_cast<uint32_t>(sample_buffer[i].pps_status), ",",
 						// GPS speed accuracy (#55), pre-formatted above.
-						s_acc_field.CStr(), crlf_);
+						s_acc_field.CStr(), baro_raw_fields.CStr(), crlf_);
 		    }
 		    start += got;
 		}

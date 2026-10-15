@@ -193,7 +193,7 @@ private:
   // WriteMany() that emits it needed 262 against 254 usable — the 2026-08-02
   // export stopped at "fix_type," and lost both num_sv and its line ending, so
   // the first data row ran onto the header line.
-  static constexpr char export_header_text_[] = "time_ms,raw_baro_agl_m,fused_agl_m,raw_baro_vel_mps,fused_vspeed_mps,accel_x_g,accel_y_g,accel_z_g,gyro_x_dps,gyro_y_dps,gyro_z_dps,lat_deg,lon_deg,flight_state,armed,ekf_health,gps_vel_n_mps,gps_vel_e_mps,gps_vel_d_mps,gps_h_acc_m,tilt_deg,q_w,q_x,q_y,q_z,fix_type,num_sv,accel_alt_x_g,accel_alt_y_g,accel_alt_z_g,accel_source,pps_status,gps_s_acc_mps";
+  static constexpr char export_header_text_[] = "time_ms,raw_baro_agl_m,fused_agl_m,raw_baro_vel_mps,fused_vspeed_mps,accel_x_g,accel_y_g,accel_z_g,gyro_x_dps,gyro_y_dps,gyro_z_dps,lat_deg,lon_deg,flight_state,armed,ekf_health,gps_vel_n_mps,gps_vel_e_mps,gps_vel_d_mps,gps_h_acc_m,tilt_deg,q_w,q_x,q_y,q_z,fix_type,num_sv,accel_alt_x_g,accel_alt_y_g,accel_alt_z_g,accel_source,pps_status,gps_s_acc_mps,baro_raw_pressure_pa,baro_temp_c";
 
   // clear_screen_ ("\x1b[2J" + "\x1b(B" + SI + "\r" = 9) + crlf_ ("\r\n" = 2)
   // share the header's line buffer.
