@@ -97,6 +97,12 @@ void Factory::Init(const Radio_s *radio) {
 	// actually recorded, not power-ons.
 	archive_.StartOpenNewFlight();
 
+	// Say what came up and what did not (ADR-0038).  A failed sensor no longer
+	// restarts the locator, so the console is reachable to read this — which is the
+	// point: a locator that boots with a dead sensor has to say so somewhere other
+	// than a one-second red LED, or it looks like a healthy one that will not arm.
+	PrintSensorStatus();
+
 	// A captured fault (HardFault / assert / watchdog hang) is deliberately left
 	// in the .noinit record so it can be read over the USB-C console with '/'
 	// after the reset that produced it.  Clearing it here (as an earlier version
@@ -668,7 +674,14 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			power_.disableDivider();
 			break;
 		case 5:
-			RgbLed(RgbColor::Off);
+			// A brief yellow flash once a second while any sensor is down (ADR-0038),
+			// so a degraded locator can be told from a healthy one without a phone or
+			// a cable.  Yellow because red is the deployment test's countdown.
+			RgbLed(navigation_.failedSensors() != 0u ? RgbColor::Yellow : RgbColor::Off);
+			break;
+		case 7:
+			if (navigation_.failedSensors() != 0u)
+				RgbLed(RgbColor::Off);
 			break;
 		}
 		break;
@@ -967,6 +980,12 @@ void Factory::HandleConsoleChar(uint8_t uart_char) {
     // ServiceDeployTrace for why the shared rule cannot apply to this one.
     // 'p' rather than 'd': root letters are matched ahead of the command-word
     // buffer, so 'd' would eat the 'd' in "data" and "dfu".
+    // Sensor status (ADR-0038).  Not disarm-gated: it is one short line, it
+    // touches no sensor, and the operator most likely to want it is the one whose
+    // arm was just refused.  's' is free of the command words' letters.
+    else if (config_.IsConsoleIdle() && (uart_char == 's' || uart_char == 'S')) {
+        PrintSensorStatus();
+    }
     else if (config_.IsConsoleIdle() && (uart_char == 'p' || uart_char == 'P')) {
         deploy_trace_ = !deploy_trace_;
         if (deploy_trace_) {
@@ -1279,14 +1298,15 @@ void Factory::PrintConsoleHelp() {
 			 "  data     flight data menu\r\n");
 	UartSend("  dfu      firmware update mode\r\n");
 
-	// '?' and 'p' are the two root keys that answer while armed, and they are
+	// '?', 'p' and 's' are the root keys that answer while armed, and they are
 	// grouped under their own heading rather than footnoted: an operator who has
 	// just been refused by one of the four below needs to know the refusal was
 	// the arm state and not a dead console.  Keeping them out of the block below
 	// is also what lets its DISARMED heading stay true without exceptions.
 	UartSend("\r\nKeys (no menu open, armed or disarmed):\r\n"
 			 "  ?        this list\r\n"
-			 "  p        deployment pin trace (DARM + channels, on change)\r\n");
+			 "  p        deployment pin trace (DARM + channels, on change)\r\n"
+			 "  s        sensor status (what a failed sensor disables)\r\n");
 
 	// The diagnostics carry one shared rule instead of four per-line carve-outs.
 	// Naming the requirement in the heading is what makes a refusal legible: the
@@ -1367,6 +1387,41 @@ const char* AxisName(NoseAxis a) {
 	}
 }
 }  // namespace
+
+static const char* SensorHealthText(SensorHealth h) {
+	if (SensorFaults::Failed(h)) return "FAILED";
+	switch (h) {
+	case SensorHealth::Ok:      return "ok";
+	case SensorHealth::Warning: return "warning";
+	case SensorHealth::Stale:   return "no fresh fix";
+	default:                    return "?";
+	}
+}
+
+void Factory::PrintSensorStatus() {
+	const SensorHealth imu  = navigation_.imuStatus().health;
+	const SensorHealth baro = navigation_.baroStatus().health;
+	const SensorHealth gps  = navigation_.gpsStatus().health;
+	char b[160];
+	snprintf(b, sizeof(b), "\r\nDIAG|SENSORS: IMU %s, barometer %s, GPS %s\r\n",
+			SensorHealthText(imu), SensorHealthText(baro), SensorHealthText(gps));
+	UartSend(b);
+	const uint8_t failed = navigation_.failedSensors();
+	if (failed == 0u)
+		return;
+	// What each loss costs, in the order an operator asks about it.  The list is
+	// the ADR-0038 table; keep the two in step.
+	if (failed & SensorFaults::kImu)
+		UartSend("DIAG|SENSORS:   no IMU - no launch detection, so no flight is recorded\r\n");
+	if (failed & SensorFaults::kBaro)
+		UartSend("DIAG|SENSORS:   no barometer - no altitude, apogee or landing detection\r\n");
+	if (failed & SensorFaults::kGps)
+		UartSend("DIAG|SENSORS:   no GPS - no position for recovery\r\n");
+	UartSend(navigation_.armingAllowed()
+			? "DIAG|SENSORS:   arming still allowed\r\n"
+			: "DIAG|SENSORS:   ARMING DISABLED - needs the IMU and the barometer\r\n");
+	UartSend("DIAG|SENSORS:   stored flights, 'data' export and the app download still work\r\n");
+}
 
 void Factory::PrintMountingDiag() {
 	char line[160];

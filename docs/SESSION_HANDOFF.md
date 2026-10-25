@@ -2,6 +2,20 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-10-25 (fix) — a failed sensor no longer restarts the locator; it boots degraded and says so — [ADR-0038](adr/0038-sensor-failure-degrades-not-restarts.md) (Proposed). Firmware + Android; NOT on hardware
+
+✅ **Why:** fschroer's ballistic flight damaged a sensor. After that, `Navigation::Init()` reset the locator after 3 s of red on every boot, so neither the console nor the app could reach the intact record on the flash.
+- **Firmware:** a sensor that fails init is held red for 1 s and left at `SensorHealth::Error`, and boot carries on. The IWDG is kicked between sensors (tags 101–103), because three failures in a row outlast its ~12.5 s. With no IMU, the EKF is seeded with a nose-up accel instead of zeros (otherwise its quaternion would be NaN).
+- **Arming** is refused unless the IMU **and** the barometer are up (`SensorFaults.hpp`, `Communication.cpp` ArmRequest). The GPS gates nothing. That is a judgment call, open to change in review.
+- **Reporting:** a `DIAG|SENSORS:` report at the end of boot and on the new `s` console key (any arm state), a 1 Hz yellow LED flash while degraded, and on Android a red status-panel note plus an Arm refusal that gives the reason (app `b630931`).
+- **No wire change.** The three health bytes were always broadcast. `WireLayoutTest.kt`, `WireLayoutTests.swift` and the receiver are untouched.
+- **Tests:** new `Tests/SensorFaults` 59/0; every host suite green. The four changed firmware files pass `arm-none-eabi-g++ -fsyntax-only -Og` with no new warnings. **Android was not compiled** (no SDK in that session), so run `:app:testDebugUnitTest` and an install-and-launch.
+- **Known limits (in the ADR):** a sensor failed at boot stays failed until a power cycle; with no IMU there is no launch detection, so no new record is made; the MS5611 PROM CRC-4 is not checked, so a barometer returning garbage still reads `Ok`.
+
+📋 **iOS** lacks the note and the arm-refusal message. It already colors the lines red, and the locator's own refusal covers both apps. Recorded in §4.4 of the summary. `UI_PARITY.md` lives in `steam-pigeon-ios`, which that session could not reach, so it still needs the entry.
+
+🧪 **Bench:** hold one sensor off (lift the IMU or baro CS, or the GPS I²C pull-up). Check that the locator boots, shows red for 1 s in that sensor's slot, then flashes yellow once a second. `s` should name the sensor, and the app note should appear. Arm should be refused with a toast (and with no app check, the armed byte stays 0). A `data` export and the app's record download should both work. Repeat with all three held off to confirm boot fits inside the watchdog.
+
 ## 2026-10-15 (fix) — record t = 0 is the start of the thrust run into launch detect; CSV export states `Launch onset time:` — ADR-0007 amendment. NOT on hardware
 
 ✅ **Why:** `AnchorRecordToLaunchOnset` took the first ring sample above 1.3 g. On Ken_6 that was a one-sample jolt 0.8 s before ignition, so every Ken_6 time is 0.8 s late. Onset is now the start of the unbroken ≥ 1.3 g run ending at launch detect, walked back from the newest sample (`LaunchOnset.hpp`). If the newest sample is in the pad band, the old first-crossing scan applies.

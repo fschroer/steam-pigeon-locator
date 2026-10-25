@@ -10,6 +10,7 @@ uint32_t Pps_GetTim2TicksPerSec(void);   // GPS-PPS-disciplined TIM2 ticks/sec (
 #include "Units.hpp"
 #include "CubeMonitorGlobals.hpp"
 #include "CycleProfiler.hpp"
+#include "Faultlog.hpp"
 
 namespace RocketNav {
 
@@ -298,6 +299,20 @@ bool Navigation::Init(const uint16_t output_rate_hz) {
     bool ok = PowerUpAll();
     uint8_t timeout;
 
+    // ADR-0038: a sensor that fails its power-on check is REPORTED, not fatal.
+    // Each branch below used to end in HAL_NVIC_SystemReset() after 3 s of red,
+    // so one damaged sensor put the locator in a restart loop that no console or
+    // app could get a word into — after a ballistic flight, that loop is what
+    // stood between the operator and the stored record.  Now the failure is held
+    // on red long enough to see, the driver is left reporting SensorHealth::Error,
+    // and boot carries on.  Every driver's readSample() returns false when it never
+    // initialized, so a dead sensor costs its own data and nothing else; what that
+    // removes from flight, and the arming refusal, are in SensorFaults.hpp.
+    //
+    // The watchdog is kicked after each sensor.  The IWDG is already running here
+    // (~12.5 s), and three sensors failing in a row — the GPS alone retries for
+    // about 6 s — would otherwise outlast it.  A restart loop by watchdog is still
+    // a restart loop.
     bool imu_init_ok = false;
     timeout = 5;
     while (!(imu_init_ok = m_imu.init(m_cfg.output_rate_hz, m_cfg.accel_source)) && timeout-- > 0) {
@@ -305,7 +320,8 @@ bool Navigation::Init(const uint16_t output_rate_hz) {
         HAL_Delay(100);
     }
     if (imu_init_ok) { RgbLed(RgbColor::Cyan);    HAL_Delay(500); }
-    else             { RgbLed(RgbColor::Red);      HAL_Delay(3000); HAL_NVIC_SystemReset(); }
+    else             { RgbLed(RgbColor::Red);      HAL_Delay(kSensorFailHoldMs); }
+    Diag::KickWatchdog(kInitCheckpointImu);
 
     bool baro_init_ok = false;
     timeout = 5;
@@ -314,16 +330,19 @@ bool Navigation::Init(const uint16_t output_rate_hz) {
         HAL_Delay(100);
     }
     if (baro_init_ok) { RgbLed(RgbColor::Magenta); HAL_Delay(500); }
-    else              { RgbLed(RgbColor::Red);      HAL_Delay(3000); HAL_NVIC_SystemReset(); }
+    else              { RgbLed(RgbColor::Red);      HAL_Delay(kSensorFailHoldMs); }
+    Diag::KickWatchdog(kInitCheckpointBaro);
 
     bool gps_init_ok = false;
     timeout = 5;
     while (!(gps_init_ok = m_gps.init(GPS_RATE)) && timeout-- > 0) {
         RgbLed(gps_init_ok ? RgbColor::Green : RgbColor::Red);
         HAL_Delay(100);
+        Diag::KickWatchdog(kInitCheckpointGps);   // each attempt can wait ~1 s for boot
     }
     if (gps_init_ok) { RgbLed(RgbColor::Green);   HAL_Delay(500); }
-    else             { RgbLed(RgbColor::Red);      HAL_Delay(3000); HAL_NVIC_SystemReset(); }
+    else             { RgbLed(RgbColor::Red);      HAL_Delay(kSensorFailHoldMs); }
+    Diag::KickWatchdog(kInitCheckpointGps);
 
     RgbLed(RgbColor::Off);
     HAL_Delay(500);
@@ -338,6 +357,11 @@ bool Navigation::Init(const uint16_t output_rate_hz) {
     m_imu.readSample(imu);
     m_baro.readSample(baro);
     m_gps.readSample(gps);
+    // With no IMU the sample above is all zeros, and the EKF seeds its attitude by
+    // normalizing that accel.  Nothing downstream uses the fused attitude without
+    // an IMU (telemetry is raw-primary, ADR-0005), but a NaN quaternion is not a
+    // thing to leave lying in a state other code reads.  Seed it nose-up at rest.
+    if (!imu_init_ok) imu.accel_selected_mps2 = { G0_F, 0.0f, 0.0f };
 
     m_ekf.initialize(imu, baro.valid ? &baro : nullptr, gps.position_valid ? &gps : nullptr);
     m_ekf.zeroPadReferenceAgl(m_ekf.getSolution().altitude_msl_m, 0.0f);

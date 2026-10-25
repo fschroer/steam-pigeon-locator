@@ -5,6 +5,7 @@
 #include "SAMM10Q.hpp"
 #include "InsEkf15.hpp"
 #include "AttitudeEstimator.hpp"
+#include "SensorFaults.hpp"
 
 // ---------------------------------------------------------------------------
 // Bench replay (#35 / #36) — DISABLED by default.
@@ -170,6 +171,17 @@ public:
     SensorStatus baroStatus() const { return m_baro.getStatus(); }
     SensorStatus gpsStatus()  const { return m_gps.getStatus(); }
 
+    // ADR-0038 — the sensors that failed their power-on check (SensorFaults bits),
+    // and whether what survived is enough to arm.  The rule lives in
+    // SensorFaults.hpp; these only feed it the live health.
+    uint8_t failedSensors() const {
+        return SensorFaults::FailedMask(m_imu.getStatus().health, m_baro.getStatus().health,
+                                        m_gps.getStatus().health);
+    }
+    bool armingAllowed() const {
+        return SensorFaults::ArmingAllowed(m_imu.getStatus().health, m_baro.getStatus().health);
+    }
+
     // True once the raw baro on-pad AGL reference has been zeroed (#11).
     bool baroAglReferenceReady() const { return m_baro.aglReferenceReady(); }
 
@@ -294,6 +306,17 @@ public:
 #endif
 
 private:
+    // ADR-0038: how long a sensor that failed its power-on check holds the status
+    // LED on red before boot carries on without it.  It used to be 3 s and then a
+    // restart; a second is enough to be seen, and three failures in a row must
+    // still fit inside the IWDG window between Init()'s kicks.
+    static constexpr uint32_t kSensorFailHoldMs = 1000u;
+    // Watchdog checkpoint tags for Init(), clear of the 0..19 service counts the
+    // main loop writes, so a hang during sensor bring-up names the sensor.
+    static constexpr uint32_t kInitCheckpointImu  = 101u;
+    static constexpr uint32_t kInitCheckpointBaro = 102u;
+    static constexpr uint32_t kInitCheckpointGps  = 103u;
+
     // IsStationary is private — used only by CalibrateOnPadAndZeroAglUntilLaunch.
     // Launch/burnout/apogee/landing detection is owned by FlightManager.
     bool IsStationary(const ImuSample& imu, const BaroSample& baro) const;
