@@ -391,7 +391,15 @@ void Communication::OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
 		}
 
 		case MsgType::ArmRequest:
-			if (device_state == DeviceState::Disarmed) {
+			// ADR-0038: refused while the IMU or the barometer failed its power-on
+			// check.  Launch and burnout come from one, apogee, main and landing
+			// from the other, so an arm without both would put charges on a guess.
+			// Arming gates pyro only (ADR-0021): a refused locator still detects,
+			// records and beacons with whatever sensors it has.  The app learns of
+			// the refusal the way it learns of every arm — from the armed byte in
+			// the next broadcast — and reads the reason off the sensor health beside
+			// it, so nothing new goes on the wire.
+			if (device_state == DeviceState::Disarmed && nav_.armingAllowed()) {
 				device_state = DeviceState::Armed;
 				// Begin cardinal-axis mounting detection.  Accumulates the next
 				// kMountingCalSamples IMU readings in raw sensor frame, identifies

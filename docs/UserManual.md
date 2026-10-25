@@ -154,7 +154,26 @@ The buzzer is the locator's primary way of talking to you, and it's the only cha
 | Status LED | Brief **blue** flash | The locator just transmitted a radio message (roughly once per second). |
 | Status LED | Brief **green** flash | The locator just received a radio message from your receiver. |
 | Status LED | **Red**, blinking about once per second, then twice per second | A deployment test is counting down. The faster blink means under 3 seconds to fire. ⚠️ |
+| Status LED | **Cyan**, **magenta**, **green**, half a second each, at power-on | The IMU, barometer and GPS came up, in that order. |
+| Status LED | **Red** for a second at power-on, in place of one of those colors | That sensor failed its power-on check. The locator carries on without it (§1.4). |
+| Status LED | Brief **yellow** flash, about once a second | A sensor failed its power-on check. The locator is running with reduced functions (§1.4). |
 | Status LED | Off | Normal idle state between radio events. |
+
+### If a sensor fails at power-on
+
+The locator checks its three sensors every time it powers on: the IMU (accelerometer and gyro), the barometer and the GPS. **A sensor that fails this check no longer restarts the locator.** It boots without that sensor and tells you so. Until 2026-10-25 it restarted, over and over, which made the stored flights unreachable on exactly the locator you most wanted to read: the one that came back damaged.
+
+What you lose depends on which sensor failed:
+
+| Failed | Still works | Lost |
+|---|---|---|
+| IMU | Stored flights and their download, the USB-C console, position, altitude, battery | **Arming.** Launch detection, so no new flight is recorded |
+| Barometer | Stored flights and their download, the USB-C console, position, accel and gyro readings | **Arming.** Altitude, apogee, main and landing detection |
+| GPS | Everything else, **including arming** | Position, so the map cannot find the rocket for you |
+
+The locator **refuses to arm** without the IMU and the barometer, because it would be firing charges on a guess. It says so in three places: a brief yellow flash on the status LED about once a second, a red note on the app's status panel (§4.6), and the console's `s` key (Appendix D).
+
+⚠️ **Don't fly a locator with a failed sensor.** A failed GPS still arms, because deployment doesn't use it. You decide whether a rocket you can't find by position should fly. Power-cycle once: a sensor that fails again is a hardware fault. **Download the stored flights first** (Part 10). That is what this behavior is for.
 
 ## 1.5 Receiver tour
 
@@ -836,6 +855,7 @@ It comes in two pieces.
 | **Satellites** | The small number beside the rocket icon. More is better; watch it climb after power-on. |
 | **Battery, ×2** | Bar gauges — receiver on top, locator below. Don't fly a locator showing one bar. The gauges go away at launch and return when you disarm after landing (§1.6) — so read it **before** you fly, and again on the walk out. An *empty* gauge on a battery you know is charged is a different problem — see Part 11. |
 | **dBm / SNR** | How loud and how clean the link is (§8.4). |
+| **Sensor note** (red, under the signal reading) | Absent. *"Locator barometer failed. Arming disabled."* (or IMU, or GPS) means that sensor failed its power-on check: see §1.4 for what still works. **Arm** will refuse and tell you why. |
 
 **The statistics panel at the bottom right** is where the flight-critical readings are. ⚡ **It has no separate "health" or "continuity" indicators — the readings themselves change color.** A line in the normal text color is a healthy one; **a line in red is the failure**, and which line is red tells you which sensor or channel.
 
@@ -1619,6 +1639,9 @@ The same applies to the accelerometer, gyro and `pad_alert` columns: those also 
 | Symptom | Look at |
 |---|---|
 | Locator won't power on / no power-on tone | Battery flat (§1.6). Wrong magnet pole or wrong spot (§1.2). |
+| Locator won't arm, and the status panel says a sensor failed | The IMU or barometer failed its power-on check, and the locator refuses to arm without them (§1.4). Power-cycle once. If it fails again, download the stored flights and send the locator in. |
+| Status LED flashes yellow about once a second | A sensor failed at power-on. Press `s` on the console or read the app's status panel to see which one (§1.4). |
+| Locator keeps restarting at power-on (red LED, power-on tone repeating) | Firmware from before 2026-10-25 restarts on a failed sensor. Update it, and the locator will boot without that sensor so you can get its stored flights out (§1.4). |
 | "I couldn't follow the signal readings / callouts during the flight" | You aren't meant to — they're recorded for you. Menu → **App Flight Logs** (§10.7). |
 | App Flight Logs is empty after a flight | A log is only created for a launch the app was already receiving telemetry for, and only a launch creates one (§10.7). A session that never flew leaves nothing by design. |
 | App never finds the receiver | Receiver powered? Bluetooth on? Phone permissions granted? (§3.8) |
@@ -1787,6 +1810,9 @@ AT THE FLIGHT LINE
 | Status | Green flash | Radio receive |
 | Status | Red, ~1 Hz | Deployment test countdown |
 | Status | Red, ~2 Hz | Deployment test — under 3 s to fire ⚠️ |
+| Status | Cyan, magenta, green at power-on | IMU, barometer, GPS came up |
+| Status | Red ~1 s at power-on | That sensor failed; boot continues without it (§1.4) |
+| Status | Yellow flash, ~1 Hz | Running with a failed sensor (§1.4) |
 | Status | Off | Idle |
 
 ## Receiver lights
@@ -1941,13 +1967,15 @@ If a key seems to do nothing, you are in a menu — press Esc. If it answers `RE
 | `h` | Holds the battery-sense circuit powered for ~10 seconds so it can be measured with a meter. Press again to release early. Releases on its own regardless. |
 | `/` | Prints the last fault the locator recorded, if any — what kind, what reset it, and how long it had been running. Says `DIAG\|NONE` when there is nothing stored, which is the normal, healthy answer. Service will ask for this text if you send a locator in. |
 | `p` | **Deployment pin trace — works armed.** Prints a line whenever the deployment hardware changes state: `cmd` is what the firmware asked the pins to do, `pad` is what the pins actually did, `DARM` is the load switch that feeds all four channels, and `D1`–`D4` are the channels themselves. Press again to turn it off. Use it when **a channel doesn't fire** (below). It only reads pins — it cannot fire anything, and it is not a way to test a channel from the console. |
+| `s` | **Sensor status — works armed.** One line naming each sensor's health (`ok`, `warning`, `no fresh fix`, or `FAILED`). If any sensor failed its power-on check, it also says what that disables and whether arming is still allowed (§1.4). The locator prints the same report once at power-on. |
 
 None of these affects flight behavior.
 
-**Two keys answer while the locator is armed**, and everything else in the table is refused until you disarm:
+**Three keys answer while the locator is armed**, and everything else in the table is refused until you disarm:
 
 - `?` — so a list of the commands is always available, even when the commands themselves are not.
 - `p` — because the thing it exists to watch, a deployment test, only ever happens while armed. A disarmed-only trace would be a trace of nothing.
+- `s` — because the person asking "why won't it arm?" usually has just been refused.
 
 ## Editing keys (configuration menu)
 

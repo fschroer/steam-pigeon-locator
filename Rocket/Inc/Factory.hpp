@@ -84,6 +84,11 @@ private:
 	// setting actually take effect?", which otherwise cannot be seen without
 	// flying and reading the archived body accel back out (#36 item 5).
 	void PrintMountingDiag();
+	// 's' console key, and once at the end of Init(): each sensor's health and,
+	// if any failed its power-on check, what that disables (ADR-0038).  Answers
+	// in any arm state — it is one line, and "why will it not arm?" is asked by
+	// someone who has just been refused.
+	void PrintSensorStatus();
 	// 'v' console key: profile the battery-sense chain (reference, converter,
 	// load switch, divider, filter cap) and print it.  The app's 8-step gauge
 	// renders every reading below 3750 mV as the same empty bar, and
