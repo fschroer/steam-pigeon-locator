@@ -19,7 +19,8 @@ Navigation::Navigation(SPI_HandleTypeDef *hspi2, I2C_HandleTypeDef *hi2c2,
                        GPIO_TypeDef *baro_cs_port, uint16_t baro_cs_pin) :
     m_imu(hspi2, imu_cs_port, imu_cs_pin),
     m_baro(hspi2, htim17, baro_cs_port, baro_cs_pin),
-    m_gps(hi2c2, 0x42) {
+    m_gps(hi2c2, 0x42),
+    m_mag(hi2c2) {
 }
 
 bool Navigation::PowerUpAll() {
@@ -284,9 +285,12 @@ void Navigation::FinishMountingCommit() {
 }
 
 bool Navigation::Init(const uint16_t output_rate_hz) {
+    // The last branch used to hard-code 20.0f, so every in-range rate became
+    // 20 Hz: harmless while the loop ran at 20 Hz, a wrong IMU/baro init rate
+    // and a wrong fallback dt at 50 Hz (ADR-0039).
     if      (output_rate_hz < 20)  m_cfg.output_rate_hz = 20.0f;
     else if (output_rate_hz > 100) m_cfg.output_rate_hz = 100.0f;
-    else                           m_cfg.output_rate_hz = 20.0f;
+    else                           m_cfg.output_rate_hz = static_cast<float>(output_rate_hz);
 
     m_cfg.accel_source          = ImuAccelSource::Auto;
     m_cfg.launch_detect_accel_g = 5.0f;
@@ -324,6 +328,10 @@ bool Navigation::Init(const uint16_t output_rate_hz) {
     }
     if (gps_init_ok) { RgbLed(RgbColor::Green);   HAL_Delay(500); }
     else             { RgbLed(RgbColor::Red);      HAL_Delay(3000); HAL_NVIC_SystemReset(); }
+
+    // Magnetometer (ADR-0039): optional, so a failed probe is not a fault and
+    // costs no retry loop or LED.  Boards without U19 simply log no field.
+    m_mag.init(m_cfg.output_rate_hz);
 
     RgbLed(RgbColor::Off);
     HAL_Delay(500);
@@ -440,6 +448,18 @@ bool Navigation::Update() {
         imu_new  = m_imu.readSample(imu);
         baro_new = m_baro.readSample(baro);
         Diag::mark(Diag::Seg::SensorRead, t_sr);
+
+        // Magnetometer before the GPS: both are on I2C2, and a GPS that
+        // clock-stretches holds the bus only for its own transaction.
+        {
+            MagSample mag{};
+            const uint16_t t_mag = Diag::Now();
+            if (!m_mag.readSample(mag))
+                m_mag_valid_ = false;
+            else
+                m_mag_valid_ = true;
+            Diag::mark(Diag::Seg::MagRead, t_mag);
+        }
 
         if (m_cfg.use_gps) {
             if (++m_gps_poll_counter_ >= GPS_POLL_DIVISOR) {
@@ -629,6 +649,7 @@ bool Navigation::Update() {
                 const uint32_t t2_start = TIM2->CNT;
                 const float    dt_fifo  = m_strapdown_dt_per_word;   // from last loop
                 uint16_t       words_drained = 0;
+                bool           drain_emptied = false;
                 Vec3f batch[kStrapdownFifoBatch];
                 for (uint8_t b = 0; b < kStrapdownFifoMaxBatches; ++b) {
                     const uint16_t fn = m_imu.drainFifoGyro(batch, kStrapdownFifoBatch);
@@ -636,8 +657,10 @@ bool Navigation::Update() {
                         m_attitude.propagate(remapVec(batch[i]), dt_fifo, now);
                     words_drained += fn;
                     if (fn > 0) propagated = true;
-                    if (fn < kStrapdownFifoBatch)
+                    if (fn < kStrapdownFifoBatch) {
+                    	drain_emptied = true;
                     	break;   // FIFO emptied
+                    }
                 }
                 // Recompute dt_per_word for next loop: the GPS-PPS-disciplined
                 // TIM2 interval since the last drain, divided across the words
@@ -645,7 +668,12 @@ bool Navigation::Update() {
                 // (immune to MSI/IMU-oscillator/HAL_GetTick error); clamped so a
                 // post-halt interval can't inject garbage.  Holds 1/480 until PPS.
                 const uint32_t tps = Pps_GetTim2TicksPerSec();   // 0 until PPS lock
-                if (tps > 0 && words_drained > 0 && m_strapdown_last_tim2 != 0) {
+                // Only across two drains that each emptied the FIFO: then the
+                // words drained are exactly the words produced in the interval.
+                // A capped drain (#24) leaves a backlog, and dividing by its words
+                // would read a short dt for as long as the backlog lasts.
+                if (tps > 0 && words_drained > 0 && m_strapdown_last_tim2 != 0
+                        && drain_emptied && m_strapdown_prev_drain_emptied_) {
                     const uint32_t interval = t2_start - m_strapdown_last_tim2; // unsigned wrap OK
                     float dt = (static_cast<float>(interval) / static_cast<float>(tps))
                                / static_cast<float>(words_drained);
@@ -657,6 +685,7 @@ bool Navigation::Update() {
                         (1.0f - kStrapdownDtAlpha) * m_strapdown_dt_per_word + kStrapdownDtAlpha * dt;
                 }
                 m_strapdown_last_tim2 = t2_start;
+                m_strapdown_prev_drain_emptied_ = drain_emptied;
                 Diag::recordCount(Diag::Cnt::FifoWords, words_drained);  // per-cycle drain count
                 Diag::mark(Diag::Seg::FifoDrain, t_drain);              // reads + propagate only
 #if SP_BENCH_REPLAY

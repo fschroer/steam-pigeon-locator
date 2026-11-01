@@ -111,7 +111,7 @@ RocketArchive::Config Archive::MakeConfig(IFlashDriver &flash) {
 	cfg.archiveBaseAddress = layout.archiveBaseAddress;
 	cfg.archiveSizeBytes = layout.archiveSizeBytes;
 	cfg.recordCount = record_count;
-	cfg.minutesPerRecord = 8u;
+	cfg.samplesPerRecord = kRecordCapacitySamples;
 	cfg.statSlotCount = static_cast<uint16_t>(FlightArchive::Statistic::Count);
 	return cfg;
 }
@@ -344,6 +344,18 @@ FlightArchive::FlightSample Archive::BuildSample(const SampleInputs &in) {
 	if (in.baro_raw_valid) {
 		s.baro_raw_pressure_2pa = PackPressure2Pa(in.baro_pressure_pa);
 		if (s.baro_raw_pressure_2pa != 0u) s.baro_temp_halfc = PackTempHalfC(in.baro_temp_c);
+	}
+
+	// Magnetometer (ADR-0039): the 18-bit reading >> 2, sensor frame.
+	for (int i = 0; i < 3; ++i) {
+		if (in.mag != nullptr && in.mag->valid) {
+			int32_t q = in.mag->raw[i] >> 2;               // arithmetic: raw is signed
+			if (q > 32767)  q = 32767;
+			if (q < -32767) q = -32767;                    // one LSB clear of kMagUnknown
+			s.mag_q[i] = static_cast<int16_t>(q);
+		} else {
+			s.mag_q[i] = FlightArchive::kMagUnknown;
+		}
 	}
 
 	// NFR-9 strapdown attitude, packed int16.

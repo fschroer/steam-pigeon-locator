@@ -52,8 +52,8 @@ void Factory::Init(const Radio_s *radio) {
 	console_baud_.Begin();
 
 	// Play the PowerOn sequence synchronously before initialization tasks begin so the
-	// user hears immediate audio feedback on power-up.  Each duration unit is one
-	// main-loop tick (1000 / SAMPLES_PER_SECOND ms).  buzzer_phase_ is set to Idle
+	// user hears immediate audio feedback on power-up.  Each duration unit is
+	// kNoteUnitMs (50 ms, the old 20 Hz tick; see Buzzer.hpp).  buzzer_phase_ is set to Idle
 	// so ProcessRocketEvents does not replay the sequence after Init() returns.
 	BuzzerStop();
 	for (size_t i = 0; i < sizeof(PowerOn) / sizeof(PowerOn[0]); i++) {
@@ -61,7 +61,7 @@ void Factory::Init(const Radio_s *radio) {
 			BuzzerPlay(PowerOn[i].tone, PowerOn[i].volume);
 		else
 			BuzzerStop();
-		HAL_Delay(static_cast<uint32_t>(PowerOn[i].duration) * (1000u / SAMPLES_PER_SECOND));
+		HAL_Delay(static_cast<uint32_t>(PowerOn[i].duration) * kNoteUnitMs);
 	}
 	BuzzerStop();
 	buzzer_phase_ = BuzzerPhase::Idle;
@@ -601,10 +601,10 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			pad_reset_pending_ = false;
 		}
 		switch (rocket_service_count) {
-		case 0:
+		case kSlotDividerOn:
 			// Allow time for the divider voltage to settle before the read at
-			// count 2.  Gated on WaitingLaunch because the battery only ever
-			// reaches the wire in PreLaunchData, and that message stops the
+			// the telemetry slot (kSlotTelemetry, 100 ms on).  Gated on
+			// WaitingLaunch because the battery only ever reaches the wire in PreLaunchData, and that message stops the
 			// moment the rocket leaves the pad — so past this point the switch
 			// was being re-enabled every second and read by nobody, burning
 			// ~120 uA through R9+R11 for the whole flight AND the whole
@@ -613,14 +613,14 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			//
 			// Deliberately NOT gated on arm state as well, even though only a
 			// disarmed locator sends PreLaunchData: disarming between count 0
-			// and count 2 would then read an unpowered divider and report a
+			// and the telemetry slot would then read an unpowered divider and report a
 			// flat battery for one second.  Arming is a pad-side transition, so
 			// the extra 150 ms/s of divider current while armed on the pad is
 			// bounded, and it buys a gauge that never blinks empty on disarm.
 			if (flight_state == FlightStates::WaitingLaunch)
 				power_.enableDivider();
 			break;
-		case 2: {
+		case kSlotTelemetry: {
 			if (flight_state == FlightStates::WaitingLaunch) {
 				navigation_.CalibrateOnPadAndZeroAglUntilLaunch(flight_state);
 			}
@@ -657,9 +657,9 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			// device states, and left EN1/EN2 asserted).
 			break;
 		}
-		case 3:
+		case kSlotDividerOff:
 			// Unconditional teardown backstop.  readBatteryMillivolts() already
-			// drops BATTRD at count 2, but only on the path that actually reads
+			// drops BATTRD at the telemetry slot, but only on the path that actually reads
 			// it — and the count-0 gate above is evaluated two cycles earlier,
 			// so a launch detected in between leaves the switch on with nothing
 			// scheduled to turn it off.  Making the teardown independent of both
@@ -667,7 +667,7 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			// Suppressed while the 'h' bench hold is active (see disableDivider).
 			power_.disableDivider();
 			break;
-		case 5:
+		case kSlotLedOff:
 			RgbLed(RgbColor::Off);
 			break;
 		}
@@ -1518,7 +1518,7 @@ void Factory::PrintBatteryDiag() {
 	}
 
 	// The offset production actually gets between enableDivider() at service
-	// count 0 and the read at count 2, and the threshold the app's gauge uses.
+	// slot 0 and the read at kSlotTelemetry (100 ms), and the threshold the app's gauge uses.
 	// Both are stated so the operator can compare the last row against what the
 	// app will show without going and looking either of them up.
 	UartSend("DIAG|BATT: production samples at t=100000 us; app gauge is empty below 3750 mV\r\n");

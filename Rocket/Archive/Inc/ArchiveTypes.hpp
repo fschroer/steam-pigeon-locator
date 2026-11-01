@@ -154,13 +154,25 @@ namespace FlightArchive
 		// No reserved bytes remain: the next field needs #48's re-cut or a bump.
 		uint16_t baro_raw_pressure_2pa;     // (85, +2)
 		int8_t   baro_temp_halfc;           // (87, +1) = 88
+		// MMC5983MA magnetic field (ARCHIVE_VERSION 8, ADR-0039), SENSOR frame:
+		// not remapped, because the board-to-body mapping for this part has not
+		// been measured.  The 18-bit reading, offset removed and shifted right 2,
+		// so one count is 1/4096 G = 0.0244 uT and int16 spans the full +/-8 G.
+		//   field_uT = mag_q * (100.0 / 4096)
+		// kMagUnknown (INT16_MIN) = no reading: part absent (older boards) or the
+		// read failed.  Written every sample the part answers.
+		int16_t  mag_q[3];                  // (88, +6) = 94
 	};
 
 #pragma pack(pop)
 
     static_assert(IsSerializable<FlightSample>(), "ExampleFlightSample must be serializable.");
-    // Lock the on-flash layout.  88 B -> 5 samples / 512 B chunk -> 892,928 B per
-    // record; 9 records = 8,036,352 B against the 8,323,072 B archive region.
+    // Lock the on-flash layout.  94 B -> 5 samples / 512 B chunk (496 B stride).
+    // Since ARCHIVE_VERSION 8 (ADR-0039) a record is sized in SAMPLES, not minutes:
+    // kRecordCapacitySamples in Archive.hpp (9,000) -> 897,024 B per record, and 9
+    // records = 8,073,216 B against the 8,323,072 B archive region.  The table
+    // below is the pre-v8 geometry (9,600 samples), kept for its shape: cost rises
+    // in steps of samples-per-chunk, not bytes.
     //
     // The binding constraint is SAMPLES PER CHUNK, not bytes: 512/sizeof is
     // integer division, so cost rises in steps.  Measured against this geometry
@@ -172,7 +184,8 @@ namespace FlightArchive
     // So the 5 reserved bytes above are free headroom up to 90 B; the field after
     // that costs a whole record.  Adjust record_count in Archive.hpp together with
     // this, and re-run Tests/ArchiveRoundTrip.
-    static_assert(sizeof(FlightSample) == 88, "FlightSample layout changed -- re-check flash capacity AND record_count in Archive.hpp AND the app archive parser, and bump ARCHIVE_VERSION.");
+    static_assert(sizeof(FlightSample) == 94, "FlightSample layout changed -- re-check flash capacity AND record_count in Archive.hpp AND the app archive parser, and bump ARCHIVE_VERSION.");
+    static constexpr int16_t kMagUnknown = INT16_MIN;
 
     // == Decoders ============================================================
     // gps_fix_type: 0-5 = live u-blox fixType (NAV-PVT parsed within 3 s);

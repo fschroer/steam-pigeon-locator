@@ -82,7 +82,7 @@ static constexpr uint32_t kRuntimeRegionSize    = 32u * 1024u;
 // loudly on its own — Archive::Init() simply returns false and every
 // subsequent assertion fails — so CheckConfigFits() below reports it plainly.
 static constexpr uint16_t kRecordCount          = 9u;
-static constexpr uint16_t kMinutesPerRecord     = 8u;
+static constexpr uint32_t kSamplesPerRecord     = 9000u;   // = kRecordCapacitySamples (Archive.hpp)
 static constexpr uint16_t kStatSlotCount =
     static_cast<uint16_t>(FlightArchive::Statistic::Count);
 static constexpr size_t   kChunkPayloadBytes    = 512u;
@@ -100,7 +100,7 @@ static RocketArchive::Config MakeConfig()
     cfg.archiveBaseAddress = layout.archiveBaseAddress;
     cfg.archiveSizeBytes   = layout.archiveSizeBytes;
     cfg.recordCount        = kRecordCount;
-    cfg.minutesPerRecord   = kMinutesPerRecord;
+    cfg.samplesPerRecord   = kSamplesPerRecord;
     cfg.statSlotCount      = kStatSlotCount;
     return cfg;
 }

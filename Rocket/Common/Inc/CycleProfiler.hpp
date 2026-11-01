@@ -25,7 +25,8 @@ enum class Seg : uint8_t {
     Comm,          // Communication::Process()
     NavUpdate,     // Navigation::Update() — total
     SensorRead,    //   IMU + baro readSample()
-    GpsRead,       //   GPS readSample() (every 2nd cycle)
+    GpsRead,       //   GPS readSample() (every 5th cycle at 50 Hz)
+    MagRead,       //   MMC5983MA readSample() (every cycle; ~0 when absent)
     Ekf,           //   EKF predict + baro/GPS updates + ZUPT
     Strapdown,     //   480 Hz gyro FIFO drain + quaternion integrate + tilt (whole block)
     FifoDrain,     //     just the FIFO drain loop (SPI reads + propagate) — subset of Strapdown

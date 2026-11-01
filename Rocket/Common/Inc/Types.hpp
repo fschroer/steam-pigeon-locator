@@ -161,6 +161,15 @@ struct BaroSample {
     bool valid = false;
 };
 
+// MMC5983MA reading (ADR-0039).  Sensor frame: the board-to-body mapping for
+// this part has not been measured, so nothing remaps it yet.
+struct MagSample {
+    uint32_t timestamp_ms = 0;
+    int32_t  raw[3] = { 0, 0, 0 };   // 18-bit, offset removed: +/-131072 = +/-8 G
+    Vec3f    field_uT {};            // raw * 100 / 16384
+    bool     valid = false;
+};
+
 struct GpsSample {
 	uint32_t timestamp_s;
 	uint32_t timestamp_ms = 0;

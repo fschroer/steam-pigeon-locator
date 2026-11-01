@@ -121,7 +121,9 @@ bool SAMM10Q::readSample(GpsSample& out) {
 			return false;
 	}
 
-	m_stream_class = classifyStream(tmp, chunk);
+	// An empty FIFO is now a zero-length read (#22); it used to be 128 bytes of
+	// 0xFF filler, which classifyStream calls Idle.  Keep calling it that.
+	m_stream_class = (chunk == 0) ? StreamClass::Idle : classifyStream(tmp, chunk);
 
 	// After the FIFO read transaction has completed, so the two never overlap.
 	servicePendingDynModel();
@@ -566,7 +568,10 @@ bool SAMM10Q::waitForAck(uint8_t cls, uint8_t id, uint32_t timeout_ms) {
 }
 
 bool SAMM10Q::readFifo(uint8_t *buf, uint16_t &len) {
-  const uint16_t chunk = 128;   // tune as desired
+  // At most this many bytes per call: the callers' buffers are 128 B.  NAV-PVT is
+  // 100 B per 100 ms, so a poll every 100 ms keeps up; anything left over is read
+  // on the next poll.
+  constexpr uint16_t kMaxChunk = 128;
 
   // Per-byte and per-transaction timeout (ms).
   // The SAM-M10Q before lock is doing heavy autonomous-aiding work and
@@ -577,57 +582,60 @@ bool SAMM10Q::readFifo(uint8_t *buf, uint16_t &len) {
   constexpr uint32_t kByteTimeoutMs = kSensorBusTimeoutMs;
   constexpr uint32_t kStopTimeoutMs = kSensorBusTimeoutMs;
 
+  len = 0;
   i2cReset();
 
-  // Phase 1: select FIFO pop window (0xFF)
-  LL_I2C_HandleTransfer(m_hi2c->Instance,
-                        (0x42 << 1),
-                        LL_I2C_ADDRSLAVE_7BIT,
-                        1,
-                        LL_I2C_MODE_AUTOEND,
-                        LL_I2C_GENERATE_START_WRITE);
-
-  {
+  // Length-aware read (#22).  This used to read a FIXED 128 bytes from the 0xFF
+  // stream register every poll, byte by byte against a clock-stretching
+  // receiver: 4-8 ms of busy-wait every poll, most of it reading 0xFF filler
+  // when nothing was waiting.  Now: point at 0xFD, read the two-byte count
+  // (0xFD = MSB, 0xFE = LSB), and read only that many from the stream.  The
+  // address pointer auto-increments to 0xFF and stays there, so the data read
+  // needs no second address write.  An empty FIFO costs two bytes.  The I2C2 bus
+  // is now shared with the MMC5983MA (hardware 4ed58aa), so every millisecond
+  // held here is one the magnetometer waits.
+  auto wait_flag = [&](auto flag_fn, uint32_t timeout_ms, bool check_nack) -> bool {
       const uint32_t t0 = HAL_GetTick();
-      while (!LL_I2C_IsActiveFlag_TXIS(m_hi2c->Instance)) {
-          if (LL_I2C_IsActiveFlag_NACK(m_hi2c->Instance)) return false;
-          if ((HAL_GetTick() - t0) >= kByteTimeoutMs) { i2cReset(); return false; }
+      while (!flag_fn(m_hi2c->Instance)) {
+          if (check_nack && LL_I2C_IsActiveFlag_NACK(m_hi2c->Instance)) return false;
+          if ((HAL_GetTick() - t0) >= timeout_ms) { i2cReset(); return false; }
       }
-  }
+      return true;
+  };
 
-  LL_I2C_TransmitData8(m_hi2c->Instance, 0xFF);
-
-  {
-      const uint32_t t0 = HAL_GetTick();
-      while (!LL_I2C_IsActiveFlag_STOP(m_hi2c->Instance)) {
-          if ((HAL_GetTick() - t0) >= kStopTimeoutMs) { i2cReset(); return false; }
-      }
-  }
+  // Phase 1: select the byte-count register (0xFD).
+  LL_I2C_HandleTransfer(m_hi2c->Instance, (0x42 << 1), LL_I2C_ADDRSLAVE_7BIT,
+                        1, LL_I2C_MODE_AUTOEND, LL_I2C_GENERATE_START_WRITE);
+  if (!wait_flag(LL_I2C_IsActiveFlag_TXIS, kByteTimeoutMs, true)) return false;
+  LL_I2C_TransmitData8(m_hi2c->Instance, 0xFD);
+  if (!wait_flag(LL_I2C_IsActiveFlag_STOP, kStopTimeoutMs, false)) return false;
   LL_I2C_ClearFlag_STOP(m_hi2c->Instance);
 
-  // Phase 2: read FIFO bytes
-  LL_I2C_HandleTransfer(m_hi2c->Instance,
-                        (0x42 << 1),
-                        LL_I2C_ADDRSLAVE_7BIT,
-                        chunk,
-                        LL_I2C_MODE_AUTOEND,
-                        LL_I2C_GENERATE_START_READ);
+  // Phase 2: read the count.
+  uint8_t cnt[2] = { 0, 0 };
+  LL_I2C_HandleTransfer(m_hi2c->Instance, (0x42 << 1), LL_I2C_ADDRSLAVE_7BIT,
+                        2, LL_I2C_MODE_AUTOEND, LL_I2C_GENERATE_START_READ);
+  for (uint16_t i = 0; i < 2; i++) {
+      if (!wait_flag(LL_I2C_IsActiveFlag_RXNE, kByteTimeoutMs, true)) return false;
+      cnt[i] = LL_I2C_ReceiveData8(m_hi2c->Instance);
+  }
+  if (!wait_flag(LL_I2C_IsActiveFlag_STOP, kStopTimeoutMs, false)) return false;
+  LL_I2C_ClearFlag_STOP(m_hi2c->Instance);
 
+  uint16_t available = static_cast<uint16_t>((cnt[0] << 8) | cnt[1]);
+  if (available == 0xFFFFu) available = 0;   // bus idle-high: not a count
+  if (available == 0)
+      return true;                           // nothing waiting: len = 0
+  const uint16_t chunk = (available < kMaxChunk) ? available : kMaxChunk;
+
+  // Phase 3: read exactly that many from the stream register (0xFF).
+  LL_I2C_HandleTransfer(m_hi2c->Instance, (0x42 << 1), LL_I2C_ADDRSLAVE_7BIT,
+                        chunk, LL_I2C_MODE_AUTOEND, LL_I2C_GENERATE_START_READ);
   for (uint16_t i = 0; i < chunk; i++) {
-      const uint32_t t0 = HAL_GetTick();
-      while (!LL_I2C_IsActiveFlag_RXNE(m_hi2c->Instance)) {
-          if (LL_I2C_IsActiveFlag_NACK(m_hi2c->Instance)) return false;
-          if ((HAL_GetTick() - t0) >= kByteTimeoutMs) { i2cReset(); return false; }
-      }
+      if (!wait_flag(LL_I2C_IsActiveFlag_RXNE, kByteTimeoutMs, true)) return false;
       buf[i] = LL_I2C_ReceiveData8(m_hi2c->Instance);
   }
-
-  {
-      const uint32_t t0 = HAL_GetTick();
-      while (!LL_I2C_IsActiveFlag_STOP(m_hi2c->Instance)) {
-          if ((HAL_GetTick() - t0) >= kStopTimeoutMs) { i2cReset(); return false; }
-      }
-  }
+  if (!wait_flag(LL_I2C_IsActiveFlag_STOP, kStopTimeoutMs, false)) return false;
   LL_I2C_ClearFlag_STOP(m_hi2c->Instance);
 
   len = chunk;

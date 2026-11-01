@@ -65,7 +65,10 @@ volatile static bool arr_update_pending = false;
 volatile static uint32_t elapsed = 0;
 volatile static uint32_t pps_missed_edges = 0;       // edges reconstructed from multi-second intervals
 volatile static uint32_t pps_rejected_intervals = 0; // intervals too far out of band to use at all
-volatile static uint32_t tim17_arr = 49999;
+// TIM17 runs at 1 MHz (PSC 47 on 48 MHz), so one loop period is
+// 1e6 / SAMPLES_PER_SECOND ticks: 19999 at 50 Hz (ADR-0039).
+#define TIM17_NOMINAL_ARR ((1000000u / SAMPLES_PER_SECOND) - 1u)
+volatile static uint32_t tim17_arr = TIM17_NOMINAL_ARR;
 volatile static uint8_t rocket_service_count = 0;
 volatile static float alpha = 0.05;
 
@@ -135,6 +138,12 @@ int main(void)
 	LL_USART_EnableIT_ERROR(USART2);
 	RocketFactory_Init(&Radio);
 
+	// The loop rate is SAMPLES_PER_SECOND, not whatever Period the .ioc last
+	// generated: force them to agree so a CubeMX regeneration that drifts from
+	// Constants.h cannot silently change the loop rate under every sample-count
+	// constant in the firmware.
+	htim17.Init.Period = TIM17_NOMINAL_ARR;
+	__HAL_TIM_SET_AUTORELOAD(&htim17, TIM17_NOMINAL_ARR);
 	tim17_arr = htim17.Init.Period;
 	HAL_TIM_Base_Start(&htim2);
 	HAL_TIM_Base_Start_IT(&htim17);
@@ -305,10 +314,11 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 				if (iv.seconds > 1)
 					pps_missed_edges += iv.seconds - 1;
 				tim17_arr = (tim17_arr + 1) * (1 - alpha) + (iv.ticks_per_sec / SAMPLES_PER_SECOND) * alpha - 1;
-				if (tim17_arr > 55000)
-					tim17_arr = 55000;
-				if (tim17_arr < 45000)
-					tim17_arr = 45000;
+				// +/-10 % of the nominal period, as the 45000..55000 clamp was at 20 Hz.
+				if (tim17_arr > (TIM17_NOMINAL_ARR + 1u) * 11u / 10u)
+					tim17_arr = (TIM17_NOMINAL_ARR + 1u) * 11u / 10u;
+				if (tim17_arr < (TIM17_NOMINAL_ARR + 1u) * 9u / 10u)
+					tim17_arr = (TIM17_NOMINAL_ARR + 1u) * 9u / 10u;
 				arr_update_pending = true;
 			} else {
 				pps_rejected_intervals++;

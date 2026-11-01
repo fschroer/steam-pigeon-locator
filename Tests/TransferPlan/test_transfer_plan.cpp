@@ -133,10 +133,19 @@ static void TestNoApogeeFallsBackToUniform() {
 
 static void TestHugeFullRateWindowFallsBackToUniform() {
     printf("apogee late enough that its window alone exceeds the budget\n");
-    Events ev; ev.has_apogee = true; ev.apogee_ms = 200000;   // 4,000 samples of boost+coast
+    // 4,200 samples of boost+coast: thinned (ADR-0039), not abandoned to uniform.
+    Events ev; ev.has_apogee = true; ev.apogee_ms = 200000;
     const Plan p = Build(20000, 1000000, ev, kBudget);
     CheckWellFormed(p, 20000, "lateapogee");
-    CHECK(p.n_seg == 1u);
+    CHECK(p.n_seg == 2u);
+    CHECK(p.seg[0].stride > 1u && p.seg[0].stride <= TransferPlan::kMaxWindowStride);
+    CHECK(p.seg[1].stride > p.seg[0].stride);
+
+    // 10,200 window samples: even kMaxWindowStride does not fit, so uniform.
+    Events ev2; ev2.has_apogee = true; ev2.apogee_ms = 500000;
+    const Plan q = Build(40000, 2000000, ev2, kBudget);
+    CheckWellFormed(q, 40000, "verylateapogee");
+    CHECK(q.n_seg == 1u);
 }
 
 static void TestMisorderedEvents() {
@@ -261,6 +270,88 @@ static void TestCodecNaN() {
     CHECK(out[1].raw_baro_altitude_agl == 10.0f);
 }
 
+// ADR-0039: ARCHIVE_VERSION 8 records are variable-rate.  With uniform 50 ms
+// timestamps the timestamp-based plan must equal the old one exactly; with a
+// v8 record the windows must land on the event TIMES, which the old mapping
+// (scale by the last timestamp) misses by tens of seconds.
+static void TestTimestampTimelineMatchesUniform() {
+    printf("timestamps: uniform 50 ms records plan exactly as before\n");
+    std::mt19937 rng(7);
+    for (int r = 0; r < 200; ++r) {
+        const uint32_t n = 2100u + rng() % 12000u;
+        const uint32_t last = (n - 1u) * 50u;
+        Events ev{};
+        ev.has_apogee = true;  ev.apogee_ms  = 5000u + rng() % 20000u;
+        ev.has_main   = (rng() & 1u) != 0u; ev.main_ms = ev.apogee_ms + 20000u + rng() % 60000u;
+        ev.has_landing = (rng() & 1u) != 0u; ev.landing_ms = last > 4000u ? last - 3000u : last;
+        const Plan a = Build(n, last, ev, kBudget);
+        const Plan b = BuildFromTimestamps(n, [](uint32_t i) { return i * 50u; }, ev, kBudget);
+        bool same = a.total == b.total && a.n_seg == b.n_seg;
+        for (uint8_t k = 0; same && k < a.n_seg; ++k)
+            same = a.seg[k].first == b.seg[k].first && a.seg[k].end == b.seg[k].end
+                && a.seg[k].stride == b.seg[k].stride;
+        CHECK_MSG(same, "record %d (n=%u) planned differently", r, n);
+    }
+}
+
+static void TestVariableRateRecord() {
+    printf("timestamps: a v8 record's full-rate windows land on the event times\n");
+    // 50 Hz to 33 s (drogue 23 s + 10 s), 5 Hz to main - 2 s, 50 Hz to main + 8 s,
+    // 5 Hz to landing - 2 s, 50 Hz to the end.  Apogee 22 s, main 300 s, landing 470 s.
+    const uint32_t apogee = 22000u, mainp = 300000u, land = 470000u, end = 472000u;
+    std::vector<uint32_t> ts;
+    for (uint32_t t = 0; t <= end; ) {
+        ts.push_back(t);
+        const bool full = t < 33000u || (t >= mainp - 2000u && t <= mainp + 8000u) || t >= land - 2000u;
+        t += full ? 20u : 200u;
+    }
+    const uint32_t n = static_cast<uint32_t>(ts.size());
+    Events ev{};
+    ev.has_apogee = true;  ev.apogee_ms = apogee;
+    ev.has_main = true;    ev.main_ms = mainp;
+    ev.has_landing = true; ev.landing_ms = land;
+    const Plan p = BuildFromTimestamps(n, [&](uint32_t i) { return ts[i]; }, ev, kBudget);
+    CheckWellFormed(p, n, "v8");
+
+    // Index of the sample at or before a time, straight from the vector.
+    auto at = [&](uint32_t ms) {
+        uint32_t k = 0; while (k + 1 < n && ts[k + 1] <= ms) ++k; return k;
+    };
+    // Stride of the planned segment that carries archive index a.
+    auto stride_at = [&](uint32_t a) -> uint32_t {
+        for (uint8_t i = 0; i < p.n_seg; ++i)
+            if (a >= p.seg[i].first && a < p.seg[i].end) return p.seg[i].stride;
+        return 0u;
+    };
+    // The windows hold ~2,200 samples, more than a transfer carries, so they
+    // are thinned to 25 Hz — not abandoned to a uniform plan.
+    CHECK_MSG(p.n_seg >= 5u, "plan fell back to uniform (%u segments)", p.n_seg);
+    const uint32_t ws = stride_at(at(apogee));
+    CHECK_MSG(ws == 2u, "ascent window stride %u, expected 2", ws);
+    CHECK_MSG(stride_at(at(mainp)) == ws, "%s", "main window not at the window stride");
+    CHECK_MSG(stride_at(at(land)) == ws, "%s", "landing window not at the window stride");
+    CHECK_MSG(stride_at(at(150000u)) > ws, "%s", "descent not thinner than the windows");
+    // Window edges land on the event times, not where a uniform mapping puts them.
+    bool main_seg_ok = false;
+    for (uint8_t i = 0; i < p.n_seg; ++i)
+        if (p.seg[i].stride == ws && p.seg[i].first == at(mainp - 2000u)) main_seg_ok = true;
+    CHECK_MSG(main_seg_ok, "%s", "no window segment starts at main - 2 s");
+
+    // With the budget to carry the windows whole, they go at full rate.
+    const Plan big = BuildFromTimestamps(n, [&](uint32_t i) { return ts[i]; }, ev, 3000u);
+    CHECK(big.total <= 3000u && big.n_seg >= 5u);
+    CHECK_MSG(CoversFullRate(big, 0u, at(apogee + 10000u) + 1u), "%s", "ascent not full rate");
+    CHECK_MSG(CoversFullRate(big, at(mainp - 2000u), at(mainp + 8000u) + 1u), "%s", "main window not full rate");
+    CHECK_MSG(CoversFullRate(big, at(land - 2000u), n), "%s", "landing window not full rate");
+
+    // The pre-v8 mapping, given the same record, puts the main window somewhere
+    // else entirely: this is the bug the timestamp lookup exists to fix.
+    const Plan old = Build(n, ts.back(), ev, 3000u);
+    CHECK_MSG(!CoversFullRate(old, at(mainp - 2000u), at(mainp + 8000u) + 1u), "%s",
+              "uniform mapping unexpectedly covered the v8 main window");
+    printf("       n=%u samples, plan %u, %u segments\n", n, p.total, p.n_seg);
+}
+
 int main() {
     TestShortRecordIsUntouched();
     TestShane();
@@ -270,6 +361,8 @@ int main() {
     TestMisorderedEvents();
     TestDeterministic();
     TestRandomRecords();
+    TestTimestampTimelineMatchesUniform();
+    TestVariableRateRecord();
     TestCodecNoAccumulation();
     TestCodecSaturatesAndRecovers();
     TestCodecTimestampStep();

@@ -552,10 +552,9 @@ void Communication::BeginTransfer(uint8_t record_id) {
 	// (≈102 s) — reported to the app as a complete transfer.
 	const size_t spp = FlightProfileCodec::MaxSamplesPerPacket();
 
-	// The last sample's timestamp scales event times to sample indices.
+	// The archive must be readable before planning; the last sample proves it.
 	if (!FetchChunk(sample_count - 1u) || chunk_buf_count_ == 0)
 		return;  // archive read failed — abort
-	const uint32_t last_ts_ms = chunk_buf_[0].timestamp_ms;
 
 	TransferPlan::Events ev {};
 	archive_.ReadEvent(record_id, FlightArchive::Statistic::ApogeeTimestampMs,
@@ -565,7 +564,20 @@ void Communication::BeginTransfer(uint8_t record_id) {
 	archive_.ReadEvent(record_id, FlightArchive::Statistic::LandingTimestampMs,
 			ev.landing_ms, ev.has_landing);
 
-	plan_ = TransferPlan::Build(sample_count, last_ts_ms, ev,
+	// ARCHIVE_VERSION 8 records are variable-rate (ADR-0039), so event times map
+	// to sample indices through the samples' own timestamps: one single-sample
+	// archive read per binary-search probe (~14 per window edge, ~90 in all,
+	// ~15 ms at SPI2 6 MHz), once per transfer, on the ground.  A read that
+	// fails returns 0xFFFFFFFF, which steers the search to the earlier half, so
+	// the worst a flash fault does is widen a full-rate window.
+	auto ts_at = [this](uint32_t i) -> uint32_t {
+		FlightArchive::FlightSample one{};
+		uint32_t got = 0u;
+		if (!archive_.ReadFlightDataRange(record_id_, i, &one, 1u, got) || got == 0u)
+			return 0xFFFFFFFFu;
+		return one.timestamp_ms;
+	};
+	plan_ = TransferPlan::BuildFromTimestamps(sample_count, ts_at, ev,
 			static_cast<uint32_t>(kMaxPackets) * spp);
 	total_samples_ = plan_.total;
 	packet_count_ = static_cast<uint16_t>((total_samples_ + spp - 1) / spp);

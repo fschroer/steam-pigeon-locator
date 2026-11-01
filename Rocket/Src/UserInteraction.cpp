@@ -778,14 +778,18 @@ void UserInteraction::ExportData(uint16_t archive_position) {
 	uint32_t sample_count_out = 0;
 	bool success = archive_.GetFlightSampleCount(archive_position, sample_count_out);
 	if (success) {
-		FlightArchive::FlightSample sample_buffer[64];
-//		FlightArchive::FlightSample sample_buffer[sample_count_out] { };
+		// 32, not 64: the 94-byte v8 sample (ADR-0039) and the 50 Hz ring
+		// grew static RAM by 8 KB, and this buffer is the deepest stack frame
+		// on the locator.  The export is UART-bound, so the batch size costs
+		// nothing measurable.
+		constexpr uint32_t kExportBatch = 32u;
+		FlightArchive::FlightSample sample_buffer[kExportBatch];
 		uint32_t got = 0u;
 		uint32_t start = 0u;
 
 		while (true) {
 		    FaultLog_KickWatchdog(0);
-		    if (!archive_.ReadFlightDataRange(archive_position, start, sample_buffer, 64u, got)) {break;}
+		    if (!archive_.ReadFlightDataRange(archive_position, start, sample_buffer, kExportBatch, got)) {break;}
 		    if (got == 0u) {break;}
 		    for (uint32_t i = 0u; i < got; ++i) {
 				// WriteMany() clears and flushes in one call, so a field that is
@@ -817,6 +821,15 @@ void UserInteraction::ExportData(uint16_t archive_position) {
 					baro_raw_fields.Append(Fmt(sample_buffer[i].baro_temp_halfc / 2.0f, 0, 1));
 				} else {
 					baro_raw_fields.Append(',');
+				}
+				// Magnetometer (ADR-0039), last-appended, sensor frame, uT.  Blank when
+				// unknown: the part is absent, the read failed, or the record predates it.
+				StaticString<40> mag_fields;
+				for (int axis = 0; axis < 3; ++axis) {
+					mag_fields.Append(',');
+					const int16_t q = sample_buffer[i].mag_q[axis];
+					if (q != FlightArchive::kMagUnknown)
+						mag_fields.Append(Fmt(q * (100.0f / 4096.0f), 0, 2));
 				}
 				// Same treatment for the non-selected accel channel: empty, not 0, when
 				// that channel had no valid reading — 0 g is a real value it can report.
@@ -865,7 +878,7 @@ void UserInteraction::ExportData(uint16_t archive_position) {
 						static_cast<uint32_t>(sample_buffer[i].accel_source), ",",
 						static_cast<uint32_t>(sample_buffer[i].pps_status), ",",
 						// GPS speed accuracy (#55), pre-formatted above.
-						s_acc_field.CStr(), baro_raw_fields.CStr(), crlf_);
+						s_acc_field.CStr(), baro_raw_fields.CStr(), mag_fields.CStr(), crlf_);
 		    }
 		    start += got;
 		}

@@ -33,11 +33,13 @@
 // HAL-free and header-only so Tests/DescentSlowdown compiles it on the host.
 
 #include <cstdint>
+#include "Constants.hpp"
 
 namespace DescentSlowdown {
 
-constexpr int   kMeanSamples       = 20;     // 1 s at 20 Hz
-constexpr int   kPersistSamples    = 30;     // 1.5 s
+// Held as the times they were tuned at, not as 20 Hz counts (ADR-0039).
+constexpr int   kMeanSamples       = SamplesForMs(1000);   // 1 s (20 @ 20 Hz)
+constexpr int   kPersistSamples    = SamplesForMs(1500);   // 1.5 s (30 @ 20 Hz)
 constexpr float kDrogueSlowdownMps = 5.0f;
 constexpr float kMainSlowdownMps   = 8.0f;
 constexpr float kDescendingMps     = -1.0f;  // vertical speed, +up

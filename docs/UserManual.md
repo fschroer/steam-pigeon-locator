@@ -1351,7 +1351,7 @@ You get a list of stored flights, each showing its **record number, date, time a
 - **Every sample** around the **main** event and at **landing**.
 - **Every few samples** on the long descent between them — a few per second, which is plenty to see a steady descent rate.
 
-So a slow drift down under canopy looks slightly coarser than the boost, by design. **The full-rate record is still on the locator**; the USB-C console export (§10.4) always has every sample.
+On a 50-samples-per-second record (November 2026 firmware and later) even those windows can hold more than one download carries, so they arrive at **every second sample** (25 per second) or, on a very long ascent, a little coarser. So a slow drift down under canopy looks slightly coarser than the boost, by design. **The full-rate record is still on the locator**; the USB-C console export (§10.4) always has every sample.
 
 ⚠️ **A locator on firmware older than 2026-09-29 sends only the first ~100 seconds of any flight.** The chart then ends there, often partway down the descent. The app now says so in red above the chart — *"Partial record: this locator's firmware sends only about the first 102 s of a flight…"* — so a short profile is no longer mistaken for the whole flight. Update the locator's firmware to see the rest. (Older app versions showed no warning at all.)
 
@@ -1492,6 +1492,8 @@ The state only ever moves forward, and it can **skip**: if two events come due i
 
 > ⚡ **The timing columns are gone**, and the column order changed. `oc_start_us`, `oc_end_us`, `process_start_us` and `process_dur_us` were replaced by the GPS velocity and accuracy columns above. If you have a spreadsheet that reads columns by position rather than by name, it will need updating. Per-cycle timing is still available live from the data menu's `t` breakdown.
 
+> ⚡ **The November 2026 firmware changes the record format again** (the 50 Hz update). Records now carry the magnetometer and are recorded at a variable rate. Old records can't be read by the new firmware, and the data menu won't list them. **Export everything you want to keep before you flash, then erase (§3.6).** Still 9 stored flights, still 8 minutes each. The export gains three columns at the end, `mag_x_ut`, `mag_y_ut` and `mag_z_ut`: the magnetic field in microtesla, blank if the locator has no magnetometer or had no reading.
+
 > ⚡ **The October 2026 firmware changes the record format again** ([#53](https://github.com/fschroer/steam-pigeon-locator/issues/53)): GPS velocity is now stored in tenths of a meter per second, so it can record a rocket past 327 m/s. Old records can't be read by the new firmware, and the data menu won't list them. **Export everything you want to keep before you flash, then erase (§3.6).** The number of stored flights (9) does not change.
 
 > ⚡ **The September 2026 firmware erased stored flights, and the locator now holds 9 instead of 10.** The record format changed enough that older records cannot be read back at all — the data menu will not list them. **Export everything you want to keep before you flash.** The flight is 8 minutes either way; only the number of stored flights changed, to make room for the extra data in each one.
@@ -1509,7 +1511,7 @@ The state only ever moves forward, and it can **skip**: if two events come due i
 - **`time_ms = 0` is thrust onset.** The record starts at launch.
 - **One exception:** if the locator's combined ("fused") solution was already flagged as unhealthy on the pad (a nonzero `ekf_health` in the seconds before launch), the record deliberately keeps about **2 seconds of pad data** so the problem can be examined, and `time_ms = 0` is the start of that instead. Thrust onset is then partway in: the `Launch onset time:` summary line (§10.4) says where. Subtract it from `time_ms` to put the record on an ignition-zero clock.
 - Time is measured on a **GPS-disciplined clock**, so it is real elapsed time, not an assumed sample rate. Durations you measure from the data are trustworthy.
-- Data is recorded at **20 samples per second**.
+- Data is recorded at **50 samples per second** from just before launch until 10 seconds after drogue (or 60 seconds after launch, if drogue never fires), for the 2 seconds before and 8 seconds after main, and for the last 2 seconds before landing to the end. **Everywhere else it is 5 samples per second.** Samples are therefore not evenly spaced: always plot against `time_ms`, never against row number. Records from firmware before November 2026 are 20 samples per second throughout.
 - A record is capped at **8 minutes** and includes about **2 seconds of settled data after landing**.
 
 **In the app flight log** (§10.7), which is a different clock and a weaker one:
@@ -2046,7 +2048,7 @@ Puts the device into firmware-update mode. It will not work again until it is re
 | Battery charging | Up to 1 A, over USB-C |
 | Audio | Piezo buzzer |
 | Data interface | USB-C, 921600 baud default (9600–921600, configurable per device) |
-| Sample rate | 20 samples per second |
+| Sample rate | 50 samples per second around launch, main and landing; 5 per second on the rest of the descent |
 | Max recorded flight | 8 minutes |
 
 ## Receiver

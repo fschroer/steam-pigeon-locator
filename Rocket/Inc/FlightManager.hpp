@@ -12,6 +12,7 @@ extern "C" {
 #include "AirStart.hpp"
 #include "DescentSlowdown.hpp"
 #include "LaunchOnset.hpp"
+#include "ArchiveRatePolicy.hpp"
 
 class FlightManager {
 public:
@@ -67,8 +68,13 @@ public:
     // the record ended one cycle BEFORE landing).  On a kMaxFlightMs force-close the
     // tail counter is never armed, so this is true immediately, preserving the
     // previous close-on-landing behavior there.
+    //
+    // Since ADR-0039 it also waits for the ring to empty: descent samples sit in
+    // it for ArchiveRate::kLookbackMs, and the drain is throttled to one chunk
+    // per cycle, so closing on the tail alone would cut off the last ~2 s.
     bool RecordComplete() const {
-        return flight_state_ == FlightStates::Landed && m_landed_tail_remaining_ == 0;
+        return flight_state_ == FlightStates::Landed && m_landed_tail_remaining_ == 0
+            && m_ring_count_ == 0;
     }
 
     uint8_t GetDeploymentStats(uint8_t channel) const {
@@ -126,7 +132,15 @@ private:
         2u * SAMPLES_PER_SECOND;                       // 2 s retained before launch
     static constexpr uint16_t kPreLaunchRingSamples =
         kPreLaunchHoldSamples + SAMPLES_PER_SECOND / 2u + 1u;  // + drain/launch headroom
+    // The same ring holds the descent lookback (ADR-0039), so it must also fit
+    // kLookbackMs of samples plus the cycles it takes to drain past them.
+    static_assert(kPreLaunchRingSamples > SamplesForMs(ArchiveRate::kLookbackMs) + SAMPLES_PER_SECOND / 4u,
+                  "ring too small for the descent lookback");
     FlightArchive::FlightSample m_ring_[kPreLaunchRingSamples] { };
+    // Variable-rate archive (ADR-0039): the events the keep/drop windows hang
+    // off, in record-epoch ms, and the 5 Hz descent decimator.
+    ArchiveRate::Events    m_rate_events_ { };
+    ArchiveRate::Decimator m_decimator_   { };
     uint16_t m_ring_head_  = 0;                        // index of oldest buffered sample
     uint16_t m_ring_count_ = 0;                        // number of buffered samples
 
@@ -226,7 +240,7 @@ private:
 
     // Burnout detection threshold and debounce
     static constexpr float   kBurnoutAccelG        = 1.5f;  // accel drops below this at burnout
-    static constexpr uint8_t kBurnoutConfirmSamples = 3;    // 150 ms sustained below threshold
+    static constexpr uint16_t kBurnoutConfirmSamples = SamplesForMs(150);  // 150 ms sustained below threshold (3 @ 20 Hz)
     // #45: the AXIAL test.  Thrust is positive along the nose and coast drag is
     // negative, so the axial specific force crosses zero at motor stop while the
     // magnitude is held up by drag for seconds on a fast rocket.  Trusted only
@@ -235,8 +249,8 @@ private:
     // reading "no thrust" at launch.
     static constexpr float   kBurnoutAxialG        = 0.5f;  // axial falls below this at burnout
     static constexpr float   kBurnoutAxialSeenG    = 2.0f;  // body X must have seen this much thrust
-    uint8_t m_burnout_count_ = 0;
-    uint8_t m_burnout_axial_count_ = 0;
+    uint16_t m_burnout_count_ = 0;
+    uint16_t m_burnout_axial_count_ = 0;
     float   m_boost_peak_axial_g_  = 0.0f;
     // #45: total specific force has fallen below kBurnoutAccelG since motor
     // burnout -- the condition apogee detection waits for (see Update).
@@ -252,17 +266,21 @@ private:
     // (false landing at 66 m AGL, which 20 @ 2.0 m/s fired on), at or below the
     // 28-sample ground quiescence of the tightest real landing on record.  20 is
     // centered in that window; 40 would have MISSED a landing that actually happened.
-    static constexpr uint8_t  kLandedConfirmSamples    = 20;     // 1.0 s sustained quiescence
+    // Those counts are 20 Hz samples; the window is held as the 1.0 s it was
+    // validated at (ADR-0039), which is 50 cycles at 50 Hz.
+    static constexpr uint16_t kLandedConfirmSamples    = SamplesForMs(1000);  // 1.0 s sustained quiescence
     // AGL threshold removed — landing may be on terrain higher than the pad, so an
     // absolute AGL ceiling would prevent detection on uphill landing sites.
     static constexpr float    kLandedRawBaroSpeedMps   = 1.0f;   // m/s on raw baro (velocity is a 10-sample/500 ms
                                                                  // average — VelocityEstimator<10> in MS5611.hpp —
                                                                  // which is independent of the confirm count above)
-    // Maximum recordable flight duration; matches archive minutesPerRecord=8.
+    // Maximum recordable flight duration.  Was "matches archive minutesPerRecord=8";
+    // since ARCHIVE_VERSION 8 the record is sized in samples (kRecordCapacitySamples),
+    // which an 8-minute variable-rate flight fills to about two thirds (ADR-0039).
     // When reached, the flight is force-closed so the landing timestamp can never
     // exceed the span of the recorded data.
     static constexpr uint32_t kMaxFlightMs             = 8u * 60u * 1000u;
-    uint8_t m_landed_count_  = 0;
+    uint16_t m_landed_count_  = 0;
 
     // Post-landing tail: after landing is detected, the sample producer keeps
     // capturing for kLandedTailSamples cycles (~2 s) in the Landed state so the
@@ -336,7 +354,7 @@ private:
     // PER-CYCLE allowance.  Applied as a FIXED bound it latched the velocity
     // channel permanently (ADR-0003 amendment 2026-08-31); SelectDeployVspeed now
     // scales it by the number of unaccepted cycles.  See that function.
-    static constexpr float    kDeployVelDistrustMps = 20.0f;  // max raw-vel jump/cycle (m/s) — keep loose
+    static constexpr float    kDeployVelDistrustMps = 20.0f;  // max raw-vel jump per 50 ms (m/s) — keep loose
                                                               // so real chute-opening decel passes
     static constexpr uint32_t kDeployCoastMs        = 300u;   // hold window before fused considered (ms)
     static constexpr uint32_t kDeployRefLostMs      = 1500u;  // beyond this: terminal
