@@ -1,6 +1,6 @@
 # ADR-0040: The radio download becomes the primary data path — full bit-exact records, background transfer and Firebase upload
 
-- **Status:** Proposed (not implemented)
+- **Status:** Proposed (codec implemented and host-tested 2026-11-01; wire, app and USB parts not implemented)
 - **Date:** 2026-11-01
 - **Deciders:** Frank Schroer
 - **Related:** [#60](https://github.com/fschroer/steam-pigeon-locator/issues/60). Builds on ADR "50 Hz loop, variable-rate archive and magnetometer" and ADR-0009 (flight-data transfer).
@@ -27,13 +27,14 @@ Today's download cannot do that, for two reasons:
 1. **Paged transfers.**
    - `FlightDataRequest` gains a `page` index. A page is up to 256 data packets, carried by today's window, parity, ACK bitmap and retransmit logic (ADR-0009) unchanged.
    - Page 0's packets also carry the record's page count, sample count and CRC.
-2. **A lossless full-sample codec.**
-   - Integer fields are sent as deltas against the previous sample.
-   - Float fields are sent as the XOR of their IEEE bits with the previous sample, with leading and trailing zeros elided.
-   - Slow bytes (state, armed, fix type, SVs, PPS, accel source) are sent as change flags.
-   - Decode must reproduce every 94 B `FlightSample` exactly.
-   - Pages are independent: each starts from an absolute sample, so one page never depends on another.
-   - Measured model (2a): ~6.1 samples per packet, ~950 packets, ~9.5 min for a typical flight. Confirm on a real v8 record.
+2. **A lossless full-sample codec** (`FullRecordCodec.hpp`, header-only, built 2026-11-01).
+   - Every byte of the 94 B `FlightSample` is coded against the previous sample. A field table covers the struct byte for byte, and a `static_assert` fails if the struct changes without the table.
+   - Timestamp: delta-of-delta. int32 and int16 fields: delta wrapped to the field width, zigzag, then a variable-length code (`0`, or `1` + 5 bits of length + the magnitude). Status bytes: an unchanged bit, or `1` + the new byte.
+   - Decode reproduces every `FlightSample` exactly (`memcmp`, not a tolerance).
+   - **Fixed pages of 512 samples.** A page's start never depends on how earlier pages compressed. The worst-case sample is 910 bits, so a 231 B payload always holds 2 and a page never needs more than 256 packets.
+   - **Packets are independent.** Each packet's first sample is coded against the two samples before it in flash. Because the decode is lossless, the app's copy of those samples is identical, so a lost packet never blocks later ones and packets can arrive in any order.
+   - `PlanPage` gives a page's packet boundaries as a pure function of the record; `Crc32` is the IEEE CRC-32 the app checks.
+   - **Measured** with the real codec on the 11 Sept-2026 exports (v7, 20 Hz; the v8-only fields modeled as noisy; rounded CSV digits replaced with noise): **5.75 samples per packet** (5.0–6.3 per flight). A typical 5,800-sample record is ~1,010 packets, ~10 min at 0.6 s per packet before the interleave cost of 6a; the 9,000-sample cap is ~1,570 packets, ~16 min. Confirm on a real v8 record.
 2a. **The archive stores its float fields as fixed-point** (fschroer, 2026-11-01, folded into `ARCHIVE_VERSION` 8 before release).
    - Fields: raw and fused AGL (cm), raw and fused vertical speed (cm/s), accel (mg), gyro (0.01 °/s). All are int32, at the float32 offsets they replace, with `INT32_MIN` meaning NaN.
    - Why: measured on 11 Sept-2026 records, bit-exact float32 compresses to 3.7 samples per packet (~15.5 min typical, 24 min at the cap). Fixed-point compresses to 6.1 (~9.5 min, 15 min). A noisy float keeps ~20 meaningful mantissa bits per sample whatever the codec does.
@@ -102,11 +103,11 @@ Today's download cannot do that, for two reasons:
 - **USB export remains the fallback.**
 - **Cost:** a typical record is ~0.55 MB raw, so the 5 GB no-cost quota holds thousands of flights. A $1 budget alert catches any surprise charge.
 - **New tests:**
-  - a codec round-trip over the corpus, checking bit-exact output;
+  - a codec round-trip, checking bit-exact output: `Tests/FullRecordCodec` (885/0 with `SP_CSV_DIR` set, 863/0 without);
   - page-planning tests in `Tests/TransferPlan`;
   - resume and auto-start state tests in the app.
 
 ## Open
 
-- The measured codec ratio decides whether 15 min holds.
+- The codec measures 5.75 samples per packet, so a typical flight is ~10 min plus the interleave cost, and the 9,000-sample cap ~16 min plus. Re-measure on a real v8 record.
 - Whether the quick-look thinned download should run first so the chart appears immediately, with the full pages following.

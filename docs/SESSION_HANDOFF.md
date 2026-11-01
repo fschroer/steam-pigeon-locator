@@ -2,6 +2,12 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-11-01 (feature) — full-record radio codec, step 1 of ADR "The radio download becomes the primary data path" (0040). Codec only, not wired in
+
+✅ **What changed:** new header-only `Rocket/Communication/Inc/FullRecordCodec.hpp`: lossless codec for whole v8 `FlightSample`s, fixed 512-sample pages, `PlanPage` packet planner, independent packets (each coded from the two flash samples before it), IEEE CRC-32. Nothing in the firmware calls it yet.
+- **Tests:** new `Tests/FullRecordCodec` 863/0 (bit-exact round trip, shuffled arrival, pure-noise worst case 910 bits so a page is never over 256 packets, deterministic plan). With `SP_CSV_DIR=<export folder>` it also measures real flights: **5.75 samples/packet** on the 11 Sept-2026 exports (885/0).
+- **Next:** the wire integration (page index in `FlightDataRequest`, page-0 header, pickup bit, interleaving, receiver relay). It changes the wire format, so it needs `steam-pigeon-ios` in the same session for `WireLayoutTests.swift`.
+
 ## 2026-11-01 (feature) — 50 Hz loop, variable-rate archive (`ARCHIVE_VERSION` 8) and MMC5983MA magnetometer — ADR "50 Hz loop, variable-rate archive and magnetometer" (0039). NOT on hardware
 
 ✅ **What changed:** loop 20 → 50 Hz; every cycle-count constant now written as time (`SamplesForMs`), identical at 20 Hz; SPI2 prescaler 8 (#21); length-aware GPS read (#22); FIFO drain cap (#24); MS5611 pipelined with D2 every 10th cycle (45 Hz baro, filter windows resized to the same time spans); MMC5983MA on I2C2 0x30, archived but not fused; archive 50 Hz through drogue + 10 s and around main and landing, 5 Hz between; `FlightSample` 94 B with `mag_q[3]`; download plan finds events by timestamp and thins windows that overflow a transfer; export adds `mag_x_ut,mag_y_ut,mag_z_ut`.
