@@ -50,9 +50,33 @@ Today's download cannot do that, for two reasons:
      - the decoded samples.
    - This must survive app kill, phone reboot, BLE disconnect and LoRa range loss.
    - A changed CRC means a different record, so the app discards what it held.
-6. **Auto-start.**
-   - The app requests the next missing page when a locator it knows is heard in `Landed` or `WaitingLaunch`, disarmed, holding a record the app has not completed.
-   - Never while armed or in flight. The transfer silences telemetry, so the locator refuses a request in any other state.
+6. **Start triggers** (fschroer, 2026-11-01). After landing, the transfer starts on **any** of the following. Each automatic trigger can be turned off in app settings; the button is always available.
+   - **Signal strength:** the receiver-reported RSSI of the locator's frames stays above a threshold for a few seconds, with hysteresis so a marginal link doesn't start and stall. Proposed default: −100 dBm sustained for 5 s.
+   - **Pickup:** the locator detects that it has been picked up — after `Landed`, the accelerometer leaves its settled 1 g reading, or its orientation changes, for a sustained window — and reports it as a bit in its periodic frame. This costs one bit in the telemetry/pre-launch status (a wire change).
+   - **Button:** the user taps "Transfer new flight data".
+   - **Gates, always:** disarmed, and in `Landed` or `WaitingLaunch`. The locator refuses a page request in any other state, so a transfer can never run during a flight.
+6a. **The transfer shares the link instead of owning it.** Today a download puts the locator in a quiet flight-profile mode: periodic frames stop and the receiver forwards commands at once (ADR-0009 decision 4).
+   - A background transfer must leave every other app function working, including commands that travel app → receiver → locator.
+   - So the locator **interleaves**: after each data burst (window plus parity) it sends its normal periodic frame and leaves a listen gap.
+   - The receiver forwards app commands into that gap.
+   - Commands and their responses always take priority over the next burst.
+   - This costs throughput. Estimate it at 20–30 %, so ~12 min instead of ~9.5 min for a typical flight; measure on the bench.
+   - Only one locator transfers at a time per channel.
+6b. **The app's flight history reads the nearest copy.**
+   - **Already in the app** (complete and CRC-verified): shown from the app.
+   - **Not in the app but in the web store** (for example a new phone, or after a reinstall): fetched from Firebase.
+   - **Neither:** comes from the locator.
+   - **While a background transfer is running**, selecting a record never starts a second transfer:
+     - the record being transferred shows the samples received so far. Pages arrive in time order, so launch, boost and apogee come first, and the view grows as pages land;
+     - a record not yet started says the transfer is under way.
+   - A record selected with no background transfer running uses the same paged, resumable transfer, run in the foreground.
+6c. **USB takes over from LoRa when it is plugged in.**
+   - When the phone is connected to the locator's USB-C port (the locator's CH340N USB-UART bridge, console at 921,600 baud, ADR-0024), the app transfers over serial instead of LoRa.
+   - It uses the same pages, codec and CRC, so a transfer can switch paths mid-record and resume where it was.
+   - A typical record takes seconds over serial: about 0.55 MB at ~90 KB/s.
+   - **Android only.** Android supports USB host mode with a CH34x driver (`usb-serial-for-android`). iOS does not allow a generic USB-serial device without Apple MFi certification, so iOS stays on LoRa. Record that in the parity matrix.
+   - The app's earlier, unused USB-serial path was removed on 2026-07-16; this is a new one.
+   - On the locator, the console needs a binary page mode alongside the menu UI, entered by a command and left on a timeout.
 7. **Background execution.**
    - **Android:** the transfer runs in the existing BLE service as a foreground service, with a progress notification.
    - **iOS:** CoreBluetooth background mode, which relies on the receiver's FFE0 advertisement (iOS-port ADR).
