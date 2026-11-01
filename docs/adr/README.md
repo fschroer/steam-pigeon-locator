@@ -53,5 +53,6 @@ Write an ADR for a decision that is costly to reverse, or that future work must 
 | [0036](0036-deployment-opening-inference.md) | A parachute opening is inferred from a sustained descent slowdown, and the app says "opening detected", not "deployed" | Accepted |
 | [0037](0037-motor-burnout-vs-apogee-coast-gate.md) | Motor burnout is read from the axial acceleration; apogee detection still waits for drag to decay | Accepted |
 | [0039](0039-50hz-loop-variable-rate-archive-magnetometer.md) | 50 Hz loop, variable-rate archive and magnetometer | Proposed |
+| [0040](0040-full-record-radio-download-and-cloud-upload.md) | The radio download becomes the primary data path — full bit-exact records, background transfer and Firebase upload | Proposed |
 
 > **Numbering note (resolved 2026-08-03):** the iOS-port ADR and the launch-detection ADR were both filed as **0015**. Launch detection was filed first (2026-07-17) and keeps the number; the iOS port moved to **0016**. Commit `4b6bb45` and any external reference calling the iOS port "ADR-0015" mean [0016](0016-ios-port-corebluetooth-and-platform-parity.md) — a note in that file records the change. When picking the next number, check this table rather than the highest number you remember.
