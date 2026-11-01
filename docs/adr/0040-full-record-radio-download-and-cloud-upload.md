@@ -57,6 +57,10 @@ Today's download cannot do that, for two reasons:
    - Each record is uploaded as its raw v8 bytes plus the decoded CSV, identical to the USB export, under `users/{uid}/locators/{locator_id}/{record_ts}_{crc}.{bin,csv}`. Upload uses the SDK's resumable upload.
    - Storage rules: a user reads and writes only `users/{their uid}/**`.
    - `google-services.json` stays out of git, like `secrets.properties`.
+9. **Sharing: link tokens only, for now** (chosen by fschroer on 2026-11-01).
+   - The owner shares a record by its Firebase download URL. The URL's token lets anyone with the link read that one file, and revoking the token kills the link.
+   - No rule change is needed.
+   - Named-user sharing (a Firestore-backed allow-list) and a signed-in `public/` gallery are deferred.
 
 ## Consequences
 
