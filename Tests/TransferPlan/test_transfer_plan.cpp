@@ -204,12 +204,15 @@ static void TestRandomRecords() {
 static FlightArchive::FlightSample Sample(uint32_t t, float alt, float gx) {
     FlightArchive::FlightSample s{};
     s.timestamp_ms = t;
-    s.raw_baro_altitude_agl = alt;
-    s.accel = Vec3f{ 9.8f, 0.1f, -0.2f };
-    s.gyro  = Vec3f{ gx, 1.0f, -2.0f };
+    FlightArchive::SetRawBaroAglM(s, alt);
+    FlightArchive::SetAccelMps2(s, Vec3f{ 9.8f, 0.1f, -0.2f });
+    FlightArchive::SetGyroRps(s, Vec3f{ gx, 1.0f, -2.0f });
     s.lat_1e7 = 408592678; s.lon_1e7 = -1191142198;
     return s;
 }
+
+// Gyro x as the radio carries it (rad/s, see FlightProfileCodec.cpp).
+static float Gx(const FlightArchive::FlightSample& s) { return FlightArchive::GyroRps(s).x; }
 
 static size_t RoundTrip(const FlightArchive::FlightSample* in, size_t n, FlightArchive::FlightSample* out) {
     uint8_t buf[Communication::kPayloadSize] {};
@@ -227,8 +230,8 @@ static void TestCodecNoAccumulation() {
     CHECK(RoundTrip(in, kSpp, out) == kSpp);
     float worst = 0;
     for (uint32_t i = 0; i < kSpp; ++i) {
-        worst = std::fmax(worst, std::fabs(out[i].raw_baro_altitude_agl - in[i].raw_baro_altitude_agl));
-        worst = std::fmax(worst, std::fabs(out[i].gyro.x - in[i].gyro.x));
+        worst = std::fmax(worst, std::fabs(FlightArchive::RawBaroAglM(out[i]) - FlightArchive::RawBaroAglM(in[i])));
+        worst = std::fmax(worst, std::fabs(Gx(out[i]) - Gx(in[i])));
     }
     // Chaining from the truth would drift by up to 8 × 0.04; from the
     // reconstruction it stays within half an LSB.
@@ -239,15 +242,15 @@ static void TestCodecSaturatesAndRecovers() {
     printf("codec: an out-of-range gyro step saturates and does not skew the packet\n");
     FlightArchive::FlightSample in[kSpp], out[kSpp];
     for (uint32_t i = 0; i < kSpp; ++i) in[i] = Sample(1000 + i * 350, 500.0f, -1800.0f);
-    in[3].gyro.x = +2400.0f;   // a 4,200 dps swing in one decimated step: > 3,276.7
+    in[3] = Sample(1000 + 3 * 350, 500.0f, +2400.0f);   // a 4,200 dps swing in one decimated step: > 3,276.7
     CHECK(RoundTrip(in, kSpp, out) == kSpp);
     // The saturated sample lands at the limit, not wrapped negative.
-    CHECK_MSG(std::fabs(out[3].gyro.x - (-1800.0f + 3276.7f)) < 0.06f, "got %.1f", out[3].gyro.x);
+    CHECK_MSG(std::fabs(Gx(out[3]) - (-1800.0f + 3276.7f)) < 0.06f, "got %.1f", Gx(out[3]));
     // The next sample steps back from the RECONSTRUCTED value, so it is exact
     // again; chaining from the truth would leave it 923 dps off, and every
     // sample after it.
     for (uint32_t i = 4; i < kSpp; ++i)
-        CHECK_MSG(std::fabs(out[i].gyro.x - in[i].gyro.x) < 0.06f, "sample %u got %.1f", i, out[i].gyro.x);
+        CHECK_MSG(std::fabs(Gx(out[i]) - Gx(in[i])) < 0.06f, "sample %u got %.1f", i, Gx(out[i]));
 }
 
 static void TestCodecTimestampStep() {
@@ -267,7 +270,7 @@ static void TestCodecNaN() {
     in[0] = Sample(1000, 10.0f, 5.0f);
     in[1] = Sample(1050, NAN, 5.0f);
     CHECK(RoundTrip(in, 2, out) == 2);
-    CHECK(out[1].raw_baro_altitude_agl == 10.0f);
+    CHECK(FlightArchive::RawBaroAglM(out[1]) == 10.0f);
 }
 
 // ADR-0039: ARCHIVE_VERSION 8 records are variable-rate.  With uniform 50 ms

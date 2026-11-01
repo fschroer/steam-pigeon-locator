@@ -845,18 +845,16 @@ void Navigation::injectTestSample(ImuSample&  imu,  BaroSample& baro,
                                   bool& imu_new, bool& baro_new, bool& gps_new) {
     const FlightArchive::FlightSample& s = m_test_buf_[m_test_buf_index_++];
 
-    imu.accel_selected_mps2 = { s.accel.x, s.accel.y, s.accel.z };
+    imu.accel_selected_mps2 = FlightArchive::AccelMps2(s);
     imu.accel_low_g_mps2    = imu.accel_selected_mps2;
-    imu.gyro_rps            = { s.gyro.x,  s.gyro.y,  s.gyro.z  };
+    imu.gyro_rps            = FlightArchive::GyroRps(s);
     imu.timestamp_ms        = s.timestamp_ms;
     imu.gyro_valid          = true;
     imu.low_g_valid         = true;
     imu_new                 = true;
 
-//    baro.altitude_m_agl  = s.fused_altitude_agl;
-//    baro.altitude_m_msl  = s.fused_altitude_agl + m_ekf.getPadAltitudeMsl();
-    baro.altitude_m_agl  = s.raw_baro_altitude_agl;
-    baro.altitude_m_msl  = s.raw_baro_altitude_agl + m_ekf.getPadAltitudeMsl();
+    baro.altitude_m_agl  = FlightArchive::RawBaroAglM(s);
+    baro.altitude_m_msl  = baro.altitude_m_agl + m_ekf.getPadAltitudeMsl();
     // Raw baro VELOCITY, not just altitude.  Omitting this stalled every replay
     // at Burnout: launch and burnout are accel-driven so they fired, but noseover
     // and everything downstream key on vertical velocity — and ADR-0018 made raw
@@ -864,7 +862,7 @@ void Navigation::injectTestSample(ImuSample&  imu,  BaroSample& baro,
     // the live baro last measured (~0.2 m/s on a bench), so apogee never arrived
     // however high the replayed altitude climbed.  The archive carries this
     // column; it was just never copied across.
-    baro.velocity        = s.raw_baro_velocity;
+    baro.velocity        = FlightArchive::RawBaroVelMps(s);
     baro.timestamp_ms    = s.timestamp_ms;
     baro.valid           = true;
     baro_new             = true;

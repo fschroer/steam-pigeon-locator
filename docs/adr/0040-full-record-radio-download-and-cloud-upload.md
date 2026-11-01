@@ -33,7 +33,12 @@ Today's download cannot do that, for two reasons:
    - Slow bytes (state, armed, fix type, SVs, PPS, accel source) are sent as change flags.
    - Decode must reproduce every 94 B `FlightSample` exactly.
    - Pages are independent: each starts from an absolute sample, so one page never depends on another.
-   - Target: at least 4 samples per packet. That is about 1,450 packets, or ~15 min at today's ~0.6 s per packet, for a typical flight. Measure this on the 28-record corpus before the codec is fixed.
+   - Measured model (2a): ~6.1 samples per packet, ~950 packets, ~9.5 min for a typical flight. Confirm on a real v8 record.
+2a. **The archive stores its float fields as fixed-point** (fschroer, 2026-11-01, folded into `ARCHIVE_VERSION` 8 before release).
+   - Fields: raw and fused AGL (cm), raw and fused vertical speed (cm/s), accel (mg), gyro (0.01 °/s). All are int32, at the float32 offsets they replace, with `INT32_MIN` meaning NaN.
+   - Why: measured on 11 Sept-2026 records, bit-exact float32 compresses to 3.7 samples per packet (~15.5 min typical, 24 min at the cap). Fixed-point compresses to 6.1 (~9.5 min, 15 min). A noisy float keeps ~20 meaningful mantissa bits per sample whatever the codec does.
+   - Every step is finer than the sensor's noise.
+   - The LoRa profile codec and its wire format are unchanged: it converts to the same float units it always sent.
 3. **Integrity.**
    - A CRC-32 over the record's raw sample bytes, computed by the locator from flash.
    - The app verifies it before calling a record complete or uploading it.

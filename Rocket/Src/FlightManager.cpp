@@ -1009,13 +1009,13 @@ uint32_t FlightManager::AnchorRecordToLaunchOnset() {
     uint16_t onset_off = 0;                 // default: keep the oldest sample
     const int walked = LaunchOnset::OnsetIndex(m_ring_count_, [this](int i) {
         const uint16_t k = static_cast<uint16_t>((m_ring_head_ + i) % kPreLaunchRingSamples);
-        return RocketNav::Math::norm(m_ring_[k].accel) / G0_F;
+        return RocketNav::Math::norm(FlightArchive::AccelG(m_ring_[k]));
     });
     // Fallback, the pre-walk-back rule: when the newest ring sample is itself in
     // the pad band (a weak motor confirmed by the baro gate) there is no run to
     // walk back along, so take the first sample above the band.
     for (uint16_t i = 0; walked < 0 && i < m_ring_count_; ++i) {
-        const float a_g = RocketNav::Math::norm(m_ring_[idx].accel) / G0_F;
+        const float a_g = RocketNav::Math::norm(FlightArchive::AccelG(m_ring_[idx]));
         if (a_g >= kLaunchOnsetAccelG) {
             // Onset = the sample just before accel first exceeds the pad band, so
             // t=0 sits immediately before the thresholds trip (per the request).

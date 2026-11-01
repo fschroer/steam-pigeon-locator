@@ -281,17 +281,17 @@ bool Archive::SetConsoleBaud(uint32_t baud) {
 FlightArchive::FlightSample Archive::BuildSample(const SampleInputs &in) {
 	FlightArchive::FlightSample s { };
 	s.timestamp_ms          = in.flight_time_ms;
-	s.raw_baro_altitude_agl = in.raw_baro_agl_m;
-	s.raw_baro_velocity     = in.raw_baro_vel_mps;
+	FlightArchive::SetRawBaroAglM(s, in.raw_baro_agl_m);
+	FlightArchive::SetRawBaroVelMps(s, in.raw_baro_vel_mps);
 
 	if (in.nav) {
 		// The EKF is retired from the real-time authority (ADR-0005) but still runs
 		// every cycle; these two columns are how its output is observed offline
 		// (ADR-0004).  ekf_health below is what says whether to believe them.
-		s.fused_altitude_agl       = in.nav->altitude_agl_m;
-		s.fused_vertical_speed_mps = in.nav->vertical_speed_mps;
-		s.accel = in.nav->body_accel_mps2;  // SELECTED channel, gravity-inclusive
-		s.gyro  = in.nav->body_rates_rps;
+		FlightArchive::SetFusedAglM(s, in.nav->altitude_agl_m);
+		FlightArchive::SetFusedVspeedMps(s, in.nav->vertical_speed_mps);
+		FlightArchive::SetAccelMps2(s, in.nav->body_accel_mps2);  // SELECTED channel, gravity-inclusive
+		FlightArchive::SetGyroRps(s, in.nav->body_rates_rps);
 	}
 
 	// #13: RAW GPS, not the retired EKF's nav->pos — that stayed frozen at the pad

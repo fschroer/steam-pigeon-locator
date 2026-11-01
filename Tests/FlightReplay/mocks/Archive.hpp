@@ -85,11 +85,11 @@ public:
     static FlightArchive::FlightSample BuildSample(const SampleInputs& in) {
         FlightArchive::FlightSample s{};
         s.timestamp_ms          = in.flight_time_ms;
-        s.raw_baro_altitude_agl = in.raw_baro_agl_m;
-        s.raw_baro_velocity     = in.raw_baro_vel_mps;
+        FlightArchive::SetRawBaroAglM(s, in.raw_baro_agl_m);
+        FlightArchive::SetRawBaroVelMps(s, in.raw_baro_vel_mps);
         if (in.nav) {
-            s.accel   = in.nav->body_accel_mps2;
-            s.gyro    = in.nav->body_rates_rps;
+            FlightArchive::SetAccelMps2(s, in.nav->body_accel_mps2);
+            FlightArchive::SetGyroRps(s, in.nav->body_rates_rps);
             s.lat_1e7 = FlightArchive::RadToDeg1e7(in.nav->pos.lat_rad);
             s.lon_1e7 = FlightArchive::RadToDeg1e7(in.nav->pos.lon_rad);
         }

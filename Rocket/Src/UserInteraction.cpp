@@ -840,17 +840,21 @@ void UserInteraction::ExportData(uint16_t archive_position) {
 						accel_alt_fields.Append(Fmt(cg / 100.0f, 0, 2));
 					accel_alt_fields.Append(',');
 				}
+				// v8 stores these as fixed-point (ADR-0040); print every digit the
+				// archive holds, so the CSV carries the record's full precision.
+				const Vec3f ag = FlightArchive::AccelG(sample_buffer[i]);
+				const Vec3f gd = FlightArchive::GyroDps(sample_buffer[i]);
 				export_line.WriteMany(sample_buffer[i].timestamp_ms, ",",
-						Fmt(sample_buffer[i].raw_baro_altitude_agl, 0, 1), ",",
-						Fmt(sample_buffer[i].fused_altitude_agl, 0, 1), ",",
-						Fmt(sample_buffer[i].raw_baro_velocity, 0, 1), ",",
-						Fmt(sample_buffer[i].fused_vertical_speed_mps, 0, 1), ",",
-						Fmt(sample_buffer[i].accel.x / G0_F, 0, 2), ",",
-						Fmt(sample_buffer[i].accel.y / G0_F, 0, 2), ",",
-						Fmt(sample_buffer[i].accel.z / G0_F, 0, 2), ",",
-						Fmt(sample_buffer[i].gyro.x * RAD2DEG, 0, 1), ",",
-						Fmt(sample_buffer[i].gyro.y * RAD2DEG, 0, 1), ",",
-						Fmt(sample_buffer[i].gyro.z * RAD2DEG, 0, 1), ",",
+						Fmt(FlightArchive::RawBaroAglM(sample_buffer[i]), 0, 2), ",",
+						Fmt(FlightArchive::FusedAglM(sample_buffer[i]), 0, 2), ",",
+						Fmt(FlightArchive::RawBaroVelMps(sample_buffer[i]), 0, 2), ",",
+						Fmt(FlightArchive::FusedVspeedMps(sample_buffer[i]), 0, 2), ",",
+						Fmt(ag.x, 0, 3), ",",
+						Fmt(ag.y, 0, 3), ",",
+						Fmt(ag.z, 0, 3), ",",
+						Fmt(gd.x, 0, 2), ",",
+						Fmt(gd.y, 0, 2), ",",
+						Fmt(gd.z, 0, 2), ",",
 						// Stored as degrees x 1e-7 (the receiver's own units); 7 decimals is
 						// exactly that resolution, so this round-trips without loss.
 						Fmt(sample_buffer[i].lat_1e7 / 1.0e7, 0, 7), ",",
@@ -915,7 +919,7 @@ void UserInteraction::ExportFlightStats(uint16_t archive_position) { //Export fl
 		while (!done && archive_.ReadFlightDataRange(archive_position, start, batch, 16u, got) && got != 0u) {
 			for (uint32_t i = 0u; i < got; ++i) {
 				if (batch[i].timestamp_ms > launch_detect_ms) { done = true; break; }
-				onset.Add(batch[i].timestamp_ms, RocketNav::Math::norm(batch[i].accel) / G0_F);
+				onset.Add(batch[i].timestamp_ms, RocketNav::Math::norm(FlightArchive::AccelG(batch[i])));
 			}
 			start += got;
 		}

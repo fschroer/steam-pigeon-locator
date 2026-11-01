@@ -44,6 +44,7 @@ The analysis is in the Claude Doc "50 Hz loop budget with MMC5983MA". Its findin
    - Decimation is **deferred**. Samples outside the ascent window wait 2 s in the RAM ring before the decimator keeps or drops them, so a main or landing event can still claim the 2 s before it at full rate.
    - Flash writes stay at one chunk per cycle (ADR "pre-launch ring monotonic clock"). The record closes only once the ring has emptied.
 8. **`FlightSample` grows to 94 B with `mag_q[3]`.**
+   - Also in v8 (2026-11-01, ADR "The radio download becomes the primary data path"): the four altitude/speed floats and the accel and gyro vectors became fixed-point int32 at the same offsets (cm, cm/s, mg, 0.01 °/s).
    - Each axis is the raw 18-bit count shifted right by 2, so 1 count is 0.0244 µT, over ±800 µT.
    - `INT16_MIN` means no reading.
    - Records are sized by samples (9,000 per record), not minutes. That is still 9 records, at 5 per 512 B chunk.

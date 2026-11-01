@@ -89,12 +89,20 @@ namespace FlightArchive
 		// record_count went 10 -> 9 to fund the rest; see the capacity note under
 		// the static_assert.
 		uint32_t timestamp_ms;              // (0,  +4)
-		float raw_baro_altitude_agl;        // (4,  +4)
-		float fused_altitude_agl;           // (8,  +4)
-		float raw_baro_velocity;            // (12, +4)
-		float fused_vertical_speed_mps;     // (16, +4)
-		Vec3f accel;                        // (20, +12) SELECTED accel channel, gravity-inclusive
-		Vec3f gyro;                         // (32, +12) body frame
+		// Fixed-point since ARCHIVE_VERSION 8 (ADR-0040, #60).  These were float32,
+		// and a noisy float keeps ~20 meaningful mantissa bits per sample whatever a
+		// codec does, which made a bit-exact radio download of a full record ~60 %
+		// longer (measured on 11 Sept-2026 records: 3.7 -> 6.1 samples/packet).
+		// Each step is finer than the sensor's own noise.  Same width and offsets
+		// as the floats, so the record geometry is unchanged.  kFixedInvalid
+		// (INT32_MIN) stands for a NaN input.  Read and write through the helpers
+		// below, never by hand: the units are the whole point.
+		int32_t raw_baro_agl_cm;            // (4,  +4) raw baro AGL, cm
+		int32_t fused_agl_cm;               // (8,  +4) EKF AGL, cm
+		int32_t raw_baro_vel_cms;           // (12, +4) raw baro vertical speed, cm/s
+		int32_t fused_vspeed_cms;           // (16, +4) EKF vertical speed, cm/s
+		int32_t accel_mg[3];                // (20, +12) SELECTED accel channel, gravity-inclusive, mg
+		int32_t gyro_cdps[3];               // (32, +12) body rates, 0.01 deg/s
 		// Raw GPS position in the receiver's native units: degrees x 1e-7.
 		// Range +/-214.7 deg, resolution 1.11 cm.
 		int32_t lat_1e7;                    // (44, +4)
@@ -186,6 +194,58 @@ namespace FlightArchive
     // this, and re-run Tests/ArchiveRoundTrip.
     static_assert(sizeof(FlightSample) == 94, "FlightSample layout changed -- re-check flash capacity AND record_count in Archive.hpp AND the app archive parser, and bump ARCHIVE_VERSION.");
     static constexpr int16_t kMagUnknown = INT16_MIN;
+
+    // ---- Fixed-point fields (ARCHIVE_VERSION 8) ---------------------------
+    inline constexpr int32_t kFixedInvalid = INT32_MIN;
+    inline constexpr float   kG0Mps2       = 9.80665f;
+    inline constexpr float   kRadToDeg     = 57.29577951308232f;
+
+    inline int32_t ToFixed(float v, float scale) {
+        if (!(v == v)) return kFixedInvalid;                  // NaN
+        float x = v * scale;
+        if (x >  2147483520.0f) x =  2147483520.0f;           // largest float < 2^31
+        if (x < -2147483520.0f) x = -2147483520.0f;
+        return static_cast<int32_t>(x >= 0.0f ? x + 0.5f : x - 0.5f);
+    }
+    inline float FromFixed(int32_t q, float scale) {
+        return q == kFixedInvalid ? __builtin_nanf("") : static_cast<float>(q) / scale;
+    }
+
+    inline void SetRawBaroAglM(FlightSample& s, float m)     { s.raw_baro_agl_cm  = ToFixed(m, 100.0f); }
+    inline void SetFusedAglM(FlightSample& s, float m)       { s.fused_agl_cm     = ToFixed(m, 100.0f); }
+    inline void SetRawBaroVelMps(FlightSample& s, float v)   { s.raw_baro_vel_cms = ToFixed(v, 100.0f); }
+    inline void SetFusedVspeedMps(FlightSample& s, float v)  { s.fused_vspeed_cms = ToFixed(v, 100.0f); }
+    inline void SetAccelMps2(FlightSample& s, const Vec3f& a) {
+        s.accel_mg[0] = ToFixed(a.x, 1000.0f / kG0Mps2);
+        s.accel_mg[1] = ToFixed(a.y, 1000.0f / kG0Mps2);
+        s.accel_mg[2] = ToFixed(a.z, 1000.0f / kG0Mps2);
+    }
+    inline void SetGyroRps(FlightSample& s, const Vec3f& w) {
+        s.gyro_cdps[0] = ToFixed(w.x, 100.0f * kRadToDeg);
+        s.gyro_cdps[1] = ToFixed(w.y, 100.0f * kRadToDeg);
+        s.gyro_cdps[2] = ToFixed(w.z, 100.0f * kRadToDeg);
+    }
+
+    inline float RawBaroAglM(const FlightSample& s)    { return FromFixed(s.raw_baro_agl_cm, 100.0f); }
+    inline float FusedAglM(const FlightSample& s)      { return FromFixed(s.fused_agl_cm, 100.0f); }
+    inline float RawBaroVelMps(const FlightSample& s)  { return FromFixed(s.raw_baro_vel_cms, 100.0f); }
+    inline float FusedVspeedMps(const FlightSample& s) { return FromFixed(s.fused_vspeed_cms, 100.0f); }
+    inline Vec3f AccelG(const FlightSample& s) {
+        return { FromFixed(s.accel_mg[0], 1000.0f), FromFixed(s.accel_mg[1], 1000.0f),
+                 FromFixed(s.accel_mg[2], 1000.0f) };
+    }
+    inline Vec3f AccelMps2(const FlightSample& s) {
+        const Vec3f g = AccelG(s);
+        return { g.x * kG0Mps2, g.y * kG0Mps2, g.z * kG0Mps2 };
+    }
+    inline Vec3f GyroDps(const FlightSample& s) {
+        return { FromFixed(s.gyro_cdps[0], 100.0f), FromFixed(s.gyro_cdps[1], 100.0f),
+                 FromFixed(s.gyro_cdps[2], 100.0f) };
+    }
+    inline Vec3f GyroRps(const FlightSample& s) {
+        const Vec3f d = GyroDps(s);
+        return { d.x / kRadToDeg, d.y / kRadToDeg, d.z / kRadToDeg };
+    }
 
     // == Decoders ============================================================
     // gps_fix_type: 0-5 = live u-blox fixType (NAV-PVT parsed within 3 s);
