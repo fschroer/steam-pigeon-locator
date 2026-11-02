@@ -3,8 +3,10 @@
 #include "ISM6HG256X.hpp"
 #include "MS5611.hpp"
 #include "SAMM10Q.hpp"
+#include "MMC5983MA.hpp"
 #include "InsEkf15.hpp"
 #include "AttitudeEstimator.hpp"
+#include "Constants.hpp"
 
 // ---------------------------------------------------------------------------
 // Bench replay (#35 / #36) — DISABLED by default.
@@ -213,6 +215,15 @@ public:
         return m_baro.raw();
     }
 
+    // Newest magnetometer reading, valid only if THIS cycle's read succeeded
+    // (ADR-0039).  Sensor frame.
+    MagSample getMag() const {
+        MagSample m = m_mag.last();
+        m.valid = m_mag_valid_;
+        return m;
+    }
+    SensorStatus magStatus() const { return m_mag.getStatus(); }
+    bool magPresent() const { return m_mag.present(); }
     const GpsSample& getRawGps() const {
 #if SP_BENCH_REPLAY
         if (m_test_active_) return m_test_gps_sample_;
@@ -322,7 +333,7 @@ private:
     NoseAxis       m_nose_axis_           = NoseAxis::Auto;
     MountingFrame  m_mounting             = {{0,1,2},{1,1,1}}; // identity (standard)
     bool           m_mounting_cal_active  = false;
-    uint8_t        m_mounting_cal_count   = 0;
+    uint16_t       m_mounting_cal_count   = 0;
     Vec3f          m_mounting_accel_accum = {};
 
     // Once set, gyro-bias accumulation is suppressed until the next arm.
@@ -330,7 +341,7 @@ private:
     // indicating motor ignition or significant handling of the rocket.
     bool           m_bias_frozen          = false;
 
-    static constexpr uint8_t kMountingCalSamples = 64; // 3.2 s at 20 Hz
+    static constexpr uint16_t kMountingCalSamples = SamplesForMs(3200); // 3.2 s (64 @ 20 Hz)
     // Tilt within which the rocket counts as standing vertical (ADR-0021
     // Decision 5 names ~20° as a starting point, to be validated on the pad —
     // it is not a measured value).  Generous relative to typical 5–10° rail
@@ -361,22 +372,24 @@ private:
     // 20 samples = 1 s at 20 Hz.
     static constexpr float   kFusedFrozenRawMoveM = 1.0f;
     static constexpr float   kFusedFrozenTolM     = 0.05f;
-    static constexpr uint8_t kFusedFrozenSamples  = 20;
+    static constexpr uint16_t kFusedFrozenSamples  = SamplesForMs(1000);  // 1 s
     float   m_last_fused_agl_m_ = 0.0f;
     float   m_last_raw_agl_m_   = 0.0f;
-    uint8_t m_fused_static_count_ = 0;
+    uint16_t m_fused_static_count_ = 0;
 
     ISM6HG256X m_imu;
     MS5611     m_baro;
     SAMM10Q    m_gps;
+    MMC5983MA  m_mag;
+    bool       m_mag_valid_ = false;   // this cycle's read succeeded
     InsEkf15   m_ekf;
     AttitudeEstimator m_attitude;   // strapdown (ADR-0005 / NFR-9)
 
     // Complementary gain for quasi-static accel tilt correction of the strapdown
     // (pad / gentle descent only).  Small: trust the gyro, nudge toward gravity.
-    static constexpr float kStrapdownTiltGain = 0.02f;
+    static constexpr float kStrapdownTiltGain = PerCycleGainFrom20Hz(0.02f);  // tuned at 20 Hz (ADR-0039)
     // LPF gain for learning the strapdown gyro bias while stationary (≈1 s at 20 Hz).
-    static constexpr float kStrapdownBiasAlpha = 0.05f;
+    static constexpr float kStrapdownBiasAlpha = PerCycleGainFrom20Hz(0.05f);  // tuned at 20 Hz (ADR-0039)
 
     // ── High-rate strapdown propagation (NFR-9) ───────────────────────────────
     // The gyro FIFO is batched at this rate; each drained sample is integrated at
@@ -389,11 +402,21 @@ private:
     // Vec3f = 576 B) buffer overflows it.  Batch = 12 words = 144 B.  Update()
     // loops the drain until the FIFO empties, so total drain capacity per loop
     // (kStrapdownFifoBatch × kStrapdownFifoMaxBatches) stays well above the
-    // ~24 words/loop fill rate (480 Hz × 50 ms) with no large allocation.
+    // fill rate (480 Hz × loop period: 9.6 words at 50 Hz) with no large allocation.
     static constexpr uint16_t kStrapdownFifoBatch     = 12;
-    // Safety cap on drain iterations per loop, bounding worst-case loop time
-    // (NFR-3) if a backlog ever forms; 48 × 12 = 576 words ≫ steady-state fill.
-    static constexpr uint8_t  kStrapdownFifoMaxBatches = 48;
+    // Cap on words drained per loop (#24).  It was 48 batches = 576 words, which
+    // let one startup backlog (284 words) take ~60 ms in a single drain -- longer
+    // than the loop period, and a backlog that outruns the loop only grows.  Now
+    // 2.5x the steady-state fill (480 Hz / loop rate: 9.6 words at 50 Hz), rounded
+    // up to whole batches: 24 words at 50 Hz, 60 at 20 Hz.  A backlog then drains
+    // over a few cycles at ~1.5x the fill rate instead of in one overrun.  The
+    // integrator loses nothing -- words wait in the FIFO and keep their order --
+    // and the dt estimate below is only updated on a drain that emptied the FIFO.
+    static constexpr uint16_t kStrapdownFifoMaxWordsPerCycle =
+        static_cast<uint16_t>((480u * 5u + 2u * SAMPLES_PER_SECOND - 1u) / (2u * SAMPLES_PER_SECOND));
+    static constexpr uint8_t  kStrapdownFifoMaxBatches = static_cast<uint8_t>(
+        (kStrapdownFifoMaxWordsPerCycle + kStrapdownFifoBatch - 1u) / kStrapdownFifoBatch);
+    bool m_strapdown_prev_drain_emptied_ = false;
 
     // ── GPS-disciplined strapdown dt (NFR-9) ──────────────────────────────────
     // Per-sample integration dt is derived from the GPS-PPS-disciplined TIM2 tick

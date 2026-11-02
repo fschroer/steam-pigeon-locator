@@ -442,6 +442,73 @@ static void B1_NominalFlight() {
 }
 
 // ===========================================================================
+// B8: the variable-rate archive (ADR-0039) through the real FlightManager drain.
+// This suite runs at 20 Hz, so "full rate" is a 50 ms step and the descent
+// decimator keeps one sample per ~200 ms (every 4th).  The rule is rate-
+// independent; Tests/ArchiveRatePolicy covers it at 50 Hz.
+// ===========================================================================
+static void B8_VariableRateArchive() {
+    printf("\n--- B8: variable-rate archive keeps full rate at the events, 5 Hz between ---\n");
+    std::vector<Cycle> flight = makeNominalFlight();
+    // Several seconds more on the ground so the landed tail and the ring drain
+    // both complete inside the data.
+    {
+        Cycle last = flight.back();
+        for (int i = 0; i < 120; ++i) { last.t_ms += 50; flight.push_back(last); }
+    }
+    g_bench.Reset();
+    RocketNav::Navigation nav; Archive ar; PowerManagement pw(nullptr);
+    FlightManager fm(nav, ar, pw);
+    fm.Init();
+    fm.flight_state_ = FlightStates::WaitingLaunch;
+    bool complete = false;
+    for (const Cycle& c : flight) {
+        applyCycle(nav, c);
+        g_bench.hal_ms = c.t_ms;
+        fm.SetFlightClockMs(c.t_ms);
+        fm.UpdateFlightState();
+        if (fm.RecordComplete()) { complete = true; break; }
+    }
+    CHECK_MSG(complete, "record never became complete (ring not drained?)");
+    CHECK(fm.m_ring_count_ == 0);
+
+    const std::vector<uint32_t>& ts = ar.written_ts;
+    CHECK_MSG(ts.size() > 50, "too few samples written: %zu", ts.size());
+    bool increasing = true;
+    for (size_t i = 1; i < ts.size(); ++i) if (ts[i] <= ts[i - 1]) increasing = false;
+    CHECK_MSG(increasing, "archived timestamps not strictly increasing");
+
+    const uint32_t drogue  = static_cast<uint32_t>(ar.Event(Stat::DroguePrimaryDeployTimestampMs));
+    const uint32_t mainp   = static_cast<uint32_t>(ar.Event(Stat::MainPrimaryDeployTimestampMs));
+    const uint32_t landing = static_cast<uint32_t>(ar.Event(Stat::LandingTimestampMs));
+    const uint32_t ascent_end = drogue + ArchiveRate::kAfterDrogueMs;
+
+    // Classify every gap by where its LATER sample sits.
+    int full_ok = 0, full_bad = 0, dec_ok = 0, dec_bad = 0;
+    for (size_t i = 1; i < ts.size(); ++i) {
+        const uint32_t t = ts[i], gap = ts[i] - ts[i - 1];
+        const bool in_ascent  = t < ascent_end;
+        const bool in_main    = t >= mainp - ArchiveRate::kBeforeMainMs && t <= mainp + ArchiveRate::kAfterMainMs
+                             && ts[i - 1] >= mainp - ArchiveRate::kBeforeMainMs;
+        const bool in_landing = t >= landing - ArchiveRate::kBeforeLandingMs
+                             && ts[i - 1] >= landing - ArchiveRate::kBeforeLandingMs;
+        if (in_ascent || in_main || in_landing) {
+            (gap == 50u) ? ++full_ok : ++full_bad;
+        } else if (t > ascent_end + 300u && !(t >= mainp - ArchiveRate::kBeforeMainMs && t <= mainp + ArchiveRate::kAfterMainMs + 300u)
+                   && t < landing - ArchiveRate::kBeforeLandingMs) {
+            (gap >= 190u && gap <= 250u) ? ++dec_ok : ++dec_bad;
+        }
+    }
+    CHECK_MSG(full_bad == 0, "%d full-rate gaps were not 50 ms", full_bad);
+    CHECK_MSG(dec_bad == 0, "%d descent gaps were not ~200 ms", dec_bad);
+    CHECK_MSG(dec_ok > 20, "descent decimation barely exercised (%d gaps)", dec_ok);
+    CHECK_MSG(ts.front() == 0u || ts.front() < 100u, "record does not start at onset: %u", ts.front());
+    CHECK_MSG(ts.back() >= landing + 1900u, "landed tail missing: last %u, landing %u", ts.back(), landing);
+    printf("       %zu samples kept of %zu cycles; full-rate gaps %d, 5 Hz gaps %d; drogue %u main %u land %u\n",
+           ts.size(), flight.size(), full_ok, dec_ok, drogue, mainp, landing);
+}
+
+// ===========================================================================
 // B5-B6: burnout is MOTOR stop, read from the axial component (#45); apogee
 // still waits for the old magnitude coast gate.
 // ===========================================================================
@@ -1045,6 +1112,7 @@ int main(int argc, char** argv) {
     B5_AxialBurnoutIsMotorStop();
     B6_WrongFrameFallsBack();
     B7_PreIgnitionJoltDoesNotMoveTheEpoch();
+    B8_VariableRateArchive();
 
     C1_DropDoesNotLaunch();
     C2_KnockDoesNotLaunch();

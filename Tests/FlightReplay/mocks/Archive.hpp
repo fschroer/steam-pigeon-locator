@@ -13,6 +13,7 @@
 #pragma once
 #include <cstdint>
 #include <map>
+#include <vector>
 #include <ArchiveTypes.hpp>
 #include "RocketSettings.hpp"
 
@@ -48,8 +49,15 @@ public:
         return true;
     }
 
-    uint16_t SamplesUntilChunkCommit() { return 100u; }
-    bool     WriteBuiltSample(const FlightArchive::FlightSample& /*s*/) { return true; }
+    // One-chunk-per-cycle budget, as the real archive: 5 samples per 512 B chunk.
+    uint16_t SamplesUntilChunkCommit() { return 5u; }
+    // Records what reached flash, so the variable-rate policy (ADR-0039) can be
+    // asserted through the real FlightManager.
+    bool     WriteBuiltSample(const FlightArchive::FlightSample& s) {
+        written_ts.push_back(s.timestamp_ms);
+        return true;
+    }
+    std::vector<uint32_t> written_ts;
 
     // Mirrors the real Archive::SampleInputs so FlightManager compiles unchanged
     // against this mock.  Only the fields this harness relies on are filled —
@@ -71,16 +79,17 @@ public:
         bool              baro_raw_valid   = false;   // #56: mirrors the real SampleInputs
         float             baro_pressure_pa = 0.0f;
         float             baro_temp_c      = 0.0f;
+        const MagSample   *mag             = nullptr;   // ADR-0039: mirrors the real SampleInputs
     };
 
     static FlightArchive::FlightSample BuildSample(const SampleInputs& in) {
         FlightArchive::FlightSample s{};
         s.timestamp_ms          = in.flight_time_ms;
-        s.raw_baro_altitude_agl = in.raw_baro_agl_m;
-        s.raw_baro_velocity     = in.raw_baro_vel_mps;
+        FlightArchive::SetRawBaroAglM(s, in.raw_baro_agl_m);
+        FlightArchive::SetRawBaroVelMps(s, in.raw_baro_vel_mps);
         if (in.nav) {
-            s.accel   = in.nav->body_accel_mps2;
-            s.gyro    = in.nav->body_rates_rps;
+            FlightArchive::SetAccelMps2(s, in.nav->body_accel_mps2);
+            FlightArchive::SetGyroRps(s, in.nav->body_rates_rps);
             s.lat_1e7 = FlightArchive::RadToDeg1e7(in.nav->pos.lat_rad);
             s.lon_1e7 = FlightArchive::RadToDeg1e7(in.nav->pos.lon_rad);
         }

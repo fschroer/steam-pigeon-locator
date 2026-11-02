@@ -104,6 +104,17 @@ private:
 	// Long enough to find the probe points and read a settled value, short
 	// enough that walking away cannot leave the divider drawing current.
 	static constexpr uint16_t kBattHoldCycles = SAMPLES_PER_SECOND * 10u;   // ~10 s
+	// Once-per-second slots in ProcessRocketEvents' rocket_service_count switch.
+	// Written as the time into the second they ran at under the 20 Hz loop (counts
+	// 0 / 2 / 3 / 5), so the divider still gets 100 ms to settle before the
+	// telemetry slot reads it, whatever the loop rate (ADR-0039).
+	static constexpr uint16_t kSlotDividerOn  = 0u;
+	static constexpr uint16_t kSlotTelemetry  = SamplesForMs(100);
+	static constexpr uint16_t kSlotDividerOff = SamplesForMs(150);
+	static constexpr uint16_t kSlotLedOff     = SamplesForMs(250);
+	static_assert(kSlotDividerOn < kSlotTelemetry && kSlotTelemetry < kSlotDividerOff
+	              && kSlotDividerOff < kSlotLedOff && kSlotLedOff < SAMPLES_PER_SECOND,
+	              "once-per-second slots must be distinct and in order");
 
 	static constexpr uint16_t kUart2RxBufSize = 256;  // power of two
 	volatile uint8_t  uart2_rx_buf_[kUart2RxBufSize] = { };

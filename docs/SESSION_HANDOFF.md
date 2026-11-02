@@ -2,6 +2,53 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-11-02 (feature) — background full-record transfer, firmware side — ADR "The radio download becomes the primary data path" (0040). NOT on hardware
+
+✅ **What changed:**
+- Four new message types (26–29: `FullRecordRequest` / `Data` / `Parity` / `Ack`), additive, no existing message changed size.
+- `FullRecordSender.hpp`: a HAL-free burst → periodic → 900 ms listen cycle, running only while Disarmed in WaitingLaunch/Landed. Record CRC and page planning take 24 samples per loop cycle. The sender suspends after 3 cycles with no ACK.
+- `PickupDetector.hpp` reports pickup as bit 7 of TelemetryData `physical_deployment_stats`.
+- The receiver relays the new types and holds the transfer's ACK/request in a second forward slot.
+- Android and iOS gain the `MsgType` values, framing of 27/28, constants and layout tests.
+- **Commits** (all on `claude/project-thread-308ix0`): locator `dc085c2`, receiver `fcbe968`, app `bec5261` (**not compiled**), iOS `b05f0b6` (**not compiled**).
+- **Tests:**
+  - `Tests/FullRecordSender` 38/0 (simulated half-duplex link and app, bit-exact at 10 % loss each way, no TX in a forward window).
+  - `Tests/FullRecordCodec` 869/0.
+  - Full ARM link at -Og: flash 174 KB, static RAM 52.3 KB of 64.
+  - Receiver wire check 26 asserts.
+  - **Android and iOS not compiled here.**
+- **Modeled:** 0.70 s per packet against 0.6 quiet, so about 12 min for a typical flight. The periodic frame comes every ~5.5 s during a cycle.
+- **Not done:**
+  - the app side (step 2: background transfer, persistence and resume, Firebase upload);
+  - USB serial;
+  - iOS port of the transfer.
+- **Traps:**
+  - Packets are self-contained but decode in sample order: the app keeps each one and decodes it once the two samples before it are in hand.
+  - The app must repeat its `FullRecordRequest` in any window where nothing new arrived. That is what restarts a suspended or aborted sender.
+  - Periodic frames now set `radio_busy_` until TxDone. A lost TxDone is cleared by a 2 s watchdog, but only on the full-transfer path.
+
+## 2026-11-01 (feature) — full-record radio codec, step 1 of ADR "The radio download becomes the primary data path" (0040). Codec only, not wired in
+
+✅ **What changed:** new header-only `Rocket/Communication/Inc/FullRecordCodec.hpp`: lossless codec for whole v8 `FlightSample`s, fixed 512-sample pages, `PlanPage` packet planner, independent packets (each coded from the two flash samples before it), IEEE CRC-32. Nothing in the firmware calls it yet.
+- **Tests:** new `Tests/FullRecordCodec` 863/0 (bit-exact round trip, shuffled arrival, pure-noise worst case 910 bits so a page is never over 256 packets, deterministic plan). With `SP_CSV_DIR=<export folder>` it also measures real flights: **5.75 samples/packet** on the 11 Sept-2026 exports (885/0).
+- **Next:** the wire integration (page index in `FlightDataRequest`, page-0 header, pickup bit, interleaving, receiver relay). It changes the wire format, so it needs `steam-pigeon-ios` in the same session for `WireLayoutTests.swift`.
+
+## 2026-11-01 (feature) — 50 Hz loop, variable-rate archive (`ARCHIVE_VERSION` 8) and MMC5983MA magnetometer — ADR "50 Hz loop, variable-rate archive and magnetometer" (0039). NOT on hardware
+
+✅ **What changed:** loop 20 → 50 Hz; every cycle-count constant now written as time (`SamplesForMs`), identical at 20 Hz; SPI2 prescaler 8 (#21); length-aware GPS read (#22); FIFO drain cap (#24); MS5611 pipelined with D2 every 10th cycle (45 Hz baro, filter windows resized to the same time spans); MMC5983MA on I2C2 0x30, archived but not fused; archive 50 Hz through drogue + 10 s and around main and landing, 5 Hz between; `FlightSample` 94 B with `mag_q[3]`; download plan finds events by timestamp and thins windows that overflow a transfer; export adds `mag_x_ut,mag_y_ut,mag_z_ut`.
+- **Commits:** locator `7f58202`, receiver `8acb7ca` (comment only), app `412cd2c` (constant and comments, **not compiled**).
+- **Not done:** EKF decimation (every second cycle) is Frank's call after profiling. The EKF still runs every cycle.
+- **Tests:** every host suite green (TransferPlan 5,304/0, FlightReplay 119/0 with new B8, new `Tests/ArchiveRatePolicy` 19/0). Full `arm-none-eabi` link at -Og outside CubeIDE: flash 168 KB of 256, static RAM 50.6 KB of 64 (was 42.4), deepest stack frame 4.4 KB.
+- **Traps:** v8 orphans all stored records, so **export before flashing**. `Tests/FlightReplay` and `Tests/DescentSlowdown` are pinned to `-DSAMPLES_PER_SECOND=20` because the corpus is 20 Hz. PR #58 (degraded boot) also edits `Navigation::Init`: expect a merge conflict. CubeIDE must refresh `Debug/` to pick up `MMC5983MA.cpp`.
+
+🧪 **Bench, in order:**
+1. Console `t` breakdown at -Og: worst cycle under ~16 ms, with `MagRead` about 0.3 ms.
+2. `MagRead` health: product ID 0x30 found, field magnitude 25–65 µT at rest, and it rotates when the board turns.
+3. Baro: AGL noise on the pad comparable to the 20 Hz build; no stale-D2 temperature jumps.
+4. `SP_BENCH_REPLAY` a 20 Hz record and check events match the 20 Hz build.
+5. Vacuum-chamber flight (ADR-0031), then export: about 50 samples/s through drogue + 10 s, 5/s on descent, 50/s around main and landing; mag columns filled.
+6. Download that record to the app and check the main and landing markers sit on the trace.
+
 ## 2026-10-15 (fix) — record t = 0 is the start of the thrust run into launch detect; CSV export states `Launch onset time:` — ADR-0007 amendment. NOT on hardware
 
 ✅ **Why:** `AnchorRecordToLaunchOnset` took the first ring sample above 1.3 g. On Ken_6 that was a one-sample jolt 0.8 s before ignition, so every Ken_6 time is 0.8 s late. Onset is now the start of the unbroken ≥ 1.3 g run ending at launch detect, walked back from the newest sample (`LaunchOnset.hpp`). If the newest sample is in the pad band, the old first-crossing scan applies.

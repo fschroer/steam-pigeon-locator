@@ -1,4 +1,5 @@
 #pragma once
+#include "Constants.hpp"
 #include <Types.hpp>
 
 namespace RocketNav {
@@ -66,9 +67,9 @@ public:
     void   flagFusedFrozen()   { m_health.fused_frozen = true; }
 
     // Consecutive-reset threshold before the filter asks to be re-seeded in flight.
-    // 20 cycles = 1 s at the 20 Hz loop rate — long enough that a genuine transient
+    // 1 s of cycles (20 at 20 Hz, 50 at 50 Hz) — long enough that a genuine transient
     // (a baro spike, a single bad IMU read) is ruled out.
-    static constexpr uint32_t kMaxConsecutiveVelResets = 20u;
+    static constexpr uint32_t kMaxConsecutiveVelResets = SamplesForMs(1000);
 
     // True once the velocity guard has fired kMaxConsecutiveVelResets cycles in a
     // row.  Navigation polls this after predict() and calls reinitializeFrom() with

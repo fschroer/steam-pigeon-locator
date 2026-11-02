@@ -9,8 +9,8 @@
 //   3.  GetFlightSampleCount returns the exact number of samples written
 //   4.  ReadFlightDataRange recovers every sample in correct order
 //   5.  Every FlightSample field round-trips exactly:
-//         timestamp_ms, raw_baro_altitude_agl, fused_altitude_agl,
-//         raw_baro_velocity, fused_vertical_speed_mps,
+//         timestamp_ms, raw_baro_agl_cm, fused_agl_cm,
+//         raw_baro_vel_cms, fused_vspeed_cms,
 //         accel (body-frame Vec3f), gyro, lat_rad, lon_rad,
 //         flight_state  <-- newly added field
 //   6.  All Statistic event stats round-trip (LaunchTimestampMs,
@@ -64,10 +64,6 @@ static int  g_fail = 0;
 
 static bool floatEq(float a, float b)  { return std::memcmp(&a, &b, 4) == 0; }
 static bool doubleEq(double a, double b) { return std::memcmp(&a, &b, 8) == 0; }
-static bool vec3Eq(const Vec3f& a, const Vec3f& b)
-{
-    return floatEq(a.x, b.x) && floatEq(a.y, b.y) && floatEq(a.z, b.z);
-}
 
 // ---------------------------------------------------------------------------
 // Flash / archive configuration — mirrors Archive.cpp exactly
@@ -82,7 +78,7 @@ static constexpr uint32_t kRuntimeRegionSize    = 32u * 1024u;
 // loudly on its own — Archive::Init() simply returns false and every
 // subsequent assertion fails — so CheckConfigFits() below reports it plainly.
 static constexpr uint16_t kRecordCount          = 9u;
-static constexpr uint16_t kMinutesPerRecord     = 8u;
+static constexpr uint32_t kSamplesPerRecord     = 9000u;   // = kRecordCapacitySamples (Archive.hpp)
 static constexpr uint16_t kStatSlotCount =
     static_cast<uint16_t>(FlightArchive::Statistic::Count);
 static constexpr size_t   kChunkPayloadBytes    = 512u;
@@ -100,7 +96,7 @@ static RocketArchive::Config MakeConfig()
     cfg.archiveBaseAddress = layout.archiveBaseAddress;
     cfg.archiveSizeBytes   = layout.archiveSizeBytes;
     cfg.recordCount        = kRecordCount;
-    cfg.minutesPerRecord   = kMinutesPerRecord;
+    cfg.samplesPerRecord   = kSamplesPerRecord;
     cfg.statSlotCount      = kStatSlotCount;
     return cfg;
 }
@@ -135,21 +131,21 @@ static FlightArchive::FlightSample MakeSample(uint32_t i)
 {
     FlightArchive::FlightSample s{};
     s.timestamp_ms            = 1000u + i * 50u;          // 20 Hz starting at T+1 s
-    s.raw_baro_altitude_agl   = 10.0f + static_cast<float>(i) * 0.5f;
-    s.fused_altitude_agl      = 10.1f + static_cast<float>(i) * 0.5f;
-    s.raw_baro_velocity       = 1.0f  + static_cast<float>(i) * 0.1f;
-    s.fused_vertical_speed_mps= 1.05f + static_cast<float>(i) * 0.1f;
+    FlightArchive::SetRawBaroAglM(s,    10.0f + static_cast<float>(i) * 0.5f);
+    FlightArchive::SetFusedAglM(s,      10.1f + static_cast<float>(i) * 0.5f);
+    FlightArchive::SetRawBaroVelMps(s,  1.0f  + static_cast<float>(i) * 0.1f);
+    FlightArchive::SetFusedVspeedMps(s, 1.05f + static_cast<float>(i) * 0.1f);
 
     // Body-frame accelerometer: distinctive per-sample values
     // (gravity-inclusive, so at rest this would be ~9.81 on one axis;
     //  during burn it climbs — we just use synthetic data here)
-    s.accel = { 0.1f * static_cast<float>(i),
-                0.2f * static_cast<float>(i),
-                9.81f + 0.3f * static_cast<float>(i) };
+    FlightArchive::SetAccelMps2(s, { 0.1f * static_cast<float>(i),
+                                     0.2f * static_cast<float>(i),
+                                     9.81f + 0.3f * static_cast<float>(i) });
 
-    s.gyro  = { 0.01f * static_cast<float>(i),
-               -0.01f * static_cast<float>(i),
-                0.005f * static_cast<float>(i) };
+    FlightArchive::SetGyroRps(s, {  0.01f * static_cast<float>(i),
+                                   -0.01f * static_cast<float>(i),
+                                    0.005f * static_cast<float>(i) });
 
     s.lat_1e7 = 400000000 + static_cast<int32_t>(i);   // ~40° N, degrees x 1e-7
     s.lon_1e7 = -720000000 + static_cast<int32_t>(i);  // ~-72° (Connecticut)
@@ -179,12 +175,13 @@ static void CheckSampleMatch(const FlightArchive::FlightSample& got,
                              uint32_t index)
 {
     bool ok = (got.timestamp_ms             == expected.timestamp_ms)
-           && floatEq(got.raw_baro_altitude_agl,  expected.raw_baro_altitude_agl)
-           && floatEq(got.fused_altitude_agl,      expected.fused_altitude_agl)
-           && floatEq(got.raw_baro_velocity,        expected.raw_baro_velocity)
-           && floatEq(got.fused_vertical_speed_mps, expected.fused_vertical_speed_mps)
-           && vec3Eq(got.accel,                     expected.accel)
-           && vec3Eq(got.gyro,                      expected.gyro)
+           // Fixed-point since v8 (ADR-0040): the round trip is bit-exact.
+           && (got.raw_baro_agl_cm  == expected.raw_baro_agl_cm)
+           && (got.fused_agl_cm     == expected.fused_agl_cm)
+           && (got.raw_baro_vel_cms == expected.raw_baro_vel_cms)
+           && (got.fused_vspeed_cms == expected.fused_vspeed_cms)
+           && std::memcmp(got.accel_mg,  expected.accel_mg,  sizeof(got.accel_mg))  == 0
+           && std::memcmp(got.gyro_cdps, expected.gyro_cdps, sizeof(got.gyro_cdps)) == 0
            && (got.lat_1e7                     == expected.lat_1e7)
            && (got.lon_1e7                     == expected.lon_1e7)
            && (got.flight_state                == expected.flight_state)
@@ -200,13 +197,13 @@ static void CheckSampleMatch(const FlightArchive::FlightSample& got,
         if (got.timestamp_ms != expected.timestamp_ms)
             printf("        timestamp_ms: got %u, expected %u\n",
                    got.timestamp_ms, expected.timestamp_ms);
-        if (!floatEq(got.raw_baro_altitude_agl, expected.raw_baro_altitude_agl))
-            printf("        raw_baro_altitude_agl: got %.3f, expected %.3f\n",
-                   (double)got.raw_baro_altitude_agl, (double)expected.raw_baro_altitude_agl);
-        if (!vec3Eq(got.accel, expected.accel))
-            printf("        accel: got (%.3f,%.3f,%.3f), expected (%.3f,%.3f,%.3f)\n",
-                   (double)got.accel.x, (double)got.accel.y, (double)got.accel.z,
-                   (double)expected.accel.x, (double)expected.accel.y, (double)expected.accel.z);
+        if (got.raw_baro_agl_cm != expected.raw_baro_agl_cm)
+            printf("        raw_baro_agl_cm: got %d, expected %d\n",
+                   (int)got.raw_baro_agl_cm, (int)expected.raw_baro_agl_cm);
+        if (std::memcmp(got.accel_mg, expected.accel_mg, sizeof(got.accel_mg)) != 0)
+            printf("        accel_mg: got (%d,%d,%d), expected (%d,%d,%d)\n",
+                   (int)got.accel_mg[0], (int)got.accel_mg[1], (int)got.accel_mg[2],
+                   (int)expected.accel_mg[0], (int)expected.accel_mg[1], (int)expected.accel_mg[2]);
         if (got.flight_state != expected.flight_state)
             printf("        flight_state: got %u, expected %u\n",
                    got.flight_state, expected.flight_state);

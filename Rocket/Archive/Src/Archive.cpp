@@ -111,7 +111,7 @@ RocketArchive::Config Archive::MakeConfig(IFlashDriver &flash) {
 	cfg.archiveBaseAddress = layout.archiveBaseAddress;
 	cfg.archiveSizeBytes = layout.archiveSizeBytes;
 	cfg.recordCount = record_count;
-	cfg.minutesPerRecord = 8u;
+	cfg.samplesPerRecord = kRecordCapacitySamples;
 	cfg.statSlotCount = static_cast<uint16_t>(FlightArchive::Statistic::Count);
 	return cfg;
 }
@@ -281,17 +281,17 @@ bool Archive::SetConsoleBaud(uint32_t baud) {
 FlightArchive::FlightSample Archive::BuildSample(const SampleInputs &in) {
 	FlightArchive::FlightSample s { };
 	s.timestamp_ms          = in.flight_time_ms;
-	s.raw_baro_altitude_agl = in.raw_baro_agl_m;
-	s.raw_baro_velocity     = in.raw_baro_vel_mps;
+	FlightArchive::SetRawBaroAglM(s, in.raw_baro_agl_m);
+	FlightArchive::SetRawBaroVelMps(s, in.raw_baro_vel_mps);
 
 	if (in.nav) {
 		// The EKF is retired from the real-time authority (ADR-0005) but still runs
 		// every cycle; these two columns are how its output is observed offline
 		// (ADR-0004).  ekf_health below is what says whether to believe them.
-		s.fused_altitude_agl       = in.nav->altitude_agl_m;
-		s.fused_vertical_speed_mps = in.nav->vertical_speed_mps;
-		s.accel = in.nav->body_accel_mps2;  // SELECTED channel, gravity-inclusive
-		s.gyro  = in.nav->body_rates_rps;
+		FlightArchive::SetFusedAglM(s, in.nav->altitude_agl_m);
+		FlightArchive::SetFusedVspeedMps(s, in.nav->vertical_speed_mps);
+		FlightArchive::SetAccelMps2(s, in.nav->body_accel_mps2);  // SELECTED channel, gravity-inclusive
+		FlightArchive::SetGyroRps(s, in.nav->body_rates_rps);
 	}
 
 	// #13: RAW GPS, not the retired EKF's nav->pos — that stayed frozen at the pad
@@ -344,6 +344,18 @@ FlightArchive::FlightSample Archive::BuildSample(const SampleInputs &in) {
 	if (in.baro_raw_valid) {
 		s.baro_raw_pressure_2pa = PackPressure2Pa(in.baro_pressure_pa);
 		if (s.baro_raw_pressure_2pa != 0u) s.baro_temp_halfc = PackTempHalfC(in.baro_temp_c);
+	}
+
+	// Magnetometer (ADR-0039): the 18-bit reading >> 2, sensor frame.
+	for (int i = 0; i < 3; ++i) {
+		if (in.mag != nullptr && in.mag->valid) {
+			int32_t q = in.mag->raw[i] >> 2;               // arithmetic: raw is signed
+			if (q > 32767)  q = 32767;
+			if (q < -32767) q = -32767;                    // one LSB clear of kMagUnknown
+			s.mag_q[i] = static_cast<int16_t>(q);
+		} else {
+			s.mag_q[i] = FlightArchive::kMagUnknown;
+		}
 	}
 
 	// NFR-9 strapdown attitude, packed int16.

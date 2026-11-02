@@ -25,7 +25,7 @@ namespace FlightArchive
             uint32_t archiveBaseAddress;
             uint32_t archiveSizeBytes;
             uint16_t recordCount;
-            uint16_t minutesPerRecord;
+            uint32_t samplesPerRecord;   // capacity, not duration: the rate varies (v8)
             uint16_t statSlotCount;
         };
 

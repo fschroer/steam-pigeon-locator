@@ -70,7 +70,9 @@ bool MS5611::init(float sample_rate_hz) {
 	m_state = State::Idle;
 	m_iir_initialized_ = false;   // reset IIR; readSampleBlocking() below warms it up
 	m_pressure_median_.reset();   // and its median, so pre-reset pressure cannot leak
-	RearmCC1ForD2();
+	m_have_d2_ = false;
+	m_cycles_since_d2_ = 0;
+	__HAL_TIM_DISABLE_IT(htim17_, TIM_IT_CC1);   // CC1 kick retired (ADR-0039)
 
 	BaroSample baro { }; // Pre-read baro to ensure valid subsequent reads
 	uint8_t sample = 0, sampleCount = 3;
@@ -153,103 +155,155 @@ void MS5611::computeCompensated(uint32_t D1, uint32_t D2, float &pressure_pa, fl
 	pressure_pa = static_cast<float>(P_double);
 }
 
-volatile int32_t d_d1_converted_ms_ = 0;
+// ---------------------------------------------------------------------------
+// Conversion pipeline (ADR-0039).
+//
+// Runs entirely in main-loop context with direct SPI, the way readAdc() always
+// did.  It used to start each cycle's D2 -> D1 pair from the TIM17 CC1 interrupt
+// at ~8 ms into a 50 ms period.  Two OSR-4096 conversions take ~19.4 ms back to
+// back, which a 20 ms period cannot hold, and the queued commands waited behind
+// the whole of ProcessRocketEvents before they reached the bus.
+//
+// Now each readSample() that collects a pressure immediately starts the NEXT
+// conversion, so one D1 (9.7 ms) runs while the rest of the cycle is processed
+// and is ready long before the next tick.  Temperature (D2) is converted once
+// every kD2EveryN cycles in place of a D1: that cycle's readSample() starts D2,
+// ServiceConversions() (polled every main-loop spin) collects it and starts D1,
+// and the pressure arrives a cycle late.  So at 50 Hz pressure is fresh on 9 of
+// every 10 cycles (45 Hz) and temperature on 1 (5 Hz); both stay at OSR-4096,
+// the noise every flight in the corpus was recorded at.
+// ---------------------------------------------------------------------------
+static constexpr uint32_t kConvReadyTicks = 9700u;   // OSR-4096 max 9.04 ms + margin, TIM2 @ 1 MHz
+
+bool MS5611::issueConversion(bool temperature) {
+	Spi2Bus().drain();   // never interleave with a queued transaction
+	const bool ok = temperature ? startConversionD2() : startConversionD1();
+	m_conv_start_tim2_ = TIM2->CNT;
+	m_state = ok ? (temperature ? State::D2Converting : State::D1Converting) : State::Idle;
+	return ok;
+}
+
+bool MS5611::conversionReady() const {
+	return (TIM2->CNT - m_conv_start_tim2_) >= kConvReadyTicks;
+}
+
+void MS5611::SetD1Converted() {
+	// ServiceConversions: D2 done -> read it and start D1.  Called every
+	// main-loop spin (Factory::ServiceBus) and once per tick.
+	if (!m_status.initialized || m_state != State::D2Converting || !conversionReady())
+		return;
+	Spi2Bus().drain();
+	uint32_t d2 = 0;
+	if (readAdc(d2) && d2 != 0u) {
+		m_D2 = d2;
+		m_have_d2_ = true;
+	}
+	issueConversion(false);
+}
+
 bool MS5611::readSample(BaroSample &out) {
 	if (!m_status.initialized)
 		return false;
 
-	if (m_state == State::D1Converted) {
-		d1_converted_ms_ = TIM2->CNT;
-		d_d1_converted_ms_ = d1_converted_ms_;
+	switch (m_state) {
+	case State::Idle:
+		// First call after init, or after a failed command: start over with a
+		// temperature so the first pressure is compensated with a real D2.
+		issueConversion(!m_have_d2_);
+		return false;
+	case State::D2Converting:
+		SetD1Converted();      // collect D2 if it is ready, start D1
+		return false;
+	case State::D1Converting:
+		if (!conversionReady())
+			return false;      // No new sample yet
+		break;
+	default:
+		break;
+	}
 
-		// Flush any baro transactions the timer ISR queued (the D2 read and the
-		// D1 conversion-start) so m_d2_rx_ is populated before we use it.  This
-		// runs in main-loop context; the direct D1 read below is therefore the
-		// only bus access in flight.
-		Spi2Bus().drain();
+	Spi2Bus().drain();
+	uint32_t d1 = 0;
+	const bool read_ok = readAdc(d1);
+	// Start the next conversion before any of the math, so it runs while the
+	// rest of this cycle is processed.  0 from the ADC means it was read before
+	// a conversion finished (datasheet); count it as no sample.
+	const bool want_temperature = !m_have_d2_ || (++m_cycles_since_d2_ >= kD2EveryN);
+	if (want_temperature)
+		m_cycles_since_d2_ = 0;
+	issueConversion(want_temperature);
+	if (!read_ok || d1 == 0u || !m_have_d2_)
+		return false;
+	m_D1 = d1;
 
-		// Assemble the D2 (temperature) word read by the queued transaction.
-		m_D2 = (static_cast<uint32_t>(m_d2_rx_[0]) << 16)
-		     | (static_cast<uint32_t>(m_d2_rx_[1]) << 8)
-		     |  static_cast<uint32_t>(m_d2_rx_[2]);
+	float p_pa = 0.0f;
+	float t_c = 0.0f;
+	computeCompensated(m_D1, m_D2, p_pa, t_c);
 
-		if (!readAdc(m_D1))
-			return false;
+	out.timestamp_ms = HAL_GetTick();
+	out.pressure_pa = p_pa;
+	out.temperature_c = t_c;
 
-		// Now we have a full D1 + D2 pair
-		float p_pa = 0.0f;
-		float t_c = 0.0f;
-		computeCompensated(m_D1, m_D2, p_pa, t_c);
+	// Pressure conditioning: MEDIAN, then IIR (ADR-0032).  Both act on the
+	// compensated pressure before the altitude conversion, so altitude_m_msl
+	// and altitude_m_agl are conditioned consistently.  out.pressure_pa above
+	// stays the UNfiltered compensated value, so the raw reading is still
+	// observable.
+	//
+	// The median runs FIRST because it is the only one of the two that can
+	// actually remove an outlier: a single-sample spike is DISCARDED here.
+	// Left to the IIR alone the same spike was merely attenuated (a 165 m
+	// transient to ~41 m after one step, ~10 m after two, < 1 m after four) and
+	// smeared across ~4 samples — which is what made single-sample sensor
+	// spikes look like multi-sample events in the archive, and forced every
+	// downstream rejector wider than the physics required.
+	//
+	// The IIR still runs, on the now outlier-free stream, doing the job it is
+	// actually for: Gaussian noise.  On first valid sample it is seeded
+	// directly so there is no step transient at startup.
+const float p_med = m_pressure_median_.push(p_pa);
 
-		out.timestamp_ms = HAL_GetTick();
-		out.pressure_pa = p_pa;
-		out.temperature_c = t_c;
+	if (!m_iir_initialized_) {
+		m_iir_pressure_pa_ = p_med;
+		m_iir_initialized_ = true;
+	} else {
+		m_iir_pressure_pa_ += (p_med - m_iir_pressure_pa_) * (1.0f / kIirCoeff);
+	}
+	const float p_filt = m_iir_pressure_pa_;
 
-		// Pressure conditioning: MEDIAN, then IIR (ADR-0032).  Both act on the
-		// compensated pressure before the altitude conversion, so altitude_m_msl
-		// and altitude_m_agl are conditioned consistently.  out.pressure_pa above
-		// stays the UNfiltered compensated value, so the raw reading is still
-		// observable.
-		//
-		// The median runs FIRST because it is the only one of the two that can
-		// actually remove an outlier: a single-sample spike is DISCARDED here.
-		// Left to the IIR alone the same spike was merely attenuated (a 165 m
-		// transient to ~41 m after one step, ~10 m after two, < 1 m after four) and
-		// smeared across ~4 samples — which is what made single-sample sensor
-		// spikes look like multi-sample events in the archive, and forced every
-		// downstream rejector wider than the physics required.
-		//
-		// The IIR still runs, on the now outlier-free stream, doing the job it is
-		// actually for: Gaussian noise.  On first valid sample it is seeded
-		// directly so there is no step transient at startup.
-		const float p_med = m_pressure_median_.push(p_pa);
-
-		if (!m_iir_initialized_) {
-			m_iir_pressure_pa_ = p_med;
-			m_iir_initialized_ = true;
-		} else {
-			m_iir_pressure_pa_ += (p_med - m_iir_pressure_pa_) * (1.0f / kIirCoeff);
-		}
-		const float p_filt = m_iir_pressure_pa_;
-
-		out.altitude_m_msl = 44330.0f * (1.0f - std::pow(p_filt / 101325.0f, 0.19029495f));
-		out.altitude_m_agl = 44330.0f * (1.0f - std::pow(p_filt / m_ground_pressure_pa, 0.19029495f));
-		out.valid = std::isfinite(out.altitude_m_msl) && std::isfinite(out.altitude_m_agl);
-		velocity_estimator_.addSample(out.altitude_m_agl, out.timestamp_ms);
-		velocity_estimator_.velocity(out.velocity);
+	out.altitude_m_msl = 44330.0f * (1.0f - std::pow(p_filt / 101325.0f, 0.19029495f));
+	out.altitude_m_agl = 44330.0f * (1.0f - std::pow(p_filt / m_ground_pressure_pa, 0.19029495f));
+	out.valid = std::isfinite(out.altitude_m_msl) && std::isfinite(out.altitude_m_agl);
+	velocity_estimator_.addSample(out.altitude_m_agl, out.timestamp_ms);
+	velocity_estimator_.velocity(out.velocity);
 
         if (out.valid) {
-		m_last = out;
-		m_status.data_valid = out.valid;
-		m_status.data_fresh = out.valid;
-		m_status.last_update_ms = out.timestamp_ms;
-		m_status.health = SensorHealth::Ok;
+	m_last = out;
+	m_status.data_valid = out.valid;
+	m_status.data_fresh = out.valid;
+	m_status.last_update_ms = out.timestamp_ms;
+	m_status.health = SensorHealth::Ok;
         } else {
             m_status.health = SensorHealth::Warning;
         }
 
-		m_state = State::Idle;
-		RearmCC1ForD2();
-
-		return out.valid;
-	}
-	return false;       // No new sample yet
+	return out.valid;
 }
 
+
 bool MS5611::readSampleBlocking(BaroSample &out) {
-	// Synchronous path used during init() only (before timers/ISRs are live),
-	// so direct SpiDevice access is safe here.  Mirror the D2 word into m_d2_rx_
-	// because readSample() now reassembles m_D2 from that buffer (the live path
-	// fills it via a queued transaction).
+	// Synchronous path used during init() only: one D2 and one D1, blocking.
 	startConversionD2();
 	HAL_Delay(10);
-	readAdc(m_D2);
-	m_d2_rx_[0] = static_cast<uint8_t>((m_D2 >> 16) & 0xFF);
-	m_d2_rx_[1] = static_cast<uint8_t>((m_D2 >> 8) & 0xFF);
-	m_d2_rx_[2] = static_cast<uint8_t>(m_D2 & 0xFF);
+	uint32_t d2 = 0;
+	if (readAdc(d2) && d2 != 0u) {
+		m_D2 = d2;
+		m_have_d2_ = true;
+	}
 	startConversionD1();
+	m_conv_start_tim2_ = TIM2->CNT;
 	HAL_Delay(10);
-	m_state = State::D1Converted;
+	m_state = State::D1Converting;
 	return readSample(out);
 }
 
@@ -271,89 +325,11 @@ bool MS5611::zeroAglReference(float alpha) {
 	return true;
 }
 
-void MS5611::RearmCC1ForD2() {
-    const uint32_t arr = __HAL_TIM_GET_AUTORELOAD(htim17_);
-    const uint32_t ccr_d2 = (arr * MS5611_D2_START_NUM) / MS5611_D2_START_DEN;
-	__HAL_TIM_SET_COMPARE(htim17_, TIM_CHANNEL_1, ccr_d2);
-	__HAL_TIM_ENABLE_IT(htim17_, TIM_IT_CC1);
-}
-
-/*---------------------------------------------------------------------------
- * OCCallback  (CC1 fires once per 50 ms period, at MS5611_D2_START ≈ 8 ms)
- *--------------------------------------------------------------------------*/
-volatile int32_t d_d2_converting_ms_ = 0;
-volatile int32_t d_d1_converting_ms_ = 0;
-// OCCallback runs in the TIM17 CC interrupt.  It MUST NOT touch the SPI
-// peripheral directly (that is what corrupted the shared SPI2 bus when flash
-// logging ran concurrently in the main loop).  Instead it enqueues SpiBus
-// transactions; the main-loop drain executes them.  issue_ts captures the real
-// instant each conversion command goes out, so SetD1Converted() measures the
-// 9.12 ms D1 conversion from actual issue time, not from enqueue time.
+// The TIM17 CC1 kick is retired (see the pipeline note above).  The interrupt
+// is left disabled, so this is never called; it stays so the CubeMX-generated
+// callback chain in main.c links unchanged.
 void MS5611::OCCallback() {
-	// Cadence kick only: at the CC1 instant (~8 ms into the period) queue the
-	// D2 conversion-start.  Everything after this — the D2 read, the D1
-	// conversion-start, and the D1 read — is sequenced by ServiceConversions()
-	// (called SetD1Converted) in main-loop context, gated on the ACTUAL
-	// conversion-elapsed time so a busy main loop can never trigger a read
-	// before the MS5611 has finished converting.  No SPI is issued here.
-	if (m_state == State::Idle) {
-		m_d2_conv_started_ = false;
-		SpiBus::Txn d2{};
-		d2.hspi = hspi_; d2.cs_port = cs_port_; d2.cs_pin = cs_pin_;
-		d2.mode = SpiBus::Mode::Write;
-		d2.tx = &m_cmd_conv_d2_; d2.tx_len = 1;
-		d2.issue_ts = &d2_converting_ms_;     // real D2 conversion start time
-		d2.done     = &m_d2_conv_started_;
-		Spi2Bus().enqueue(d2);
-		m_state = State::D2Converting;
-	}
-	// CC1 is a one-shot per cycle; disable until RearmCC1ForD2() re-arms it
-	// after the sample is consumed in readSample().
 	__HAL_TIM_DISABLE_IT(htim17_, TIM_IT_CC1);
 }
 
-// Conversion service — runs in main-loop context (called continuously from the
-// super-loop and once per ProcessRocketEvents tick).  MS5611 OSR-4096 max
-// conversion time is 9.04 ms ≈ 9040 TIM2 ticks @ 1 MHz; we wait 9700 (~660 µs
-// margin) measured from the ACTUAL command-issue timestamp captured by SpiBus.
-//
-// State flow (each transition only fires once the prior conversion is proven
-// complete, so deferred bus execution cannot cause an early read):
-//   D2Converting → (D2 done) → queue D2 read + D1 conversion-start → D1Converting
-//   D1Converting → (D1 done) → D1Converted   (readSample() then reads D1)
-void MS5611::SetD1Converted() {
-    constexpr uint32_t D2_READY_TICKS = 9700u;
-    constexpr uint32_t D1_READY_TICKS = 9700u;
-
-    if (m_state == State::D2Converting) {
-        if (m_d2_conv_started_ && (TIM2->CNT - d2_converting_ms_) >= D2_READY_TICKS) {
-            // D2 (temperature) conversion complete: queue its read, then start
-            // the D1 (pressure) conversion.  Executed in order by the drain.
-            m_d2_read_done_    = false;
-            m_d1_conv_started_ = false;
-
-            SpiBus::Txn rd{};
-            rd.hspi = hspi_; rd.cs_port = cs_port_; rd.cs_pin = cs_pin_;
-            rd.mode = SpiBus::Mode::WriteThenRead;
-            rd.tx = &m_cmd_adc_read_; rd.tx_len = 1;
-            rd.rx = m_d2_rx_; rd.rx_len = 3;
-            rd.done = &m_d2_read_done_;
-            Spi2Bus().enqueue(rd);
-
-            SpiBus::Txn d1{};
-            d1.hspi = hspi_; d1.cs_port = cs_port_; d1.cs_pin = cs_pin_;
-            d1.mode = SpiBus::Mode::Write;
-            d1.tx = &m_cmd_conv_d1_; d1.tx_len = 1;
-            d1.issue_ts = &d1_converting_ms_;   // real D1 conversion start time
-            d1.done     = &m_d1_conv_started_;
-            Spi2Bus().enqueue(d1);
-
-            m_state = State::D1Converting;
-        }
-    } else if (m_state == State::D1Converting) {
-        if (m_d1_conv_started_ && (TIM2->CNT - d1_converting_ms_) >= D1_READY_TICKS) {
-            m_state = State::D1Converted;
-        }
-    }
-}
 }

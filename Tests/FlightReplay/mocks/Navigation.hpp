@@ -31,6 +31,7 @@ public:
     const NavSolution& getFused()   const { return m_solution; }
     const BaroSample&  getRawBaro() const { return m_raw_baro; }
     const GpsSample&   getRawGps()  const { return m_raw_gps; }   // #13
+    MagSample          getMag()     const { return {}; }          // ADR-0039: no magnetometer here
     void  setPhase(FlightStates /*state*/) {}
     float getMaxAltitude()          const { return m_max_altitude_agl_m; }
     bool  baroAglReferenceReady()   const { return m_baro_ref_ready; }

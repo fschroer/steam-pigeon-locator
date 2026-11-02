@@ -17,9 +17,6 @@ extern ADC_HandleTypeDef hadc;
 extern TIM_HandleTypeDef htim17;
 
 namespace RocketNav {
-	extern volatile uint32_t d_d2_converting_ms_;
-	extern volatile uint32_t d_d1_converting_ms_;
-	extern volatile uint32_t d_d1_converted_ms_;
 }
 
 #define SWO_SPEED 2000000UL    // 2 MHz — must match CubeIDE debug config exactly
@@ -129,7 +126,4 @@ extern "C" void RocketFactory_ProcessUART2Char(uint8_t uart_char) {
 extern "C" void RocketFactory_MS5611OCCallback() {
     factory.MS5611OCCallback();
 
-	ITM_Trace::send(2, (uint32_t)RocketNav::d_d2_converting_ms_);
-	ITM_Trace::send(3, (uint32_t)RocketNav::d_d1_converting_ms_);
-	ITM_Trace::send(4, (uint32_t)RocketNav::d_d1_converted_ms_);
 }

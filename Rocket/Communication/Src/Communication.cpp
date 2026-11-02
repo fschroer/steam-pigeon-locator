@@ -58,7 +58,27 @@ void Communication::SendGenericPacket(const uint8_t *data, size_t len) {
 //  Pre-launch / telemetry packets
 // ============================================================================
 
+// Factory's 1 Hz beacon.  While the background full-record transfer is in a
+// cycle it sends this frame itself, once per burst, so a frame here can never
+// land inside a burst or on top of the receiver's forward window.
 void Communication::SendPreLaunchData(bool armed, uint8_t pad_alert) {
+	periodic_kind_ = PeriodicKind::PreLaunch;
+	periodic_armed_ = armed;
+	periodic_pad_alert_ = pad_alert;
+	if (full_.HoldsPeriodic())
+		return;
+	SendPreLaunchDataNow(armed, pad_alert);
+}
+
+void Communication::SendTelemetryData(bool armed) {
+	periodic_kind_ = PeriodicKind::Telemetry;
+	periodic_armed_ = armed;
+	if (full_.HoldsPeriodic())
+		return;
+	SendTelemetryDataNow(armed);
+}
+
+void Communication::SendPreLaunchDataNow(bool armed, uint8_t pad_alert) {
 	PreLaunchData msg;
 	// ADR-0005: telemetry is raw-primary (no getFused()). Position from raw GPS,
 	// AGL from raw baro, accel/rates from raw IMU.
@@ -115,10 +135,13 @@ void Communication::SendPreLaunchData(bool armed, uint8_t pad_alert) {
 	msg.packet_header.crc = 0;
 	msg.packet_header.crc = ComputeMessageCrc(msg);
 	RgbLed(RgbColor::Blue); // Blink LoRa transmit LED for visual validation
+	radio_busy_ = true;     // so nothing else starts until TxDone
+	radio_tx_start_ms_ = HAL_GetTick();
+	full_.OnPeriodicSent(); // the receiver's forward window opens after this frame
 	radio_->Send(reinterpret_cast<uint8_t*>(&msg), sizeof(PreLaunchData));
 }
 
-void Communication::SendTelemetryData(bool armed) {
+void Communication::SendTelemetryDataNow(bool armed) {
 	TelemetryData msg;
 	// ADR-0005: raw-primary telemetry. Raw GPS position + raw-baro AGL/velocity;
 	// orientation from the NFR-9 strapdown (q_bn), not the retired EKF.
@@ -142,7 +165,10 @@ void Communication::SendTelemetryData(bool armed) {
 	msg.deployment_ch2_stats = flight_.GetDeploymentStats(2) | ((status & 0x02) << (bit_shift_continuity - 1));
 	msg.deployment_ch3_stats = flight_.GetDeploymentStats(3) | ((status & 0x04) << (bit_shift_continuity - 2));
 	msg.deployment_ch4_stats = flight_.GetDeploymentStats(4) | ((status & 0x08) << (bit_shift_continuity - 3));
-	msg.physical_deployment_stats = flight_.GetPhysicalDeploymentStats();
+	// Bit 7 is recovery status, not deployment: picked up after landing, one of
+	// the app's triggers for a background full-record transfer.
+	msg.physical_deployment_stats = static_cast<uint8_t>(flight_.GetPhysicalDeploymentStats()
+			| (pickup_.picked_up() ? kTelemetryPickedUpBit : 0u));
 	msg.agl = baro_sample.altitude_m_agl;
 	// Raw NED velocity: GPS horizontal + raw-baro vertical (−d(AGL)/dt = +down).
 	msg.vel_ned_mps = Vec3f{ gps_sample.vel_n_mps, gps_sample.vel_e_mps, -baro_sample.velocity };
@@ -169,6 +195,9 @@ void Communication::SendTelemetryData(bool armed) {
 
 	msg.packet_header.crc = ComputeMessageCrc(msg);
 	RgbLed(RgbColor::Blue); // Blink LoRa transmit LED for visual validation
+	radio_busy_ = true;
+	radio_tx_start_ms_ = HAL_GetTick();
+	full_.OnPeriodicSent();
 	radio_->Send(reinterpret_cast<uint8_t*>(&msg), sizeof(TelemetryData));
 }
 
@@ -438,6 +467,21 @@ void Communication::OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
 			break;
 		}
 
+		case MsgType::FullRecordRequest:
+			// Gated in Process() (disarmed, on the ground), where the sender runs.
+			if (!pending_full_req_) {
+				std::memcpy(&pending_full_req_msg_, payload, sizeof(FullRecordRequest));
+				pending_full_req_ = true;
+			}
+			break;
+
+		case MsgType::FullRecordAck:
+			if (!pending_full_ack_) {
+				std::memcpy(&pending_full_ack_msg_, payload, sizeof(FullRecordAck));
+				pending_full_ack_ = true;
+			}
+			break;
+
 		case MsgType::FlightDataAck: {
 			FlightDataAck ack { };
 			std::memcpy(&ack, payload, sizeof(ack));
@@ -552,10 +596,9 @@ void Communication::BeginTransfer(uint8_t record_id) {
 	// (≈102 s) — reported to the app as a complete transfer.
 	const size_t spp = FlightProfileCodec::MaxSamplesPerPacket();
 
-	// The last sample's timestamp scales event times to sample indices.
+	// The archive must be readable before planning; the last sample proves it.
 	if (!FetchChunk(sample_count - 1u) || chunk_buf_count_ == 0)
 		return;  // archive read failed — abort
-	const uint32_t last_ts_ms = chunk_buf_[0].timestamp_ms;
 
 	TransferPlan::Events ev {};
 	archive_.ReadEvent(record_id, FlightArchive::Statistic::ApogeeTimestampMs,
@@ -565,7 +608,20 @@ void Communication::BeginTransfer(uint8_t record_id) {
 	archive_.ReadEvent(record_id, FlightArchive::Statistic::LandingTimestampMs,
 			ev.landing_ms, ev.has_landing);
 
-	plan_ = TransferPlan::Build(sample_count, last_ts_ms, ev,
+	// ARCHIVE_VERSION 8 records are variable-rate (ADR-0039), so event times map
+	// to sample indices through the samples' own timestamps: one single-sample
+	// archive read per binary-search probe (~14 per window edge, ~90 in all,
+	// ~15 ms at SPI2 6 MHz), once per transfer, on the ground.  A read that
+	// fails returns 0xFFFFFFFF, which steers the search to the earlier half, so
+	// the worst a flash fault does is widen a full-rate window.
+	auto ts_at = [this](uint32_t i) -> uint32_t {
+		FlightArchive::FlightSample one{};
+		uint32_t got = 0u;
+		if (!archive_.ReadFlightDataRange(record_id_, i, &one, 1u, got) || got == 0u)
+			return 0xFFFFFFFFu;
+		return one.timestamp_ms;
+	};
+	plan_ = TransferPlan::BuildFromTimestamps(sample_count, ts_at, ev,
 			static_cast<uint32_t>(kMaxPackets) * spp);
 	total_samples_ = plan_.total;
 	packet_count_ = static_cast<uint16_t>((total_samples_ + spp - 1) / spp);
@@ -831,7 +887,8 @@ void Communication::Process(DeviceState &device_state) {
 
 	// Send deferred VersionInfo response.  Must run before the transfer guard
 	// so it fires even when no flight-data transfer is active.
-	if (version_info_pending_) {
+	if (version_info_pending_ && !radio_busy_
+			&& HAL_GetTick() - last_radio_tx_end_ms_ >= kMinRxWindowMs) {
 		version_info_pending_ = false;
 		VersionInfoMessage msg { };
 		msg.packet_header.system_id = system_id;
@@ -841,8 +898,14 @@ void Communication::Process(DeviceState &device_state) {
 		std::memcpy(msg.locator_version, GIT_VERSION,
 				std::min(sizeof(msg.locator_version), sizeof(GIT_VERSION)));
 		msg.packet_header.crc = ComputeMessageCrc(msg);
+		// Busy until TxDone, so the background transfer's next burst waits for
+		// this response instead of starting on top of it.
+		radio_busy_ = true;
+		radio_tx_start_ms_ = HAL_GetTick();
 		radio_->Send(reinterpret_cast<uint8_t*>(&msg), sizeof(msg));
 	}
+
+	ServiceFullRecordTransfer(device_state);
 
 	// Send the FlightEvents summary for the record being transferred.  Runs
 	// before the transfer guard (and before the data burst) so it lands during
@@ -940,6 +1003,76 @@ void Communication::Process(DeviceState &device_state) {
 }
 
 // ============================================================================
+//  Background full-record transfer (ADR "The radio download becomes the
+//  primary data path", #60)
+// ============================================================================
+
+void Communication::ServiceFullRecordTransfer(DeviceState device_state) {
+	const uint32_t now = HAL_GetTick();
+	const FlightStates fs = flight_.GetFlightState();
+	const Vec3f a = nav_.getRawImu().accel_selected_mps2;
+	pickup_.Update(now, fs == FlightStates::Landed, a.x, a.y, a.z);
+
+	// Disarmed on the ground: run.  Armed, or off the ground: forget it, because
+	// a flight may rewrite the slot.  Any other ground mode (config, deployment
+	// test, the quick-look transfer) owns the link for a while: hold.
+	const bool on_ground = fs == FlightStates::WaitingLaunch || fs == FlightStates::Landed;
+	FullRecordSender::Gate gate = FullRecordSender::Gate::Pause;
+	if (device_state == DeviceState::Armed || !on_ground)
+		gate = FullRecordSender::Gate::Abort;
+	else if (device_state == DeviceState::Disarmed)
+		gate = FullRecordSender::Gate::Run;
+
+	// A request in any other state is refused: dropped, and the app repeats it.
+	if (pending_full_req_) {
+		if (gate == FullRecordSender::Gate::Run)
+			full_.OnRequest(pending_full_req_msg_.record, pending_full_req_msg_.page);
+		pending_full_req_ = false;
+	}
+	if (pending_full_ack_) {
+		if (gate == FullRecordSender::Gate::Run)
+			full_.OnAck(pending_full_ack_msg_);
+		pending_full_ack_ = false;
+	}
+	full_.Process(now, gate);
+}
+
+bool Communication::FullIo::SampleCount(uint8_t record, uint32_t &n) {
+	return c_.archive_.GetFlightSampleCount(record, n);
+}
+
+bool Communication::FullIo::Read(uint8_t record, uint32_t first, FlightArchive::FlightSample *out, uint32_t n,
+		uint32_t &got) {
+	c_.chunk_buf_count_ = 0;   // out is chunk_buf_: the quick-look cache is gone
+	return c_.archive_.ReadFlightDataRange(record, first, out, n, got);
+}
+
+bool Communication::FullIo::RadioIdle(uint32_t now_ms) {
+	if (c_.radio_busy_ && now_ms - c_.radio_tx_start_ms_ > kRadioBusyWatchdogMs) {
+		c_.radio_busy_ = false;                 // TxDone lost: see kRadioBusyWatchdogMs
+		c_.last_radio_tx_end_ms_ = now_ms;
+	}
+	return !c_.radio_busy_ && now_ms - c_.last_radio_tx_end_ms_ >= kMinRxWindowMs;
+}
+
+void Communication::FullIo::Send(FullRecordPacket &pkt, size_t len) {
+	pkt.h.packet_header.system_id = system_id;
+	pkt.h.packet_header.msg_count = c_.next_msg_count_++;
+	pkt.h.packet_header.crc = 0;
+	pkt.h.packet_header.crc = c_.ComputeMessageCrcPartial(reinterpret_cast<const uint8_t*>(&pkt), len);
+	c_.radio_busy_ = true;
+	c_.radio_tx_start_ms_ = HAL_GetTick();
+	c_.radio_->Send(reinterpret_cast<const uint8_t*>(&pkt), len);
+}
+
+void Communication::FullIo::SendPeriodic() {
+	if (c_.periodic_kind_ == PeriodicKind::Telemetry)
+		c_.SendTelemetryDataNow(c_.periodic_armed_);
+	else
+		c_.SendPreLaunchDataNow(c_.periodic_armed_, c_.periodic_pad_alert_);
+}
+
+// ============================================================================
 //  Frame parser
 // ============================================================================
 
@@ -966,6 +1099,16 @@ ParseResult Communication::ParseLoraFrame(const uint8_t *data, std::size_t len, 
 		return decode_message<MsgType::FlightDataRequest>(data, len, out);
 	case MsgType::DeploymentTestRequest:
 		return decode_message<MsgType::DeploymentTestRequest>(data, len, out);
+	case MsgType::FullRecordRequest:
+		if (len != sizeof(FullRecordRequest))
+			return ParseResult::LengthMismatch;
+		out.type = hdr.msg_type;
+		return ParseResult::Ok;
+	case MsgType::FullRecordAck:
+		if (len != sizeof(FullRecordAck))
+			return ParseResult::LengthMismatch;
+		out.type = hdr.msg_type;
+		return ParseResult::Ok;
 	case MsgType::PadAlertSnoozeRequest:
 		// Payload read directly from the frame in the handler (target id +
 		// minutes), so no ParsedMessage member is needed — only the length has

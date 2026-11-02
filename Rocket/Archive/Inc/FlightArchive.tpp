@@ -15,7 +15,7 @@ namespace FlightArchive
     template<typename TSample, typename TStatTraits, size_t ChunkPayloadBytes>
     bool Archive<TSample, TStatTraits, ChunkPayloadBytes>::Init()
     {
-        if (m_cfg.recordCount == 0u || m_cfg.minutesPerRecord == 0u || m_cfg.statSlotCount == 0u)
+        if (m_cfg.recordCount == 0u || m_cfg.samplesPerRecord == 0u || m_cfg.statSlotCount == 0u)
         {
             return false;
         }
@@ -52,7 +52,7 @@ namespace FlightArchive
     Archive<TSample, TStatTraits, ChunkPayloadBytes>::GetGeometry() const
     {
         Geometry g{};
-        g.samplesPerRecord = static_cast<uint32_t>(m_cfg.minutesPerRecord) * 60u * SAMPLES_PER_SEC;
+        g.samplesPerRecord = m_cfg.samplesPerRecord;
 
         g.validMarkerOffset = AlignUp(sizeof(RecordHeader), 4u);
         g.validMarkerSize = AlignUp(sizeof(ValidMarker), 4u);

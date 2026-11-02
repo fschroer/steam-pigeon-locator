@@ -68,7 +68,15 @@ enum class MsgType : uint8_t {
 	LocatorSearchResult = 24,
 	// Reserved for the same reason as 20/21 and 23/24 above.  Stops a channel
 	// survey in progress; app<->receiver only, and never sent or parsed here.
-	ChannelSurveyCancelRequest = 25
+	ChannelSurveyCancelRequest = 25,
+	// Paged, bit-exact full-record transfer (ADR "The radio download becomes the
+	// primary data path").  New types rather than new fields on FlightData*, so
+	// the quick-look transfer above stays byte-identical for every app and
+	// receiver build that already speaks it.
+	FullRecordRequest = 26, // App→locator: send page N of a record (0xFFFF stops).
+	FullRecordData = 27,    // Locator→app: one packet of a page, FullRecordCodec payload.
+	FullRecordParity = 28,  // Locator→app: XOR of up to kParityGroupSize data packets.
+	FullRecordAck = 29      // App→locator: bitmap of the page's packets received.
 };
 
 // Flight event summary indices.  One entry per archived event timestamp; the
@@ -260,6 +268,79 @@ struct FlightDataPacket {
 	uint8_t payload[kPayloadSize]; // Compressed payload bytes
 };
 
+// ── Paged full-record transfer (ADR "The radio download becomes the primary
+// data path") ────────────────────────────────────────────────────────────────
+//
+// A record is cut into fixed pages of FullRecordCodec::kSamplesPerPage (512)
+// samples.  A page is up to 256 packets, so one FullRecordAck bitmap covers it.
+// EVERY packet is self-describing: it names its record (by CRC), page, first
+// sample and sample count, and is coded from the two flash samples before it.
+// So the app can take packets in any order (each decodes once the two samples
+// before it are in hand), resume a page after any interruption, and drop a
+// packet that belongs to some other record.
+//
+// record_crc is the IEEE CRC-32 of the record's raw FlightSample bytes in flash
+// order, and the record's identity on the wire: a slot reused by a new flight
+// gets a new CRC, so a resumed transfer can never splice two flights together.
+// The app verifies it over the reassembled record before calling it complete.
+//
+// The locator only serves this while disarmed and in WaitingLaunch or Landed,
+// and it sends its normal periodic frame between bursts, so every other app
+// function keeps working while a transfer runs in the background.
+struct FullRecordRequest {          // app→locator, MsgType::FullRecordRequest
+	PacketHeader packet_header;
+	uint32_t target_locator_id;     // ADR-0020, at the fixed offset every command uses
+	uint16_t page;                  // kFullRecordStopPage stops a transfer
+	uint8_t  record;                // archive slot
+	uint8_t  reserved;              // 0
+};
+static constexpr uint16_t kFullRecordStopPage = 0xFFFFu;
+
+// Data and parity share one layout.  A data packet carries packet_index,
+// first_in_page, sample_count and payload_len for itself, and parity_mask = 0.
+// A parity packet carries the group's first packet index, the member mask
+// (bit j ⇒ packet_index + j is included), and the XOR of every member's
+// first_in_page, sample_count, payload_len and zero-padded payload, so the one
+// missing member is rebuilt whole.
+//
+// packet_count = 0 is a marker: total_samples = 0 (and record_crc = 0) means the
+// record is empty or missing; otherwise the requested page is past the end.
+struct FullRecordPacketHeader {
+	PacketHeader packet_header;
+	uint32_t record_crc;
+	uint32_t total_samples;         // samples in the whole record
+	uint16_t page;
+	uint16_t packet_count;          // packets in this page, 1..256 (0 = marker)
+	uint8_t  packet_index;          // data: 0..255; parity: the group's first index
+	uint8_t  parity_mask;           // data: 0; parity: members included
+	uint16_t first_in_page;         // first sample, as an offset into the page
+	uint8_t  sample_count;          // samples in the payload
+	uint8_t  payload_len;           // payload bytes (the frame is header + this)
+	uint8_t  record;                // archive slot, for display; the CRC is the identity
+};
+constexpr size_t kFullRecordPayloadSize = kMaxPayloadBytes - sizeof(FullRecordPacketHeader);
+struct FullRecordPacket {
+	FullRecordPacketHeader h;
+	uint8_t payload[kFullRecordPayloadSize];
+};
+
+struct FullRecordAck {              // app→locator, MsgType::FullRecordAck
+	PacketHeader packet_header;
+	uint32_t target_locator_id;
+	uint32_t record_crc;            // must match the page being sent, or it is ignored
+	uint16_t page;
+	uint16_t packet_count;
+	uint8_t  bitmap[32];            // bit (i % 8) of byte (i / 8) ⇒ packet i received
+};
+
+// Recovery status rides in a spare bit of TelemetryData::physical_deployment_stats
+// (bits 0 and 1 are drogue and main detected) rather than in a new field, so the
+// message keeps its size and every parser in the field keeps working.
+// Set once the locator has landed and then been picked up: the accelerometer has
+// left its settled reading, or the board has turned, for a sustained window.  One
+// of the app's three triggers for starting a background transfer.
+static constexpr uint8_t kTelemetryPickedUpBit = 0x80u;
+
 // ── Addressed app→locator commands (ADR-0020, #34) ──────────────────────────
 //
 // The receiver relays these over LoRa, which is a broadcast medium, so without a
@@ -376,5 +457,23 @@ static_assert(sizeof(DeploymentTestCountdownMessage) ==   7, "DeploymentTestCoun
 static_assert(sizeof(FlightDataRequest)              ==  11, "FlightDataRequest size changed");
 static_assert(sizeof(DeploymentTestRequest)          ==  11, "DeploymentTestRequest size changed");
 static_assert(sizeof(PadAlertSnoozeRequest)          ==  11, "PadAlertSnoozeRequest size changed — sync receiver + app");
+static_assert(sizeof(FullRecordRequest)              ==  14, "FullRecordRequest size changed — sync receiver + app + iOS");
+static_assert(sizeof(FullRecordPacketHeader)         ==  25, "FullRecordPacketHeader size changed — sync app + iOS");
+static_assert(kFullRecordPayloadSize                 == 230, "FullRecord payload size changed — re-check FullRecordCodec's worst case");
+static_assert(sizeof(FullRecordPacket)               == 255, "FullRecordPacket size changed (max LoRa frame 255)");
+static_assert(sizeof(FullRecordAck)                  ==  50, "FullRecordAck size changed — sync receiver + app + iOS");
+static_assert(offsetof(FullRecordPacketHeader, record_crc)    ==  6, "FullRecord offsets changed — sync app + iOS");
+static_assert(offsetof(FullRecordPacketHeader, total_samples) == 10, "FullRecord offsets changed — sync app + iOS");
+static_assert(offsetof(FullRecordPacketHeader, page)          == 14, "FullRecord offsets changed — sync app + iOS");
+static_assert(offsetof(FullRecordPacketHeader, packet_count)  == 16, "FullRecord offsets changed — sync app + iOS");
+static_assert(offsetof(FullRecordPacketHeader, packet_index)  == 18, "FullRecord offsets changed — sync app + iOS");
+static_assert(offsetof(FullRecordPacketHeader, parity_mask)   == 19, "FullRecord offsets changed — sync app + iOS");
+static_assert(offsetof(FullRecordPacketHeader, first_in_page) == 20, "FullRecord offsets changed — sync app + iOS");
+static_assert(offsetof(FullRecordPacketHeader, sample_count)  == 22, "FullRecord offsets changed — sync app + iOS");
+static_assert(offsetof(FullRecordPacketHeader, payload_len)   == 23, "FullRecord offsets changed — sync app + iOS");
+static_assert(offsetof(FullRecordPacketHeader, record)        == 24, "FullRecord offsets changed — sync app + iOS");
+static_assert(offsetof(FullRecordAck, record_crc)             == 10, "FullRecordAck offsets changed — sync app + iOS");
+static_assert(offsetof(FullRecordAck, bitmap)                 == 18, "FullRecordAck offsets changed — sync app + iOS");
+static_assert(offsetof(FullRecordRequest, page)               == 10, "FullRecordRequest offsets changed — sync app + iOS");
 
 } // namespace Communication
