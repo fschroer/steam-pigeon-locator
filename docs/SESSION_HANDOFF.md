@@ -2,6 +2,33 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-11-02 (feature) — full-record transfer over the USB cable, step 3 of ADR "The radio download becomes the primary data path" (0040, decision 6c). Android NOT compiled, nothing on hardware
+
+✅ **What changed:**
+- **One transfer, two paths.** The cable carries the radio's own frames, byte for byte. `FullRecordSender` answers on the path the app last spoke on, so a record moves between radio and cable mid-page. On the cable a cycle sweeps the whole page with no parity, 4 packets per loop cycle, then the periodic frame and a 300 ms listen. The radio beacon is left alone meanwhile.
+- **Locator:**
+  - `SerialLink.hpp` (new, header-only): the frame parser for binary mode and the two 1 KB TX buffers.
+  - `Factory`: binary mode is entered by the hello byte 0xA5 at an idle console and left 3 s after the last hello or frame. Each hello is answered with the periodic frame. The UART TX DMA is driven directly (see Traps).
+  - `Communication`: the serial port, the cable's frames (checked like radio frames, address included), and the periodic frame copied to the cable.
+- **Android** (`rocket-flight-manager` `725e74f`; iOS `0d0be34` records it as Android-only for good):
+  - `UsbLocatorLink` opens the CH340 (`usb-serial-for-android`), asks for the USB permission, sends the hello once a second, and tries the console rates from 921,600 down until the locator answers.
+  - `FullRecordHub` routes requests and ACKs down the cable while it is up, and lets the cable's periodic frames pace the transfer.
+  - `SerialFrames.kt` is the cable's framer. Its frames lack the receiver's appended metadata, so the BLE framer cannot read them.
+  - Plugging in is a trigger (`Trigger.Cable`): no landing needed, still behind the disarmed gate.
+  - The Flight Profiles status says "over the USB cable".
+- **Tests:**
+  - `Tests/FullRecordSender` 61/0: over the cable, with frame loss, and radio → cable → radio;
+  - `Tests/SerialLink` 15/0;
+  - Android JVM 30/0. The cable's request and ACK are checked against bytes from a host build of the firmware structs.
+- **Not done:**
+  - bench everything;
+  - serve the flight list over the cable, so a cable works with no receiver;
+  - an Android build.
+- **Traps:**
+  - **Do not switch the console TX to `HAL_UART_Transmit_DMA`.** The USART2 handler's LL block clears TC first, so the HAL transfer never completes and the UART handle stays busy for good. That would silence every console write until reset.
+  - Binary mode adds 2.1 KB of RAM (`Factory` 46.8 KB of 64 KB). Check the CubeIDE link map.
+  - The model gives ~18 s for a 5,800-sample record, about half the ADR's estimate. Planning and CRC at 24 samples a cycle are most of it.
+
 ## 2026-11-02 (feature) — background full-record transfer, Android side + Firebase upload — ADR "The radio download becomes the primary data path" (0040). Android NOT compiled, nothing on hardware
 
 ✅ **What changed:**
@@ -31,7 +58,7 @@ Orientation note for resuming work. Detail lives in the linked artifacts; this i
   - an Android build;
   - the foreground paged transfer for a record selected with no background run (the quick-look download is still used);
   - store I/O off the main thread;
-  - USB serial (step 3);
+  - USB serial (step 3, done the same day: see the entry above);
   - iOS (step 4).
 - **Traps:**
   - Nothing outside `data/fullrecord/` has been compiled. Expect a few compile fixes in the ViewModel, Compose and Firebase code.

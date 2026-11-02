@@ -12,7 +12,11 @@
 //     the app's next request resumes it where it stopped;
 //   * Pause holds state, Abort forgets it, and a resumed transfer still
 //     completes bit-exact;
-//   * an empty slot and a page past the end are answered with markers.
+//   * an empty slot and a page past the end are answered with markers;
+//   * over the USB serial path (ADR decision 6c) a record arrives bit-exact,
+//     with byte loss too, sends nothing on the radio but its beacon, and the
+//     transfer moves radio -> serial and serial -> radio mid-record without
+//     starting over.
 // PickupDetector: settle, then a tilt or a walk latches; a bump does not.
 //
 // The airtime model (~410 ms for a 255 B frame) is the measured SF7 figure
@@ -110,6 +114,32 @@ struct FakeIo : frs::Io {
         return true;
     }
     bool RadioIdle(uint32_t t) override { return !busy && t >= tx_end + 20u; }
+
+    // The serial path: 921,600 baud is 92 bytes per ms, behind two 1 KB buffers.
+    bool serial = false;                 // cable in and the console in binary mode
+    uint64_t ser_free_us = 0;            // when the line finishes what is queued
+    std::vector<Frame> wire;             // every frame the locator sent on the UART
+    size_t SerialBacklog(uint32_t t) const {
+        const uint64_t now_us = uint64_t(t) * 1000u;
+        return ser_free_us > now_us ? size_t((ser_free_us - now_us) * 92u / 1000u) : 0u;
+    }
+    bool SerialIdle(uint32_t t) override { return serial && SerialBacklog(t) + 255u <= 2048u; }
+    void SerialTx(const uint8_t* p, size_t len, bool periodic) {
+        if (!serial) { printf("  FAIL  UART transmit with no cable at %u\n", now); ++g_fail; return; }
+        const uint64_t start = std::max<uint64_t>(uint64_t(now) * 1000u, ser_free_us);
+        ser_free_us = start + len * 1000u / 92u;
+        wire.push_back({ uint32_t(start / 1000u), uint32_t((ser_free_us + 999u) / 1000u),
+                         std::vector<uint8_t>(p, p + len), periodic });
+    }
+    void SendSerial(FullRecordPacket& pkt, size_t len) override {
+        pkt.h.packet_header.system_id = system_id;
+        SerialTx(reinterpret_cast<const uint8_t*>(&pkt), len, false);
+    }
+    void SendSerialPeriodic() override {
+        uint8_t frame[77] = {};
+        frame[1] = static_cast<uint8_t>(MsgType::TelemetryData);
+        SerialTx(frame, sizeof frame, true);
+    }
     void Transmit(const uint8_t* p, size_t len, bool periodic) {
         if (!RadioIdle(now)) { printf("  FAIL  transmit on a busy radio at %u\n", now); ++g_fail; }
         busy = true;
@@ -125,6 +155,8 @@ struct FakeIo : frs::Io {
         uint8_t frame[77] = {};
         frame[1] = static_cast<uint8_t>(MsgType::TelemetryData);
         Transmit(frame, sizeof frame, true);
+        // Communication copies every radio periodic frame to the UART in binary mode.
+        if (serial && SerialIdle(now)) SerialTx(frame, sizeof frame, true);
     }
 };
 
@@ -285,6 +317,31 @@ struct World {
     std::vector<Up> uplinks;
     uint32_t window_violations = 0, burst_periodic_overlap = 0;
     frs::Gate gate = frs::Gate::Run;
+    // Serial: the app's uplinks go over the cable while app_serial is set.
+    bool app_serial = false;
+    double loss_serial = 0.0;
+    size_t ser_delivered = 0;
+    std::vector<Up> ser_uplinks;
+
+    void Plug()   { io.serial = true; app_serial = true; }
+    void Unplug() { io.serial = false; app_serial = false; ser_uplinks.clear(); sender.OnSerialLost(); }
+
+    void Deliver(const std::vector<uint8_t>& b, frs::Path path) {
+        const auto t = static_cast<MsgType>(b[1]);
+        if (t == MsgType::FullRecordRequest) {
+            FullRecordRequest q; std::memcpy(&q, b.data(), sizeof q);
+            if (gate == frs::Gate::Run) sender.OnRequest(q.record, q.page, path);
+        } else if (t == MsgType::FullRecordAck) {
+            FullRecordAck a; std::memcpy(&a, b.data(), sizeof a);
+            sender.OnAck(a, path);
+        }
+    }
+    void AppUplink(uint32_t at) {
+        std::vector<uint8_t> up;
+        if (!app.Uplink(0x12345678u, up)) return;
+        if (app_serial) ser_uplinks.push_back({ at + 5u, up });
+        else uplinks.push_back({ at + 120u, up });   // receiver window 50..700 ms
+    }
 
     bool Lost(double p) { return std::uniform_real_distribution<double>(0.0, 1.0)(rng) < p; }
 
@@ -295,12 +352,20 @@ struct World {
         for (; delivered < io.air.size() && io.air[delivered].end <= now; ++delivered) {
             const Frame& f = io.air[delivered];
             if (Lost(loss_down)) continue;
-            if (f.periodic) {
-                std::vector<uint8_t> up;
-                if (app.Uplink(0x12345678u, up)) uplinks.push_back({ f.end + 120u, up });   // receiver window 50..700 ms
-            } else {
-                app.Rx(f.bytes);
-            }
+            if (f.periodic) AppUplink(f.end);
+            else app.Rx(f.bytes);
+        }
+        // The same on the cable.
+        for (; ser_delivered < io.wire.size() && io.wire[ser_delivered].end <= now; ++ser_delivered) {
+            const Frame& f = io.wire[ser_delivered];
+            if (!app_serial || Lost(loss_serial)) continue;
+            if (f.periodic) AppUplink(f.end);
+            else app.Rx(f.bytes);
+        }
+        for (size_t i = 0; i < ser_uplinks.size();) {
+            if (ser_uplinks[i].at > now) { ++i; continue; }
+            if (!Lost(loss_serial)) Deliver(ser_uplinks[i].bytes, frs::Path::Serial);
+            ser_uplinks.erase(ser_uplinks.begin() + static_cast<long>(i));
         }
         // Uplinks arrive after their own airtime, if the locator is listening.
         for (size_t i = 0; i < uplinks.size();) {
@@ -309,17 +374,7 @@ struct World {
             const bool locator_tx = std::any_of(io.air.begin(), io.air.end(), [&](const Frame& f) {
                 return f.start < arrive && f.end > uplinks[i].at; });
             if (locator_tx) ++window_violations;
-            else if (!Lost(loss_up)) {
-                const auto& b = uplinks[i].bytes;
-                const auto t = static_cast<MsgType>(b[1]);
-                if (t == MsgType::FullRecordRequest) {
-                    FullRecordRequest q; std::memcpy(&q, b.data(), sizeof q);
-                    if (gate == frs::Gate::Run) sender.OnRequest(q.record, q.page);
-                } else if (t == MsgType::FullRecordAck) {
-                    FullRecordAck a; std::memcpy(&a, b.data(), sizeof a);
-                    sender.OnAck(a);
-                }
-            }
+            else if (!Lost(loss_up)) Deliver(uplinks[i].bytes, frs::Path::Radio);
             uplinks.erase(uplinks.begin() + static_cast<long>(i));
         }
         // Factory's 1 Hz periodic frame, deferred to the sender while it holds it.
@@ -362,11 +417,13 @@ static bool AppMatches(const World& w, const Record& r) {
     return RecordCrc(w.app.got) == w.app.crc;
 }
 
-static uint32_t DataPackets(const World& w) {
+static uint32_t DataPackets(const std::vector<Frame>& frames) {
     uint32_t n = 0;
-    for (const Frame& f : w.io.air) if (!f.periodic && f.bytes[1] == static_cast<uint8_t>(MsgType::FullRecordData)) ++n;
+    for (const Frame& f : frames) if (!f.periodic && f.bytes[1] == static_cast<uint8_t>(MsgType::FullRecordData)) ++n;
     return n;
 }
+static uint32_t DataPackets(const World& w) { return DataPackets(w.io.air); }
+static uint32_t SerialPackets(const World& w) { return DataPackets(w.io.wire); }
 
 // ---- Tests --------------------------------------------------------------------
 
@@ -489,6 +546,72 @@ static void TestRecordChangesUnderneath() {
     delete w;
 }
 
+static void TestSerialClean() {
+    printf("serial: the same 5,800-sample record over the USB cable\n");
+    const Record r = MakeRecord(5800u, 1u);
+    World* w = NewWorld(r);
+    w->Plug();
+    w->RunUntil(3600u * 1000u);
+    CHECK(w->app.complete);
+    CHECK(AppMatches(*w, r));
+    const uint32_t took = w->now;
+    w->RunFor(2000u);
+    CHECK(w->sender.phase() == frs::Phase::Idle);
+    CHECK(w->sender.path() == frs::Path::Serial);
+    CHECK(DataPackets(*w) == 0u);                        // nothing but the beacon on the radio
+    CHECK(w->app.bad_len == 0u);
+    size_t parity = 0, beacons = 0;
+    for (const Frame& f : w->io.wire) if (f.bytes[1] == static_cast<uint8_t>(MsgType::FullRecordParity)) ++parity;
+    for (const Frame& f : w->io.air) if (f.periodic) ++beacons;
+    CHECK(parity == 0u);
+    CHECK(beacons >= took / 1000u - 1u);                 // the 1 Hz beacon was never held
+    printf("  %.1f s, %u data packets, %.1f KB/s of record\n", took / 1000.0, SerialPackets(*w),
+           r.size() * sizeof(FlightSample) / 1024.0 / (took / 1000.0));
+    CHECK(took < 30000u);
+    delete w;
+}
+
+static void TestSerialLossy() {
+    printf("serial with 5 %% of frames lost each way (UART overruns): still bit-exact\n");
+    const Record r = MakeRecord(3000u, 2u);
+    World* w = NewWorld(r);
+    w->Plug();
+    w->loss_serial = 0.05;
+    w->RunUntil(3600u * 1000u);
+    CHECK(w->app.complete);
+    CHECK(AppMatches(*w, r));
+    printf("  %.1f s\n", w->now / 1000.0);
+    delete w;
+}
+
+static void TestPathSwitch() {
+    printf("radio -> cable -> radio mid-record: one transfer, nothing restarted\n");
+    const Record r = MakeRecord(5800u, 8u);
+    World* w = NewWorld(r);
+    w->RunUntil(90000u);                                 // a few pages over the radio
+    const uint32_t radio_first = DataPackets(*w);
+    const uint16_t page_at_plug = w->sender.page();
+    CHECK(radio_first > 0u && !w->app.complete);
+    w->Plug();
+    w->RunUntil(w->now + 1500u);                         // part of a page on the cable
+    CHECK(w->sender.path() == frs::Path::Serial);
+    CHECK(w->sender.page() >= page_at_plug);             // carried on; did not go back to page 0
+    CHECK(SerialPackets(*w) > 0u);
+    const uint32_t radio_at_unplug = DataPackets(*w);
+    w->Unplug();
+    CHECK(w->sender.path() == frs::Path::Radio);
+    CHECK(w->sender.phase() != frs::Phase::Burst);       // waits for the app on the radio
+    w->RunUntil(3600u * 1000u);
+    CHECK(w->app.complete);
+    CHECK(AppMatches(*w, r));
+    // Every packet went once, give or take a burst in flight at each switch.
+    const uint32_t total = DataPackets(*w) + SerialPackets(*w);
+    printf("  radio %u + serial %u data packets (radio-only run: ~735)\n", DataPackets(*w), SerialPackets(*w));
+    CHECK(total < 735u + 2u * frs::Sender::kWindow + 16u);
+    CHECK(DataPackets(*w) > radio_at_unplug);           // and the radio did finish it
+    delete w;
+}
+
 static void TestPickup() {
     printf("PickupDetector\n");
     auto run = [](PickupDetector& d, uint32_t& t, uint32_t ms, bool landed, auto&& accel) {
@@ -553,6 +676,9 @@ int main() {
     TestPauseAndAbort();
     TestMarkers();
     TestRecordChangesUnderneath();
+    TestSerialClean();
+    TestSerialLossy();
+    TestPathSwitch();
     TestPickup();
     printf("\nResults: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

@@ -1,6 +1,6 @@
 # ADR-0040: The radio download becomes the primary data path — full bit-exact records, background transfer and Firebase upload
 
-- **Status:** Proposed. Firmware side implemented and host-tested: the codec 2026-11-01, the paged background transfer, receiver relay and pickup detection 2026-11-02. **Android runs the transfer and uploads to Firebase (2026-11-02)**: its transfer core is JVM-tested against frames from the real C++ sender, but the Android build itself has not been compiled (no SDK where it was written). iOS frames the messages only, and USB serial is not started. Nothing has run on hardware.
+- **Status:** Proposed. Firmware side implemented and host-tested: the codec 2026-11-01, the paged background transfer, receiver relay and pickup detection 2026-11-02. **Android runs the transfer and uploads to Firebase (2026-11-02)**: its transfer core is JVM-tested against frames from the real C++ sender, but the Android build itself has not been compiled (no SDK where it was written). **USB serial (decision 6c) is implemented on both sides (2026-11-02)**: the locator's sender, frame parser and TX queue are host-tested and the firmware compiles for the target; the Android side is JVM-tested where it is pure Kotlin and not compiled otherwise. iOS frames the messages only. Nothing has run on hardware.
 - **Date:** 2026-11-01
 - **Deciders:** Frank Schroer
 - **Related:** [#60](https://github.com/fschroer/steam-pigeon-locator/issues/60). Builds on ADR "50 Hz loop, variable-rate archive and magnetometer" and ADR-0009 (flight-data transfer).
@@ -108,6 +108,14 @@ Today's download cannot do that, for two reasons:
    - **Android only.** Android supports USB host mode with a CH34x driver (`usb-serial-for-android`). iOS does not allow a generic USB-serial device without Apple MFi certification, so iOS stays on LoRa. Record that in the parity matrix.
    - The app's earlier, unused USB-serial path was removed on 2026-07-16; this is a new one.
    - On the locator, the console needs a binary page mode alongside the menu UI, entered by a command and left on a timeout.
+   - **As built (2026-11-02):**
+     - **One transfer, two paths.** The cable carries the same frames as the radio, byte for byte with the frame CRC: FullRecordRequest / FullRecordAck up, FullRecordData and the periodic frame down. `FullRecordSender` answers on the path the app last spoke on, so a record moves between radio and cable mid-page and nothing already held is resent. Nothing is wrapped: the frames self-delimit (system id, type, length from the type, CRC). The locator's periodic frames come down the cable without the metadata a receiver appends, so the app has a cable framer of its own (`SerialFrames.kt`).
+     - **On the serial path a cycle is a sweep.** Every unacknowledged packet of the page, window after window, with no parity, then the periodic frame and a 300 ms listen for the ACK. Four packets per loop cycle, because each is a flash read of ~1 KB; that is what bounds the rate, not the line. The radio is left alone meanwhile: the 1 Hz beacon goes out as usual.
+     - **Binary mode** (`SerialLink.hpp`) is entered by the app's hello byte, 0xA5, at an idle console, and left 3 s after the last hello or valid frame. The "command" is a byte rather than a word because no terminal key produces 0xA5, and a word would have had to dodge the root-level letter keys. While it lasts every received byte goes to the frame parser, ahead of the menu and of the baud-rate detector (frame bytes would read to it as a mismatched link). The app sends the hello once a second, and **the locator answers each with its periodic frame**. That is how the app finds the console rate: it tries the eight standard rates from 921,600 down, and a link faster than the locator cannot disturb it (ADR-0024).
+     - **Unplugging is a timeout.** The sender stops where it is and waits; the app carries on over the radio with its next request or ACK, from the packets it holds.
+     - **The flight list still comes over the radio.** Only the full-record frames work over the cable, so the app needs its receiver link to know which records exist. Plugging the cable in is a trigger of its own (like the button, no landing needed, but only through the disarmed-on-the-ground gate).
+     - **TX is DMA, driven directly.** The USART2 handler's LL block clears TC before `HAL_UART_IRQHandler` sees it, so the HAL's own DMA transmit would never complete and would leave the UART handle busy for good. The firmware starts the DMA itself and marks the handle busy while it runs, so every blocking console write returns `HAL_BUSY` instead of writing into the middle of a frame.
+     - **Rate (model):** the test's 5,800-sample record takes 18.5 s over the cable, ~29 KB/s of record, against ~8.6 min over the radio. Under half the estimate above; most of the rest is planning and CRC work paced at 24 samples a loop cycle. Bench it before tuning.
 7. **Background execution.**
    - **Android:** the transfer runs in the existing BLE service as a foreground service, with a progress notification.
    - **iOS:** CoreBluetooth background mode, which relies on the receiver's FFE0 advertisement (iOS-port ADR).
@@ -140,7 +148,7 @@ Today's download cannot do that, for two reasons:
 - **Cost:** a typical record is ~0.55 MB raw, so the 5 GB no-cost quota holds thousands of flights. A $1 budget alert catches any surprise charge.
 - **New tests:**
   - a codec round-trip, checking bit-exact output: `Tests/FullRecordCodec` (869/0);
-  - the transfer, run against a simulated half-duplex link and app: `Tests/FullRecordSender` (38/0). It checks:
+  - the transfer, run against a simulated half-duplex link and app: `Tests/FullRecordSender` (40/0 before the serial path). It checks:
     - bit-exact with no loss and with 10 % loss each way;
     - no transmission inside a forward window;
     - suspend and resume;
@@ -148,14 +156,20 @@ Today's download cannot do that, for two reasons:
     - markers;
     - a slot rewritten mid-transfer;
     - the pickup detector;
+    - **the serial path** (2026-11-02, now 61/0): bit-exact over the cable, also with 5 % of frames lost each way; no full-record frame on the radio and the beacon never held; radio → cable → radio mid-record without starting over;
+  - the cable's frame parser and TX queue: `Tests/SerialLink` (15/0);
   - page-planning tests in `Tests/TransferPlan`;
-  - **Android JVM tests** (`app/src/test/.../fullrecord`, 24 tests, 2026-11-02):
+  - **Android JVM tests** (`app/src/test/.../fullrecord`, 30 tests, 2026-11-02):
     - `FullRecordCodecTest` decodes `sender_fixture.bin`, made by `Tools/full-record-fixture` from the **real** `FullRecordSender.hpp`, codec and `FormatFloat`. It checks: bit-exact; parity recovery; any order within a page; a corrupt payload; a foreign CRC; the CSV's number formatting against the locator over 4,100 values. It also holds the test-only Kotlin encoder to the C++ byte for byte;
-    - `FullRecordTransferTest` runs the controller against a simulated locator at 10 % and 25 % loss each way. It checks: bit-exact; resume after an app kill mid-record; arming mid-transfer; the trigger rules; skipping records already held; a slot rewritten mid-transfer.
+    - `FullRecordTransferTest` runs the controller against a simulated locator at 10 % and 25 % loss each way. It checks: bit-exact; resume after an app kill mid-record; arming mid-transfer; the trigger rules (the cable's included); skipping records already held; a slot rewritten mid-transfer.
+    - `SerialFramesTest` (decision 6c) checks the cable's request and ACK against bytes printed by a host build of the firmware's own structs and CRC, the periodic-frame offsets, and the framer over console text, noise, false starts and every read split.
 
 ## Open
 
 - ~~**The USB export's lat/lon are float-precision.**~~ Fixed 2026-11-02 (fschroer): `FormatDeg1e7` prints them from the stored integer, exact to 1e-7°, in the export and in the app's CSV alike (it had gone through float, ~0.4 m).
+- **USB serial is untried on hardware.** Bench: the DMA path (that a console line printed between DMA buffers does not corrupt a frame, and that the console works normally after binary mode ends); the CH340N at 921,600 with `usb-serial-for-android` 3.8.1 (the version already in the toml, unverified from here); the rate search against a locator set slower; unplugging mid-page.
+- **RAM: binary mode adds 2.1 KB** (two 1 KB TX buffers), taking `Factory` from 44.7 to 46.8 KB of the 64 KB RAM. Confirm the link map in CubeIDE; SRAM2 is free if it gets tight.
+- **A cable alone cannot start a transfer.** The flight list (FlightMetadata) is a radio command. Serving it over the cable too would make the cable work with no receiver at all.
 - **Android's store does file I/O on the main thread.** That is a state write of up to ~60 KB every ~5.5 s, and ~1.5 MB once per finished record. Move it to a background dispatcher if it shows as jank on the Pixel.
 
 - The codec measures 5.75 samples per packet, so a typical flight is ~10 min plus the interleave cost, and the 9,000-sample cap ~16 min plus. Re-measure on a real v8 record.

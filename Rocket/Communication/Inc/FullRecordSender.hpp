@@ -28,9 +28,18 @@
 // airtime or battery than the normal 1 Hz beacon; the next request or ACK for
 // the same page resumes it where it stopped.
 //
-// HAL-free and header-only: Communication supplies the radio, the archive and
-// the frame CRC through Io, and Tests/FullRecordSender runs the real code
-// against a simulated lossy link and app.
+// Two paths, one transfer (ADR decision 6c).  With the locator's USB cable in
+// the phone, the app can drive the same transfer over the console UART instead
+// of the radio: the same requests, ACKs, pages, packets and CRC, so it can move
+// from one path to the other mid-record and nothing already held is resent.
+// The path the app last spoke on is the path the sender answers on.  On the
+// serial path there is no receiver to leave a window for and no airtime to
+// save, so a cycle is a sweep over every unacknowledged packet of the page with
+// no parity, then the periodic frame and a short listen for the ACK.
+//
+// HAL-free and header-only: Communication supplies the radio, the UART, the
+// archive and the frame CRC through Io, and Tests/FullRecordSender runs the real
+// code against a simulated lossy link and app.
 
 #include <cstddef>
 #include <cstdint>
@@ -61,6 +70,13 @@ public:
     virtual void Send(FullRecordPacket& pkt, size_t len) = 0;
     // Transmit the normal periodic frame (PreLaunchData or TelemetryData).
     virtual void SendPeriodic() = 0;
+    // The serial path (ADR decision 6c).  SerialIdle is true when a full-size
+    // frame can be queued now; SendSerial and SendSerialPeriodic are Send and
+    // SendPeriodic on the console UART.  The defaults are a locator with no
+    // serial path, which the radio-only tests are.
+    virtual bool SerialIdle(uint32_t /*now_ms*/) { return false; }
+    virtual void SendSerial(FullRecordPacket& /*pkt*/, size_t /*len*/) {}
+    virtual void SendSerialPeriodic() {}
 protected:
     ~Io() = default;
 };
@@ -73,12 +89,23 @@ enum class Gate : uint8_t {
 
 enum class Phase : uint8_t { Idle, Crc, Plan, Burst, Periodic, Listen, PageDone, Suspended, Marker };
 
+// Where the app's last request or ACK came from, and so where the answer goes.
+enum class Path : uint8_t { Radio, Serial };
+
 class Sender {
 public:
     static constexpr uint32_t kListenGapMs      = 900u;  // receiver forwards 50..700 ms after a periodic frame
     static constexpr uint32_t kSamplesPerStep   = 24u;   // flash work per loop cycle (~2.3 KB, ~3 ms at 6 MHz)
     static constexpr uint8_t  kMaxSilentCycles  = 3u;    // bursts with no ACK before suspending
     static constexpr uint8_t  kMarkerRepeats    = 2u;
+    // Serial: the app answers a periodic frame within a few ms over USB; this
+    // leaves room for an Android main thread that is busy drawing.
+    static constexpr uint32_t kSerialListenMs   = 300u;
+    // Serial packets per loop cycle.  Each one is a flash read of up to ~10
+    // samples (~1 KB), so this is what bounds the transfer's share of the 50 Hz
+    // cycle (~5 ms), not the line: 4 x ~240 B per 20 ms is ~48 KB/s, about half
+    // of 921,600 baud.
+    static constexpr uint8_t  kSerialPacketsPerStep = 4u;
     static constexpr uint16_t kWindow           = Communication::kWindowSize;
     static constexpr uint16_t kGroup            = Communication::kParityGroupSize;
     static_assert(kWindow <= 8u, "parity_mask is 8 bits wide, relative to the group's first packet");
@@ -86,8 +113,9 @@ public:
     Sender(Io& io, FlightSample* scratch, uint32_t scratch_n) : io_(io), scratch_(scratch), scratch_n_(scratch_n) {}
 
     // From main-loop context (Communication defers both from the radio ISR).
-    void OnRequest(uint8_t record, uint16_t page) {
+    void OnRequest(uint8_t record, uint16_t page, Path from = Path::Radio) {
         if (page == Communication::kFullRecordStopPage) { Reset(); return; }
+        SetPath(from);
         const bool same = record == record_ && page == page_ && phase_ != Phase::Idle && phase_ != Phase::Marker;
         if (same) {
             if (phase_ == Phase::Suspended) { Resume(); return; }
@@ -107,8 +135,9 @@ public:
         crc_valid_ = false; crc_at_ = 0; crc_acc_ = 0; phase_ = Phase::Crc;
     }
 
-    void OnAck(const FullRecordAck& a) {
+    void OnAck(const FullRecordAck& a, Path from = Path::Radio) {
         if (!Serving() || a.record_crc != crc_ || a.page != page_) return;
+        SetPath(from);
         const uint16_t n = a.packet_count < count_ ? a.packet_count : count_;
         for (uint16_t i = 0; i < n; ++i)
             if (a.bitmap[i / 8u] & (1u << (i % 8u))) acked_[i / 8u] |= static_cast<uint8_t>(1u << (i % 8u));
@@ -125,13 +154,17 @@ public:
         case Phase::Plan:       StepPlan(); break;
         case Phase::Burst:      StepBurst(now); break;
         case Phase::Periodic:
-            if (io_.RadioIdle(now)) { io_.SendPeriodic(); ++periodics_; OnPeriodicSent(); phase_ = Phase::Listen; }
+            if (!LinkIdle(now)) break;
+            if (path_ == Path::Serial) { io_.SendSerialPeriodic(); quiet_pending_ = true; }
+            else { io_.SendPeriodic(); OnPeriodicSent(); }
+            ++periodics_;
+            phase_ = Phase::Listen;
             break;
         case Phase::Listen:
             if (Quiet(now)) Decide();
             break;
         case Phase::Marker:
-            if (io_.RadioIdle(now) && Quiet(now)) {
+            if (LinkIdle(now) && Quiet(now)) {
                 SendMarker();
                 if (--marker_left_ == 0u) phase_ = Phase::Idle;
             }
@@ -143,16 +176,35 @@ public:
     // While a cycle is running the sender alone sends the periodic frame, once
     // per cycle, so it can never land inside a burst or on top of the receiver's
     // forward in the listen gap.  Communication defers Factory's 1 Hz frame.
+    //
+    // Not on the serial path: the radio is then free, and the 1 Hz beacon goes
+    // out as usual (Communication also copies it to the UART).
     bool HoldsPeriodic() const {
-        return phase_ == Phase::Burst || phase_ == Phase::Periodic || phase_ == Phase::Listen
-            || phase_ == Phase::Marker;   // else the 1 Hz beacon's windows leave no room to send
+        return path_ == Path::Radio
+            && (phase_ == Phase::Burst || phase_ == Phase::Periodic || phase_ == Phase::Listen
+                || phase_ == Phase::Marker);   // else the 1 Hz beacon's windows leave no room to send
     }
 
     // Communication calls this for EVERY periodic frame it sends, including the
     // 1 Hz ones sent while no cycle runs.  The receiver forwards in the window
     // after any of them, so nothing here may transmit until kListenGapMs after
     // that frame has left the antenna -- the first burst of a page included.
-    void OnPeriodicSent() { quiet_pending_ = true; }
+    //
+    // On the serial path the radio's frames say nothing about the UART, so they
+    // are ignored here; the sender times its own serial listen.
+    void OnPeriodicSent() { if (path_ == Path::Radio) quiet_pending_ = true; }
+
+    // The USB link went away (the console left binary mode).  A cycle that was
+    // running on it stops where it is and waits for the app, which carries on
+    // over the radio with a request or an ACK: the radio must not start bursting
+    // on its own at a phone that may not be listening there.
+    void OnSerialLost() {
+        if (path_ != Path::Serial) return;
+        path_ = Path::Radio;
+        quiet_pending_ = false; quiet_armed_ = false;
+        if (phase_ == Phase::Burst || phase_ == Phase::Periodic || phase_ == Phase::Listen) phase_ = Phase::Suspended;
+        else if (phase_ == Phase::Marker) phase_ = Phase::Idle;
+    }
 
     Phase    phase() const { return phase_; }
     uint8_t  record() const { return record_; }
@@ -160,6 +212,7 @@ public:
     uint16_t packet_count() const { return count_; }
     uint32_t record_crc() const { return crc_; }
     uint32_t periodics_sent() const { return periodics_; }
+    Path     path() const { return path_; }
 
 private:
     struct Parity {
@@ -177,9 +230,9 @@ private:
     // starts on the first idle-radio check after it was sent.
     bool Quiet(uint32_t now) {
         if (quiet_pending_) {
-            if (!io_.RadioIdle(now)) return false;
+            if (!LinkIdle(now)) return false;
             quiet_pending_ = false;
-            quiet_until_ = now + kListenGapMs;
+            quiet_until_ = now + (path_ == Path::Serial ? kSerialListenMs : kListenGapMs);
             quiet_armed_ = true;
         }
         return !quiet_armed_ || static_cast<int32_t>(now - quiet_until_) >= 0;
@@ -191,7 +244,18 @@ private:
         phase_ = Phase::Idle; count_ = 0; window_start_ = 0; n_items_ = 0; item_ = 0;
         std::memset(acked_, 0, sizeof(acked_));
     }
-    void Resume() { silent_ = 0; BuildBurst(); }
+    void Resume() { silent_ = 0; StartCycle(); }
+
+    bool LinkIdle(uint32_t now) { return path_ == Path::Serial ? io_.SerialIdle(now) : io_.RadioIdle(now); }
+    void Emit(FullRecordPacket& p, size_t len) {
+        if (path_ == Path::Serial) io_.SendSerial(p, len); else io_.Send(p, len);
+    }
+    void SetPath(Path p) {
+        if (p == path_) return;
+        path_ = p;
+        // The other path's listen timing means nothing on this one.
+        quiet_pending_ = false; quiet_armed_ = false;
+    }
 
     // ---- CRC and planning: a few samples per call -----------------------------
     bool ReadInto(uint32_t first, uint32_t n, uint32_t& got) {
@@ -250,37 +314,56 @@ private:
     }
 
     // ---- The burst ------------------------------------------------------------
+    // A cycle starts at the first unacknowledged packet.  On the radio it is one
+    // window of kWindow packets with parity; on the serial path it continues
+    // window after window to the end of the page, with no parity.
+    void StartCycle() { got_ack_ = false; cursor_ = window_start_; BuildBurst(); }
+
     void BuildBurst() {
-        n_items_ = 0; item_ = 0; got_ack_ = false;
-        uint8_t members = 0, group = 0;
-        const uint16_t end = (window_start_ + kWindow < count_) ? static_cast<uint16_t>(window_start_ + kWindow) : count_;
-        for (uint16_t i = window_start_; i < end; ++i) {
-            if (Acked(i)) continue;
-            if (members == 0u) { std::memset(&par_[group], 0, sizeof(Parity)); par_[group].base = static_cast<uint8_t>(i); }
-            items_[n_items_++] = { static_cast<uint8_t>(i), false, group };
-            if (++members == kGroup) {
-                items_[n_items_++] = { 0u, true, group };
-                members = 0; ++group;
+        n_items_ = 0; item_ = 0;
+        const bool parity = path_ == Path::Radio;
+        while (n_items_ == 0u && cursor_ < count_) {
+            uint8_t members = 0, group = 0;
+            const uint16_t end = (cursor_ + kWindow < count_) ? static_cast<uint16_t>(cursor_ + kWindow) : count_;
+            for (uint16_t i = cursor_; i < end; ++i) {
+                if (Acked(i)) continue;
+                if (members == 0u) { std::memset(&par_[group], 0, sizeof(Parity)); par_[group].base = static_cast<uint8_t>(i); }
+                items_[n_items_++] = { static_cast<uint8_t>(i), false, group };
+                if (++members == kGroup) {
+                    if (parity) items_[n_items_++] = { 0u, true, group };
+                    members = 0; ++group;
+                }
             }
+            if (parity && members >= 2u) items_[n_items_++] = { 0u, true, group };
+            // (a lone packet's parity would only duplicate it)
+            cursor_ = end;
+            if (path_ == Path::Radio) break;              // one window per cycle on the radio
         }
-        if (members >= 2u) items_[n_items_++] = { 0u, true, group };
-        else if (members == 1u) { /* a lone packet's parity would only duplicate it */ }
         phase_ = n_items_ ? Phase::Burst : Phase::Periodic;
     }
 
     void StepBurst(uint32_t now) {
-        if (!io_.RadioIdle(now) || !Quiet(now)) return;
-        while (item_ < n_items_) {
+        const uint8_t budget = path_ == Path::Serial ? kSerialPacketsPerStep : 1u;
+        for (uint8_t sent = 0; sent < budget;) {
+            if (!LinkIdle(now) || !Quiet(now)) return;
+            if (item_ >= n_items_) {
+                if (path_ == Path::Serial && cursor_ < count_) {   // next window of the sweep
+                    BuildBurst();
+                    if (phase_ == Phase::Burst) continue;
+                    return;
+                }
+                phase_ = Phase::Periodic;
+                return;
+            }
             const Item it = items_[item_++];
             if (it.parity) {
-                if (par_[it.group].members >= 2u) { SendParity(par_[it.group]); return; }
+                if (par_[it.group].members >= 2u) { SendParity(par_[it.group]); ++sent; }
                 continue;
             }
             if (Acked(it.index)) continue;                // acknowledged since the burst was built
-            if (SendData(it.index, par_[it.group])) return;
-            Reset(); return;                              // flash fault mid-page
+            if (!SendData(it.index, par_[it.group])) { Reset(); return; }   // flash fault mid-page
+            ++sent;
         }
-        phase_ = Phase::Periodic;
     }
 
     void Fill(FullRecordPacket& p, Communication::MsgType t) {
@@ -317,7 +400,7 @@ private:
         par.first_x ^= p.h.first_in_page; par.count_x ^= p.h.sample_count; par.len_x ^= p.h.payload_len;
         par.mask |= static_cast<uint8_t>(1u << (k - par.base));
         ++par.members;
-        io_.Send(p, sizeof(p.h) + p.h.payload_len);
+        Emit(p, sizeof(p.h) + p.h.payload_len);
         return true;
     }
 
@@ -335,7 +418,7 @@ private:
         // not otherwise tell where it ends.  Packets are filled greedily, so the
         // longest member is nearly always within a few bytes of this anyway.
         std::memcpy(p.payload, par.payload, sizeof(p.payload));
-        io_.Send(p, sizeof(p));
+        Emit(p, sizeof(p));
     }
 
     void StartMarker(uint32_t crc, uint32_t n) {
@@ -347,7 +430,7 @@ private:
         p.h.record_crc = marker_crc_;
         p.h.total_samples = marker_n_;
         p.h.packet_count = 0;
-        io_.Send(p, sizeof(p.h));
+        Emit(p, sizeof(p.h));
     }
 
     // After the listen gap: what the acknowledgments say to do next.
@@ -355,7 +438,7 @@ private:
         if (AllAcked()) { phase_ = Phase::PageDone; return; }
         if (got_ack_) silent_ = 0;
         else if (++silent_ >= kMaxSilentCycles) { phase_ = Phase::Suspended; return; }
-        BuildBurst();
+        StartCycle();
     }
 
     Io& io_;
@@ -376,6 +459,8 @@ private:
     uint16_t count_ = 0;
     uint8_t  acked_[32] = {};
     uint16_t window_start_ = 0;
+    uint16_t cursor_ = 0;                                 // next window of this cycle
+    Path     path_ = Path::Radio;
 
     Item     items_[kWindow + kWindow / 2u + 1u] = {};
     uint8_t  n_items_ = 0, item_ = 0;

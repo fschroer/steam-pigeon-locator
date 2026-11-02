@@ -18,6 +18,7 @@
 #include "TransferPlan.hpp"
 #include "MessageProtocol.hpp"
 #include "FullRecordSender.hpp"
+#include "SerialLink.hpp"
 #include "PickupDetector.hpp"
 #include "Deployment.hpp"
 
@@ -131,6 +132,16 @@ public:
 	// Background full-record transfer: run from Process() every loop cycle.
 	void ServiceFullRecordTransfer(DeviceState device_state);
 	FullRecordSender::Phase FullRecordPhase() const { return full_.phase(); }
+
+	// The console's binary mode (ADR decision 6c, SerialLink.hpp).  Factory sets
+	// the port when the app's hello arrives and clears it when the console times
+	// out of binary mode; clearing it hands a running transfer back to the radio.
+	void SetSerialPort(SerialLink::TxQueue *port);
+	// A complete frame the console's parser collected, from main-loop context.
+	void OnSerialFrame(const uint8_t *data, size_t len);
+	// The periodic frame Factory last asked for, to the UART only: the answer to
+	// the app's hello, which is how the app knows the cable and its rate work.
+	void SendPeriodicToSerial();
 	bool PickedUp() const { return pickup_.picked_up(); }
 	bool IsComplete() const { return complete_; }
 	// Call from the main loop while in MetadataRequested or DataRequested.
@@ -353,9 +364,13 @@ private:
 		bool RadioIdle(uint32_t now_ms) override;
 		void Send(FullRecordPacket &pkt, size_t len) override;
 		void SendPeriodic() override;
+		bool SerialIdle(uint32_t now_ms) override;
+		void SendSerial(FullRecordPacket &pkt, size_t len) override;
+		void SendSerialPeriodic() override;
 	private:
 		Communication &c_;
 	};
+	SerialLink::TxQueue *serial_ = nullptr;   // non-null while the console is in binary mode
 	FullIo full_io_ { *this };
 	FullRecordSender::Sender full_ { full_io_, chunk_buf_, kChunkSize };
 	PickupDetector pickup_;
@@ -365,8 +380,10 @@ private:
 	// previous one is still unconsumed is dropped; the app repeats both.
 	volatile bool pending_full_req_ = false;
 	FullRecordRequest pending_full_req_msg_ { };
+	FullRecordSender::Path pending_full_req_path_ = FullRecordSender::Path::Radio;
 	volatile bool pending_full_ack_ = false;
 	FullRecordAck pending_full_ack_msg_ { };
+	FullRecordSender::Path pending_full_ack_path_ = FullRecordSender::Path::Radio;
 
 	// The periodic frame Factory last asked for, so the sender can send it
 	// between bursts while it holds the beacon (Factory's own 1 Hz call is
@@ -375,8 +392,12 @@ private:
 	PeriodicKind periodic_kind_ = PeriodicKind::PreLaunch;
 	bool    periodic_armed_ = false;
 	uint8_t periodic_pad_alert_ = 0;
-	void SendPreLaunchDataNow(bool armed, uint8_t pad_alert);
-	void SendTelemetryDataNow(bool armed);
+	// radio = false builds the frame for the UART alone (the serial path's own
+	// periodic frame, ADR decision 6c); either way it is copied to the UART while
+	// the console is in binary mode.
+	void SendPreLaunchDataNow(bool armed, uint8_t pad_alert, bool radio = true);
+	void SendTelemetryDataNow(bool armed, bool radio = true);
+	void CopyToSerial(const void *frame, size_t len);
 
 	// Start time of the transmission in flight.  The SubGHz driver's TX timeout
 	// is not routed to OnRadioTxDone, so a lost TxDone would leave radio_busy_

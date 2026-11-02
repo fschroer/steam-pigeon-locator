@@ -78,7 +78,7 @@ void Communication::SendTelemetryData(bool armed) {
 	SendTelemetryDataNow(armed);
 }
 
-void Communication::SendPreLaunchDataNow(bool armed, uint8_t pad_alert) {
+void Communication::SendPreLaunchDataNow(bool armed, uint8_t pad_alert, bool radio) {
 	PreLaunchData msg;
 	// ADR-0005: telemetry is raw-primary (no getFused()). Position from raw GPS,
 	// AGL from raw baro, accel/rates from raw IMU.
@@ -134,6 +134,11 @@ void Communication::SendPreLaunchDataNow(bool armed, uint8_t pad_alert) {
 
 	msg.packet_header.crc = 0;
 	msg.packet_header.crc = ComputeMessageCrc(msg);
+	// In the console's binary mode every periodic frame also goes to the UART,
+	// and the full-record sender's serial cycle sends one there alone.
+	CopyToSerial(&msg, sizeof(PreLaunchData));
+	if (!radio)
+		return;
 	RgbLed(RgbColor::Blue); // Blink LoRa transmit LED for visual validation
 	radio_busy_ = true;     // so nothing else starts until TxDone
 	radio_tx_start_ms_ = HAL_GetTick();
@@ -141,7 +146,7 @@ void Communication::SendPreLaunchDataNow(bool armed, uint8_t pad_alert) {
 	radio_->Send(reinterpret_cast<uint8_t*>(&msg), sizeof(PreLaunchData));
 }
 
-void Communication::SendTelemetryDataNow(bool armed) {
+void Communication::SendTelemetryDataNow(bool armed, bool radio) {
 	TelemetryData msg;
 	// ADR-0005: raw-primary telemetry. Raw GPS position + raw-baro AGL/velocity;
 	// orientation from the NFR-9 strapdown (q_bn), not the retired EKF.
@@ -194,6 +199,9 @@ void Communication::SendTelemetryDataNow(bool armed) {
 	msg.auth_tag = ComputePasswordAuthTag(msg, archive_.GetPasswordKey());
 
 	msg.packet_header.crc = ComputeMessageCrc(msg);
+	CopyToSerial(&msg, sizeof(TelemetryData));   // as in SendPreLaunchDataNow
+	if (!radio)
+		return;
 	RgbLed(RgbColor::Blue); // Blink LoRa transmit LED for visual validation
 	radio_busy_ = true;
 	radio_tx_start_ms_ = HAL_GetTick();
@@ -471,6 +479,7 @@ void Communication::OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
 			// Gated in Process() (disarmed, on the ground), where the sender runs.
 			if (!pending_full_req_) {
 				std::memcpy(&pending_full_req_msg_, payload, sizeof(FullRecordRequest));
+				pending_full_req_path_ = FullRecordSender::Path::Radio;
 				pending_full_req_ = true;
 			}
 			break;
@@ -478,6 +487,7 @@ void Communication::OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
 		case MsgType::FullRecordAck:
 			if (!pending_full_ack_) {
 				std::memcpy(&pending_full_ack_msg_, payload, sizeof(FullRecordAck));
+				pending_full_ack_path_ = FullRecordSender::Path::Radio;
 				pending_full_ack_ = true;
 			}
 			break;
@@ -1026,12 +1036,12 @@ void Communication::ServiceFullRecordTransfer(DeviceState device_state) {
 	// A request in any other state is refused: dropped, and the app repeats it.
 	if (pending_full_req_) {
 		if (gate == FullRecordSender::Gate::Run)
-			full_.OnRequest(pending_full_req_msg_.record, pending_full_req_msg_.page);
+			full_.OnRequest(pending_full_req_msg_.record, pending_full_req_msg_.page, pending_full_req_path_);
 		pending_full_req_ = false;
 	}
 	if (pending_full_ack_) {
 		if (gate == FullRecordSender::Gate::Run)
-			full_.OnAck(pending_full_ack_msg_);
+			full_.OnAck(pending_full_ack_msg_, pending_full_ack_path_);
 		pending_full_ack_ = false;
 	}
 	full_.Process(now, gate);
@@ -1070,6 +1080,77 @@ void Communication::FullIo::SendPeriodic() {
 		c_.SendTelemetryDataNow(c_.periodic_armed_);
 	else
 		c_.SendPreLaunchDataNow(c_.periodic_armed_, c_.periodic_pad_alert_);
+}
+
+// ---- The serial path (ADR decision 6c): the same frames on the console UART ----
+
+bool Communication::FullIo::SerialIdle(uint32_t) {
+	return c_.serial_ != nullptr && c_.serial_->Room(sizeof(FullRecordPacket));
+}
+
+void Communication::FullIo::SendSerial(FullRecordPacket &pkt, size_t len) {
+	pkt.h.packet_header.system_id = system_id;
+	pkt.h.packet_header.msg_count = c_.next_msg_count_++;
+	pkt.h.packet_header.crc = 0;
+	pkt.h.packet_header.crc = c_.ComputeMessageCrcPartial(reinterpret_cast<const uint8_t*>(&pkt), len);
+	c_.CopyToSerial(&pkt, len);
+}
+
+void Communication::FullIo::SendSerialPeriodic() {
+	c_.SendPeriodicToSerial();
+}
+
+void Communication::SendPeriodicToSerial() {
+	if (serial_ == nullptr)
+		return;
+	if (periodic_kind_ == PeriodicKind::Telemetry)
+		SendTelemetryDataNow(periodic_armed_, false);
+	else
+		SendPreLaunchDataNow(periodic_armed_, periodic_pad_alert_, false);
+}
+
+void Communication::CopyToSerial(const void *frame, size_t len) {
+	if (serial_ != nullptr)
+		serial_->Write(static_cast<const uint8_t*>(frame), len);   // no room: dropped, like a lost frame
+}
+
+void Communication::SetSerialPort(SerialLink::TxQueue *port) {
+	if (port == serial_)
+		return;
+	serial_ = port;
+	if (port == nullptr)
+		full_.OnSerialLost();
+}
+
+// A frame from the console in binary mode.  Checked exactly as a radio frame is
+// (system id, CRC, length, and the ADR-0020 address), and then queued for
+// Process() exactly as one is, marked as having come over the cable.  Called
+// from main-loop context (Factory::ServiceConsole), so it may overwrite nothing
+// the radio ISR is part-way through: a slot already holding a radio frame wins,
+// and the app repeats.
+void Communication::OnSerialFrame(const uint8_t *data, size_t len) {
+	ParsedMessage parsed { };
+	if (ParseLoraFrame(data, len, system_id, parsed) != ParseResult::Ok)
+		return;
+	uint32_t target = 0;
+	if (len < sizeof(PacketHeader) + sizeof(target))
+		return;
+	std::memcpy(&target, data + sizeof(PacketHeader), sizeof(target));
+	if (target == 0 || target != deviceUID_.getUID())
+		return;
+	// The radio callback fills the same slots, so test-and-fill with it held off.
+	const uint32_t primask = __get_PRIMASK();
+	__disable_irq();
+	if (parsed.type == MsgType::FullRecordRequest && !pending_full_req_) {
+		std::memcpy(&pending_full_req_msg_, data, sizeof(FullRecordRequest));
+		pending_full_req_path_ = FullRecordSender::Path::Serial;
+		pending_full_req_ = true;
+	} else if (parsed.type == MsgType::FullRecordAck && !pending_full_ack_) {
+		std::memcpy(&pending_full_ack_msg_, data, sizeof(FullRecordAck));
+		pending_full_ack_path_ = FullRecordSender::Path::Serial;
+		pending_full_ack_ = true;
+	}
+	__set_PRIMASK(primask);
 }
 
 // ============================================================================

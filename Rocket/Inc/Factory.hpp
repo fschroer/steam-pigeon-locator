@@ -69,6 +69,14 @@ private:
 	// navigation_.Update().
 	void ServiceConsole();
 	void HandleConsoleChar(uint8_t uart_char);
+	// The console's binary mode, for the full-record transfer over the USB cable
+	// (ADR "The radio download becomes the primary data path", decision 6c;
+	// SerialLink.hpp).  Entered by the app's hello byte at an idle console, left
+	// after SerialLink::kHoldMs with neither a hello nor a valid frame.
+	void HandleBinaryByte(uint8_t b);
+	void ServiceBinaryMode();
+	// Starts the next queued buffer on the UART TX DMA, if the wire is free.
+	void KickSerialTx();
 	// Runs the sync-byte verify timeout and persists a detection once it commits.
 	// Called from ServiceConsole so it ticks on the 50 ms cycle whether or not any
 	// bytes arrived — a half-finished detection has to time out on its own.
@@ -120,6 +128,11 @@ private:
 	volatile uint8_t  uart2_rx_buf_[kUart2RxBufSize] = { };
 	volatile uint16_t uart2_rx_head_ = 0;  // producer: UART2 RX ISR
 	volatile uint16_t uart2_rx_tail_ = 0;  // consumer: main loop
+
+	SerialLink::Parser  serial_parser_;
+	SerialLink::TxQueue serial_tx_;
+	bool     binary_mode_ = false;
+	uint32_t binary_last_ms_ = 0;
 
 	UART_HandleTypeDef &huart2_;
 	SPI_HandleTypeDef &hspi2_;

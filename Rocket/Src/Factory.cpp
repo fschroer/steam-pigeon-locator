@@ -244,6 +244,7 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 	// regardless of device state, before the per-state switch below.
 	const uint16_t t_comm = Diag::Now();
 	comm_.Process(device_state_);
+	KickSerialTx();   // what the transfer queued this cycle goes out now, not next cycle
 #if SP_LOSS_INJECT
 	// Say so when a forced miss actually fires (#20).  Arming printed and firing
 	// did not, so a bench run could not tell a dropped config change from one that
@@ -763,6 +764,14 @@ void Factory::ServiceConsole() {
     while (uart2_rx_tail_ != uart2_rx_head_) {
         const uint8_t c = uart2_rx_buf_[uart2_rx_tail_];
         uart2_rx_tail_ = (uart2_rx_tail_ + 1u) & (kUart2RxBufSize - 1u);
+        // The app's binary mode takes the byte ahead of the menu AND of the baud
+        // detector: frame bytes are not console input, and fed to the detector
+        // they would read as a mismatched link.  The hello is not ASCII, so no
+        // terminal produces it, and an open menu keeps the keyboard.
+        if (binary_mode_ || (c == SerialLink::kHello && config_.IsConsoleIdle())) {
+            HandleBinaryByte(c);
+            continue;
+        }
         HandleConsoleChar(c);
         // Checked INSIDE the loop, not after it.  When a measurement is adopted
         // mid-drain, every byte still queued was sampled at the old rate and is
@@ -775,6 +784,86 @@ void Factory::ServiceConsole() {
             break;
         }
     }
+    ServiceBinaryMode();
+}
+
+// ---- Binary mode: the full-record transfer over the USB cable ---------------
+
+namespace {
+// The UART TX DMA, driven directly rather than through HAL_UART_Transmit_DMA.
+// The USART2 handler's LL block clears TC ahead of HAL_UART_IRQHandler, so the
+// HAL's own DMA transmit would never see its end and would leave the handle
+// BUSY_TX for good, and the HAL's TxCplt callback belongs to the ST trace
+// utility.  So the DMA is started on its own, and the handle is marked BUSY_TX
+// while it runs: every blocking console write in the firmware then returns
+// HAL_BUSY instead of writing TDR in the middle of a frame.
+SerialLink::TxQueue* s_tx_queue = nullptr;
+UART_HandleTypeDef*  s_tx_uart = nullptr;
+
+void SerialTxDone(DMA_HandleTypeDef*) {
+    CLEAR_BIT(s_tx_uart->Instance->CR3, USART_CR3_DMAT);
+    s_tx_uart->gState = HAL_UART_STATE_READY;
+    s_tx_queue->OnTxDone();
+}
+}  // namespace
+
+void Factory::KickSerialTx() {
+    if (!binary_mode_ || serial_tx_.busy() || huart2_.gState != HAL_UART_STATE_READY)
+        return;
+    const uint8_t* p = nullptr;
+    uint16_t n = 0;
+    if (!serial_tx_.TakeNext(p, n))
+        return;
+    DMA_HandleTypeDef* dma = huart2_.hdmatx;
+    s_tx_queue = &serial_tx_;
+    s_tx_uart = &huart2_;
+    dma->XferCpltCallback = SerialTxDone;
+    dma->XferErrorCallback = SerialTxDone;   // a DMA error drops the buffer; the app repeats
+    dma->XferHalfCpltCallback = nullptr;
+    dma->XferAbortCallback = nullptr;
+    huart2_.gState = HAL_UART_STATE_BUSY_TX;
+    __HAL_UART_CLEAR_FLAG(&huart2_, UART_CLEAR_TCF);
+    SET_BIT(huart2_.Instance->CR3, USART_CR3_DMAT);
+    if (HAL_DMA_Start_IT(dma, reinterpret_cast<uint32_t>(p), reinterpret_cast<uint32_t>(&huart2_.Instance->TDR), n)
+            != HAL_OK) {
+        CLEAR_BIT(huart2_.Instance->CR3, USART_CR3_DMAT);
+        huart2_.gState = HAL_UART_STATE_READY;
+        serial_tx_.OnTxDone();
+    }
+}
+
+void Factory::HandleBinaryByte(uint8_t b) {
+    switch (serial_parser_.Feed(b)) {
+    case SerialLink::Parser::Event::Hello:
+        binary_last_ms_ = HAL_GetTick();
+        if (!binary_mode_) {
+            binary_mode_ = true;
+            comm_.SetSerialPort(&serial_tx_);
+        }
+        // Answered with the periodic frame, so the app finds the console rate in
+        // one hello per rate rather than waiting out a transfer cycle (which can
+        // hold the 1 Hz beacon for ~5 s), and has the locator's id at once.
+        comm_.SendPeriodicToSerial();
+        break;
+    case SerialLink::Parser::Event::Frame:
+        binary_last_ms_ = HAL_GetTick();
+        comm_.OnSerialFrame(serial_parser_.frame(), serial_parser_.length());
+        break;
+    default:
+        break;
+    }
+}
+
+// From ServiceConsole, every cycle.  The cable coming out is only ever a
+// silence, so the timeout is the whole of the exit path.
+void Factory::ServiceBinaryMode() {
+    if (binary_mode_ && HAL_GetTick() - binary_last_ms_ > SerialLink::kHoldMs) {
+        binary_mode_ = false;
+        comm_.SetSerialPort(nullptr);    // a running transfer waits for the app on the radio
+        serial_tx_.Clear();              // a buffer already on the wire finishes on its own
+        serial_parser_ = SerialLink::Parser();
+    }
+    KickSerialTx();
 }
 
 void Factory::ServiceConsoleBaud() {
