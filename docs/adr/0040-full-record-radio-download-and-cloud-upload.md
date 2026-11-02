@@ -117,7 +117,7 @@ Today's download cannot do that, for two reasons:
    - Each record is uploaded as its raw v8 bytes plus the decoded CSV, identical to the USB export, under `users/{uid}/locators/{locator_id}/{record_ts}_{crc}.{bin,csv}`. Upload uses the SDK's resumable upload.
    - **As built on Android (2026-11-02, `FirebaseCloud.kt`):**
      - `{locator_id}` is decimal; `{crc}` is 8 lowercase hex digits.
-     - The CSV is built from the raw bytes by a port of the locator's `FormatFloat`, in float arithmetic, and is checked against the real `FormatFloat` over 4,100 values. So it matches the USB export character for character, including two of the export's own quirks: a NaN prints as `0.00`, and lat/lon pass through float before printing, so their 7 decimals carry only float precision (~0.4 m). The `.bin` keeps the exact 1e-7 degrees.
+     - The CSV is built from the raw bytes by a port of the locator's `FormatFloat`, in float arithmetic, and is checked against the real `FormatFloat` over 4,100 values. So it matches the USB export character for character, including the export's own quirk that a NaN prints as `0.00`. Lat/lon are printed from the stored integer on both sides (`FormatDeg1e7`, 2026-11-02), so they are exact; the app checks its copy against the real function over 2,015 values.
      - The Google Services plugin is applied only when `google-services.json` exists. A build without it has no Firebase and says so in App Settings.
      - An upload cut off by an app kill starts that file over at the next app start.
    - Storage rules: a user reads and writes only `users/{their uid}/**`.
@@ -149,13 +149,13 @@ Today's download cannot do that, for two reasons:
     - a slot rewritten mid-transfer;
     - the pickup detector;
   - page-planning tests in `Tests/TransferPlan`;
-  - **Android JVM tests** (`app/src/test/.../fullrecord`, 23 tests, 2026-11-02):
+  - **Android JVM tests** (`app/src/test/.../fullrecord`, 24 tests, 2026-11-02):
     - `FullRecordCodecTest` decodes `sender_fixture.bin`, made by `Tools/full-record-fixture` from the **real** `FullRecordSender.hpp`, codec and `FormatFloat`. It checks: bit-exact; parity recovery; any order within a page; a corrupt payload; a foreign CRC; the CSV's number formatting against the locator over 4,100 values. It also holds the test-only Kotlin encoder to the C++ byte for byte;
     - `FullRecordTransferTest` runs the controller against a simulated locator at 10 % and 25 % loss each way. It checks: bit-exact; resume after an app kill mid-record; arming mid-transfer; the trigger rules; skipping records already held; a slot rewritten mid-transfer.
 
 ## Open
 
-- **The USB export's lat/lon are float-precision** (`UserInteraction::ExportData` passes `lat_1e7 / 1.0e7` through `Fmt(double)`, which converts to float). Its comment says 7 decimals "round-trips without loss", but a float holds about 0.4 m at these magnitudes. The uploaded CSV matches the export as specified; fixing the export would change both together.
+- ~~**The USB export's lat/lon are float-precision.**~~ Fixed 2026-11-02 (fschroer): `FormatDeg1e7` prints them from the stored integer, exact to 1e-7°, in the export and in the app's CSV alike (it had gone through float, ~0.4 m).
 - **Android's store does file I/O on the main thread.** That is a state write of up to ~60 KB every ~5.5 s, and ~1.5 MB once per finished record. Move it to a background dispatcher if it shows as jank on the Pixel.
 
 - The codec measures 5.75 samples per packet, so a typical flight is ~10 min plus the interleave cost, and the 9,000-sample cap ~16 min plus. Re-measure on a real v8 record.

@@ -25,7 +25,7 @@ Orientation note for resuming work. Detail lives in the linked artifacts; this i
 - `Tools/full-record-fixture` generates the app's `sender_fixture.bin` from the real sender, codec and `FormatFloat`.
 - **Tests:**
   - `Tests/FullRecordSender` 40/0 (adds the frame-length check);
-  - Android JVM 23/0, compiled with kotlinc 2.0.0 + JUnit outside Gradle (see the cloud-build-limits memory).
+  - Android JVM 24/0, compiled with kotlinc 2.0.0 + JUnit outside Gradle (see the cloud-build-limits memory).
 - **Trigger rules as built:** automatic starts need a landing seen from this locator, and are held behind the disarmed-on-the-ground gate. They stand down when the user presses Stop or when every record is on the phone. Details are in ADR decision 6.
 - **Not done:**
   - an Android build;
@@ -36,7 +36,7 @@ Orientation note for resuming work. Detail lives in the linked artifacts; this i
 - **Traps:**
   - Nothing outside `data/fullrecord/` has been compiled. Expect a few compile fixes in the ViewModel, Compose and Firebase code.
   - The Firebase BOM, credentials and googleid versions are unverified here (`dl.google.com` is blocked).
-  - **The USB export's lat/lon pass through float** (~0.4 m). The CSV matches that on purpose; the `.bin` is exact.
+  - The USB export's lat/lon used to pass through float (~0.4 m). Fixed later the same day: `FormatDeg1e7` prints them exactly, in the export and the app's CSV. Exports made before that carry the rounded values.
 
 ## 2026-11-02 (feature) — background full-record transfer, firmware side — ADR "The radio download becomes the primary data path" (0040). NOT on hardware
 

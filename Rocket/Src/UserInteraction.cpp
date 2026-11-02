@@ -842,6 +842,9 @@ void UserInteraction::ExportData(uint16_t archive_position) {
 				}
 				// v8 stores these as fixed-point (ADR-0040); print every digit the
 				// archive holds, so the CSV carries the record's full precision.
+				char lat_text[16], lon_text[16];
+				FormatDeg1e7(lat_text, sample_buffer[i].lat_1e7);
+				FormatDeg1e7(lon_text, sample_buffer[i].lon_1e7);
 				const Vec3f ag = FlightArchive::AccelG(sample_buffer[i]);
 				const Vec3f gd = FlightArchive::GyroDps(sample_buffer[i]);
 				export_line.WriteMany(sample_buffer[i].timestamp_ms, ",",
@@ -855,10 +858,11 @@ void UserInteraction::ExportData(uint16_t archive_position) {
 						Fmt(gd.x, 0, 2), ",",
 						Fmt(gd.y, 0, 2), ",",
 						Fmt(gd.z, 0, 2), ",",
-						// Stored as degrees x 1e-7 (the receiver's own units); 7 decimals is
-						// exactly that resolution, so this round-trips without loss.
-						Fmt(sample_buffer[i].lat_1e7 / 1.0e7, 0, 7), ",",
-						Fmt(sample_buffer[i].lon_1e7 / 1.0e7, 0, 7), ",",
+						// Stored as degrees x 1e-7 (the receiver's own units), printed
+						// from the integer so all 7 decimals are exact.  This went through
+						// Fmt(double), which converts to float and kept only ~0.4 m.
+						lat_text, ",",
+						lon_text, ",",
 						// One field per fact now — no unpacking (ARCHIVE_VERSION 6).
 						static_cast<uint32_t>(sample_buffer[i].flight_state), ",",
 						static_cast<uint32_t>(sample_buffer[i].armed), ",",

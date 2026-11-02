@@ -107,6 +107,13 @@ int main(int argc, char** argv) {
     for (int i = 0; i < 4000; ++i) { float v = u(rng); if (i % 3 == 0) v /= 1000.0f; if (i % 5 == 0) v = (float)(int)v / 100.0f; vals.push_back({ v, (uint32_t)fd(rng) }); }
     u32((uint32_t)vals.size());
     for (auto& [v, fr] : vals) { char buf[48]; FormatFloat(buf, v, fr); uint32_t bits; memcpy(&bits, &v, 4); u32(bits); uint8_t a = (uint8_t)fr, l = (uint8_t)strlen(buf); fwrite(&a,1,1,f); fwrite(&l,1,1,f); fwrite(buf,1,l,f); }
+    // FormatDeg1e7 reference table (the CSV's lat/lon columns)
+    std::vector<int32_t> degs = { 0, 1, -1, 9999999, -9999999, 10000000, -10000000, 408457032, -1191103439,
+                                  INT32_MAX, INT32_MIN, 1800000000, -1800000000, 5, -50 };
+    std::uniform_int_distribution<int32_t> dd(INT32_MIN, INT32_MAX);
+    for (int i = 0; i < 2000; ++i) degs.push_back(dd(rng));
+    u32((uint32_t)degs.size());
+    for (int32_t d : degs) { char buf[24]; FormatDeg1e7(buf, d); uint8_t l = (uint8_t)strlen(buf); u32((uint32_t)d); fwrite(&l,1,1,f); fwrite(buf,1,l,f); }
     fclose(f);
     printf("frames %zu\n", io.out.size());
 }
