@@ -164,7 +164,7 @@ public:
 private:
     struct Parity {
         uint8_t payload[Communication::kFullRecordPayloadSize];
-        uint16_t first_x; uint8_t count_x, len_x, max_len, mask, base, members;
+        uint16_t first_x; uint8_t count_x, len_x, mask, base, members;
     };
     struct Item { uint8_t index; bool parity; uint8_t group; };
 
@@ -315,7 +315,6 @@ private:
 
         for (size_t b = 0; b < e.bytes(); ++b) par.payload[b] ^= p.payload[b];
         par.first_x ^= p.h.first_in_page; par.count_x ^= p.h.sample_count; par.len_x ^= p.h.payload_len;
-        if (p.h.payload_len > par.max_len) par.max_len = p.h.payload_len;
         par.mask |= static_cast<uint8_t>(1u << (k - par.base));
         ++par.members;
         io_.Send(p, sizeof(p.h) + p.h.payload_len);
@@ -330,8 +329,13 @@ private:
         p.h.first_in_page = par.first_x;
         p.h.sample_count = par.count_x;
         p.h.payload_len = par.len_x;
-        std::memcpy(p.payload, par.payload, par.max_len);
-        io_.Send(p, sizeof(p.h) + par.max_len);
+        // Always the FULL payload buffer, so a parity frame is a fixed 255 B.
+        // Its payload_len field holds the members' XORed lengths, not its own,
+        // so a receiver delimiting frames by length (the apps' BLE framers) could
+        // not otherwise tell where it ends.  Packets are filled greedily, so the
+        // longest member is nearly always within a few bytes of this anyway.
+        std::memcpy(p.payload, par.payload, sizeof(p.payload));
+        io_.Send(p, sizeof(p));
     }
 
     void StartMarker(uint32_t crc, uint32_t n) {

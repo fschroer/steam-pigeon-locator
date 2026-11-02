@@ -2,6 +2,42 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-11-02 (feature) — background full-record transfer, Android side + Firebase upload — ADR "The radio download becomes the primary data path" (0040). Android NOT compiled, nothing on hardware
+
+✅ **What changed:**
+- **Android runs the transfer** (`rocket-flight-manager` `b3b3b4e`). The core is pure Kotlin in `data/fullrecord/`:
+  - codec port and CRC;
+  - assembler with parity recovery;
+  - store that resumes across app kills;
+  - CSV identical to the USB export;
+  - the controller.
+- **Android wiring:**
+  - `FullRecordHub` holds the transfer across Activity recreation.
+  - `BluetoothService` sends the request and ACK, and shows progress in its notification.
+  - Flight Profiles has the Transfer/Stop button and the partial view, and reads phone → cloud → locator.
+  - App Settings has the two trigger checkboxes and the cloud account.
+- **Firebase:** Auth (Google + email) and Storage upload. The Google Services plugin is applied only when `google-services.json` exists.
+- **Framing fix in all three:** `FullRecordParity` is a fixed 255 B. Its `payload_len` is an XOR, so both app framers would have cut every parity frame short.
+  - locator: `FullRecordSender.hpp` now sends the full payload buffer (this commit);
+  - Android `b3b3b4e`;
+  - iOS `b8c4c0d`.
+- **ADR rule corrected:** a window with *any* packet of the page, duplicates included, gets an ACK. "Nothing new → request" deadlocks after a lost ACK. The firmware's simulated app already did this; the ADR wording and the first Android draft did not.
+- `Tools/full-record-fixture` generates the app's `sender_fixture.bin` from the real sender, codec and `FormatFloat`.
+- **Tests:**
+  - `Tests/FullRecordSender` 40/0 (adds the frame-length check);
+  - Android JVM 23/0, compiled with kotlinc 2.0.0 + JUnit outside Gradle (see the cloud-build-limits memory).
+- **Trigger rules as built:** automatic starts need a landing seen from this locator, and are held behind the disarmed-on-the-ground gate. They stand down when the user presses Stop or when every record is on the phone. Details are in ADR decision 6.
+- **Not done:**
+  - an Android build;
+  - the foreground paged transfer for a record selected with no background run (the quick-look download is still used);
+  - store I/O off the main thread;
+  - USB serial (step 3);
+  - iOS (step 4).
+- **Traps:**
+  - Nothing outside `data/fullrecord/` has been compiled. Expect a few compile fixes in the ViewModel, Compose and Firebase code.
+  - The Firebase BOM, credentials and googleid versions are unverified here (`dl.google.com` is blocked).
+  - **The USB export's lat/lon pass through float** (~0.4 m). The CSV matches that on purpose; the `.bin` is exact.
+
 ## 2026-11-02 (feature) — background full-record transfer, firmware side — ADR "The radio download becomes the primary data path" (0040). NOT on hardware
 
 ✅ **What changed:**
@@ -24,7 +60,7 @@ Orientation note for resuming work. Detail lives in the linked artifacts; this i
   - iOS port of the transfer.
 - **Traps:**
   - Packets are self-contained but decode in sample order: the app keeps each one and decodes it once the two samples before it are in hand.
-  - The app must repeat its `FullRecordRequest` in any window where nothing new arrived. That is what restarts a suspended or aborted sender.
+  - The app must repeat its `FullRecordRequest` in any window where nothing at all arrived (duplicates count as arrived; see the entry above). That is what restarts a suspended or aborted sender.
   - Periodic frames now set `radio_busy_` until TxDone. A lost TxDone is cleared by a 2 s watchdog, but only on the full-transfer path.
 
 ## 2026-11-01 (feature) — full-record radio codec, step 1 of ADR "The radio download becomes the primary data path" (0040). Codec only, not wired in

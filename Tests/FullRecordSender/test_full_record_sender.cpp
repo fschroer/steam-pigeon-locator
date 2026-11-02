@@ -142,7 +142,7 @@ struct App {
     std::map<uint8_t, std::vector<uint8_t>> pkts;   // index -> full frame bytes (data, or rebuilt)
     std::vector<std::vector<uint8_t>> parities;
     uint16_t page_packets = 0;
-    uint32_t recovered = 0, markers = 0, foreign = 0;
+    uint32_t recovered = 0, markers = 0, foreign = 0, bad_len = 0;
     uint32_t marker_total = 0xFFFFFFFFu;
     size_t   rx_since_uplink = 0;
 
@@ -157,6 +157,11 @@ struct App {
         const auto& h = H(f);
         const auto t = h.packet_header.msg_type;
         if (t != MsgType::FullRecordData && t != MsgType::FullRecordParity) return;
+        // The apps' BLE framers delimit by length: data is header + payload_len,
+        // parity is always the full 255 B (its payload_len is an XOR).
+        const size_t want = t == MsgType::FullRecordParity ? sizeof(FullRecordPacket)
+                                                           : sizeof(FullRecordPacketHeader) + h.payload_len;
+        if (f.size() != want) ++bad_len;
         if (h.packet_count == 0u) { ++markers; marker_total = h.total_samples; return; }
         if (!know) { crc = h.record_crc; total = h.total_samples; know = true; got.assign(total, FlightSample{}); filled.assign(total, false); }
         if (h.record_crc != crc) {                    // another record: a changed slot
@@ -377,6 +382,7 @@ static void TestCleanLink() {
     w->CheckTimeline();
     CHECK(w->window_violations == 0u);
     CHECK(w->burst_periodic_overlap == 0u);
+    CHECK(w->app.bad_len == 0u);
     CHECK(w->sender.phase() == frs::Phase::Idle);      // the app's stop request ended it
     const uint32_t pk = DataPackets(*w);
     printf("  %.1f min, %u data packets, %.2f s/packet (model), %u periodic frames from the sender\n",
@@ -399,6 +405,7 @@ static void TestLossyLink() {
     CHECK(w->app.complete);
     CHECK(AppMatches(*w, r));
     CHECK(w->app.recovered > 0u);
+    CHECK(w->app.bad_len == 0u);
     w->CheckTimeline();
     CHECK(w->window_violations == 0u);
     printf("  %.1f min, %u data packets sent, %u rebuilt from parity\n", w->now / 60000.0, DataPackets(*w), w->app.recovered);

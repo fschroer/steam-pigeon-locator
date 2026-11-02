@@ -1,6 +1,6 @@
 # ADR-0040: The radio download becomes the primary data path — full bit-exact records, background transfer and Firebase upload
 
-- **Status:** Proposed. Firmware side implemented and host-tested: the codec 2026-11-01, the paged background transfer, receiver relay and pickup detection 2026-11-02. The apps frame the new messages but do not run the transfer yet, and USB serial is not started. Nothing has run on hardware.
+- **Status:** Proposed. Firmware side implemented and host-tested: the codec 2026-11-01, the paged background transfer, receiver relay and pickup detection 2026-11-02. **Android runs the transfer and uploads to Firebase (2026-11-02)**: its transfer core is JVM-tested against frames from the real C++ sender, but the Android build itself has not been compiled (no SDK where it was written). iOS frames the messages only, and USB serial is not started. Nothing has run on hardware.
 - **Date:** 2026-11-01
 - **Deciders:** Frank Schroer
 - **Related:** [#60](https://github.com/fschroer/steam-pigeon-locator/issues/60). Builds on ADR "50 Hz loop, variable-rate archive and magnetometer" and ADR-0009 (flight-data transfer).
@@ -32,6 +32,7 @@ Today's download cannot do that, for two reasons:
    - A page is a fixed 512 samples and up to 256 packets, so one bitmap covers it, and the existing window (8) and parity group (4) carry over.
    - **Every packet is self-describing.** `record_crc` is the record's identity on the wire, so a resumed transfer can never splice two flights together. The app drops any packet whose CRC differs from the one it is assembling.
    - **Parity covers whatever was sent.** A parity packet names its group's first index and a member mask, and carries the XOR of each member's `first_in_page`, `sample_count`, `payload_len` and zero-padded payload, so the one missing member is rebuilt whole, header included.
+   - **A parity frame is always the full 255 B** (fixed 2026-11-02). Its `payload_len` field is an XOR, not its own length, so a receiver that delimits frames by length (both apps' BLE framers) cannot read it. As first written the locator sent only the longest member's bytes, and both app framers read `payload_len`, which would have cut every parity frame short and failed its CRC. The cost is a few bytes: packets are filled greedily, so the longest member is nearly always within a few bytes of 230 anyway.
    - `packet_count = 0` is a marker. With `total_samples = 0` it means the slot is empty or missing; otherwise the requested page is past the end.
    - All three copies pin the layout: `static_assert` and `offsetof` in both firmwares, `WireLayoutTest.kt`, and `WireLayoutTests.swift`.
 2. **A lossless full-sample codec** (`FullRecordCodec.hpp`, header-only, built 2026-11-01).
@@ -58,6 +59,10 @@ Today's download cannot do that, for two reasons:
      - the decoded samples.
    - This must survive app kill, phone reboot, BLE disconnect and LoRa range loss.
    - A changed CRC means a different record, so the app discards what it held.
+   - **As built on Android (2026-11-02, `data/fullrecord/FullRecordStore.kt`):**
+     - The key is (locator id, the flight's timestamp from `FlightMetadata`, record CRC). The timestamp names the upload, and the CRC is what the wire carries. `ARCHIVE_VERSION` is not on the wire; the codec and its 94 B sample are v8-only, and a record of another layout has another CRC.
+     - Decoded samples are always a prefix of the record, because a packet decodes only after the two samples before it. So the store keeps the **completed pages** as an append-only `.part` file of raw bytes, plus a `.state` file holding **every packet held for the page in progress**. The ACK bitmap is derived from those packets.
+     - A kill between the two writes leaves at worst a torn tail on `.part`, which is cut back to a whole page on the next open.
 6. **Start triggers** (fschroer, 2026-11-01). After landing, the transfer starts on **any** of the following. Each automatic trigger can be turned off in app settings; the button is always available.
    - **Signal strength:** the receiver-reported RSSI of the locator's frames stays above a threshold for a few seconds, with hysteresis so a marginal link doesn't start and stall. Proposed default: −100 dBm sustained for 5 s.
    - **Pickup** (`PickupDetector.hpp`, implemented 2026-11-02):
@@ -68,6 +73,12 @@ Today's download cannot do that, for two reasons:
      - Sent as **bit 7 of TelemetryData `physical_deployment_stats`**: bits 0/1 stay drogue/main detected, and both apps already mask them. TelemetryData keeps its 77 B and every existing parser keeps working. A landed locator sends TelemetryData, so PreLaunchData does not need the bit.
    - **Button:** the user taps "Transfer new flight data".
    - **Gates, always:** disarmed, and in `Landed` or `WaitingLaunch`. The locator refuses a page request in any other state, so a transfer can never run during a flight.
+   - **As built on Android (2026-11-02, `FullRecordTransfer.kt`):**
+     - **The automatic triggers need a landing seen from this locator** since its last complete transfer. The app persists that flag. Disarming a landed locator sends it straight back to `WaitingLaunch` (Factory's pad reset), which on the wire is identical to a locator on the pad before a flight. Without the flag, a strong signal during prep would start a transfer of old records and slow every command to the ~5.5 s cycle.
+     - **Triggers are evaluated through the gate.** A landed locator is normally still armed: pickup comes first, then the disarm. So a trigger seen while armed is held until the disarm opens the gate, rather than spent on a run that arming would abort.
+     - "Sustained" means consecutive periodic frames at or above the threshold for 5 s. A gap of more than 7 s between frames restarts the count.
+     - **The records:** `FlightMetadata` (one listing, then a `DisarmRequest` to leave listing mode), then every slot with a flight that is not already complete on the phone, newest first.
+     - When everything is on the phone, the landing flag clears, so the next automatic start waits for the next landing. The user stopping a run clears it too; otherwise a strong signal would restart the transfer five seconds later. The button works regardless.
 6a. **The transfer shares the link instead of owning it** (implemented 2026-11-02 in `FullRecordSender.hpp`). Today a download puts the locator in a quiet flight-profile mode: periodic frames stop and the receiver forwards commands at once (ADR-0009 decision 4).
    - A background transfer must leave every other app function working, including commands that travel app → receiver → locator. So it runs only while the locator is **Disarmed** (in `WaitingLaunch` or `Landed`), as a cycle:
      - **burst:** up to 8 data packets from the first one not yet acknowledged, plus one parity packet per group of 2 to 4;
@@ -77,11 +88,12 @@ Today's download cannot do that, for two reasons:
    - **The receiver has a second forward slot** for `FullRecordAck` and `FullRecordRequest` (latest wins; both are cumulative). It is sent after any operator command in the same window. In the old single slot, an ACK every few seconds would have overwritten a waiting Arm or deployment-test cancel.
    - **Modeled cost:** 0.70 s per packet against 0.6 for the quiet transfer, about 17 % (link simulation in `Tests/FullRecordSender`, using ADR-0009's airtimes). At 5.75 samples per packet that is about 12 min for a typical 5,800-sample flight and about 18 min for the 9,000-sample cap. While a cycle runs the periodic frame comes every ~5.5 s instead of every 1 s. Measure both on the bench.
    - **Before the first burst of a record** the locator computes its CRC-32 (once per record, then cached until the locator arms) and plans each page's packet boundaries, 24 samples per loop cycle so the 50 Hz loop never stalls on flash: about 7.5 s for a full record, then about 0.5 s per page.
-   - **The app drives pages:** it requests page N and acknowledges after each periodic frame. Once a page is complete it requests N+1. In any window where nothing new has arrived since its last uplink, it repeats the request instead of an ACK. A repeat of the page already running changes nothing, and it is what restarts a suspended, aborted or never-heard transfer.
+   - **The app drives pages:** it requests page N and acknowledges after each periodic frame. Once a page is complete it requests N+1. In any window where **nothing at all** has arrived since its last uplink, it repeats the request instead of an ACK. A repeat of the page already running changes nothing, and it is what restarts a suspended, aborted or never-heard transfer.
+   - **"Nothing at all" includes duplicates** (corrected 2026-11-02). As first written the rule said "nothing new". But the sender resends from its first unacknowledged packet, so after a lost ACK it sends packets the app already holds. An app that answered those duplicates with a request, which changes nothing for a running sender, would never tell it so, and the two would loop on the same window forever. The Android JVM simulation found this at 10 % loss. The firmware's own simulated app (`Tests/FullRecordSender`) already counted duplicates, so the firmware was right; only this wording, and the first Android draft, were wrong.
    - **Suspend.** Three cycles with no ACK at all (receiver out of range, app gone) suspend the sender, so a lost link costs no more airtime or battery than the 1 Hz beacon. The next request or ACK for that page resumes it where it stopped.
    - **Gates.** Armed, or off the ground: the transfer is forgotten, along with the cached CRC, because a flight may rewrite the slot. Config, deployment test, metadata listing or the quick-look transfer: held where it was, with no transmissions. A request in any state but Disarmed on the ground is dropped, and the app repeats it.
    - Only one locator transfers at a time per channel.
-6b. **The app's flight history reads the nearest copy.**
+6b. **The app's flight history reads the nearest copy.** *(Android 2026-11-02: phone, then the web store when signed in, then the locator's quick-look download. A running background transfer is never joined: the record in transfer charts what has arrived and grows, and any other says it is waiting its turn. The foreground paged transfer in the last bullet is not built yet; a record with no copy still uses the quick-look download.)*
    - **Already in the app** (complete and CRC-verified): shown from the app.
    - **Not in the app but in the web store** (for example a new phone, or after a reinstall): fetched from Firebase.
    - **Neither:** comes from the locator.
@@ -103,6 +115,11 @@ Today's download cannot do that, for two reasons:
    - **Firebase Auth:** Google and Email/Password now; Sign in with Apple when the iOS app ships.
    - **Cloud Storage for Firebase**, on the Blaze plan within its no-cost quota, in us-central1, us-east1 or us-west1.
    - Each record is uploaded as its raw v8 bytes plus the decoded CSV, identical to the USB export, under `users/{uid}/locators/{locator_id}/{record_ts}_{crc}.{bin,csv}`. Upload uses the SDK's resumable upload.
+   - **As built on Android (2026-11-02, `FirebaseCloud.kt`):**
+     - `{locator_id}` is decimal; `{crc}` is 8 lowercase hex digits.
+     - The CSV is built from the raw bytes by a port of the locator's `FormatFloat`, in float arithmetic, and is checked against the real `FormatFloat` over 4,100 values. So it matches the USB export character for character, including two of the export's own quirks: a NaN prints as `0.00`, and lat/lon pass through float before printing, so their 7 decimals carry only float precision (~0.4 m). The `.bin` keeps the exact 1e-7 degrees.
+     - The Google Services plugin is applied only when `google-services.json` exists. A build without it has no Firebase and says so in App Settings.
+     - An upload cut off by an app kill starts that file over at the next app start.
    - Storage rules: a user reads and writes only `users/{their uid}/**`.
    - `google-services.json` stays out of git, like `secrets.properties`.
 9. **Sharing: link tokens only, for now** (chosen by fschroer on 2026-11-01).
@@ -132,9 +149,14 @@ Today's download cannot do that, for two reasons:
     - a slot rewritten mid-transfer;
     - the pickup detector;
   - page-planning tests in `Tests/TransferPlan`;
-  - resume and auto-start state tests in the app.
+  - **Android JVM tests** (`app/src/test/.../fullrecord`, 23 tests, 2026-11-02):
+    - `FullRecordCodecTest` decodes `sender_fixture.bin`, made by `Tools/full-record-fixture` from the **real** `FullRecordSender.hpp`, codec and `FormatFloat`. It checks: bit-exact; parity recovery; any order within a page; a corrupt payload; a foreign CRC; the CSV's number formatting against the locator over 4,100 values. It also holds the test-only Kotlin encoder to the C++ byte for byte;
+    - `FullRecordTransferTest` runs the controller against a simulated locator at 10 % and 25 % loss each way. It checks: bit-exact; resume after an app kill mid-record; arming mid-transfer; the trigger rules; skipping records already held; a slot rewritten mid-transfer.
 
 ## Open
+
+- **The USB export's lat/lon are float-precision** (`UserInteraction::ExportData` passes `lat_1e7 / 1.0e7` through `Fmt(double)`, which converts to float). Its comment says 7 decimals "round-trips without loss", but a float holds about 0.4 m at these magnitudes. The uploaded CSV matches the export as specified; fixing the export would change both together.
+- **Android's store does file I/O on the main thread.** That is a state write of up to ~60 KB every ~5.5 s, and ~1.5 MB once per finished record. Move it to a background dispatcher if it shows as jank on the Pixel.
 
 - The codec measures 5.75 samples per packet, so a typical flight is ~10 min plus the interleave cost, and the 9,000-sample cap ~16 min plus. Re-measure on a real v8 record.
 - Whether the quick-look thinned download should run first so the chart appears immediately, with the full pages following.
