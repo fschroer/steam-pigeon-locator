@@ -2,6 +2,31 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-11-02 (feature) — background full-record transfer, firmware side — ADR "The radio download becomes the primary data path" (0040). NOT on hardware
+
+✅ **What changed:**
+- Four new message types (26–29: `FullRecordRequest` / `Data` / `Parity` / `Ack`), additive, no existing message changed size.
+- `FullRecordSender.hpp`: a HAL-free burst → periodic → 900 ms listen cycle, running only while Disarmed in WaitingLaunch/Landed. Record CRC and page planning take 24 samples per loop cycle. The sender suspends after 3 cycles with no ACK.
+- `PickupDetector.hpp` reports pickup as bit 7 of TelemetryData `physical_deployment_stats`.
+- The receiver relays the new types and holds the transfer's ACK/request in a second forward slot.
+- Android and iOS gain the `MsgType` values, framing of 27/28, constants and layout tests.
+- **Commits:** see the cross-reference commit after this entry (locator, receiver, app, iOS, all on `claude/project-thread-308ix0`).
+- **Tests:**
+  - `Tests/FullRecordSender` 38/0 (simulated half-duplex link and app, bit-exact at 10 % loss each way, no TX in a forward window).
+  - `Tests/FullRecordCodec` 869/0.
+  - Full ARM link at -Og: flash 174 KB, static RAM 52.3 KB of 64.
+  - Receiver wire check 26 asserts.
+  - **Android and iOS not compiled here.**
+- **Modeled:** 0.70 s per packet against 0.6 quiet, so about 12 min for a typical flight. The periodic frame comes every ~5.5 s during a cycle.
+- **Not done:**
+  - the app side (step 2: background transfer, persistence and resume, Firebase upload);
+  - USB serial;
+  - iOS port of the transfer.
+- **Traps:**
+  - Packets are self-contained but decode in sample order: the app keeps each one and decodes it once the two samples before it are in hand.
+  - The app must repeat its `FullRecordRequest` in any window where nothing new arrived. That is what restarts a suspended or aborted sender.
+  - Periodic frames now set `radio_busy_` until TxDone. A lost TxDone is cleared by a 2 s watchdog, but only on the full-transfer path.
+
 ## 2026-11-01 (feature) — full-record radio codec, step 1 of ADR "The radio download becomes the primary data path" (0040). Codec only, not wired in
 
 ✅ **What changed:** new header-only `Rocket/Communication/Inc/FullRecordCodec.hpp`: lossless codec for whole v8 `FlightSample`s, fixed 512-sample pages, `PlanPage` packet planner, independent packets (each coded from the two flash samples before it), IEEE CRC-32. Nothing in the firmware calls it yet.

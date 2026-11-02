@@ -4,8 +4,8 @@
 // What this guards:
 //   * every FlightSample decodes BYTE-IDENTICAL to flash (memcmp, not a
 //     tolerance), on a realistic record and on pure noise;
-//   * each packet decodes on its own, from the two flash samples before it,
-//     so loss, retransmission and out-of-order arrival never matter;
+//   * each packet is coded from the two flash samples before it, so it decodes
+//     whenever those are in hand, in whatever order packets arrive;
 //   * a 512-sample page fits the 256-packet ACK bitmap even when every sample
 //     is the worst case;
 //   * PlanPage is deterministic (resume and retransmission rely on it);
@@ -41,7 +41,7 @@ static int g_pass = 0, g_fail = 0;
     } while (0)
 
 // The payload the transfer packet leaves for codec bits (ADR-0040 measurement).
-static constexpr size_t kPayload = 231u;
+static constexpr size_t kPayload = 230u;   // Communication::kFullRecordPayloadSize
 
 using Record = std::vector<FlightSample>;
 
@@ -81,7 +81,8 @@ static uint32_t PageCount(const Record& r) {
 struct RoundTrip { size_t packets = 0, max_page_packets = 0; bool exact = true; };
 
 // Encode every page, decode every packet independently (in the given order),
-// and compare the reassembly with flash byte for byte.
+// and compare the reassembly with flash byte for byte.  Arrival order is free;
+// each packet decodes once the two samples before it have been decoded.
 static RoundTrip RoundTripRecord(const Record& r, bool shuffle, uint32_t seed = 1u) {
     RoundTrip rt;
     std::vector<Packet> all;
@@ -93,13 +94,26 @@ static RoundTrip RoundTripRecord(const Record& r, bool shuffle, uint32_t seed = 
     rt.packets = all.size();
     if (shuffle) std::shuffle(all.begin(), all.end(), std::mt19937(seed));
 
+    // Decode the way the app must: keep every packet, and decode one only once
+    // the two samples before it are in hand.  Flash is never consulted.
     Record got(r.size());
-    std::vector<bool> filled(r.size(), false);
-    for (const Packet& k : all) {
-        frc::State st = StateAt(r, k.first);   // the receiver's identical copy
-        const size_t n = frc::Decode(st, k.bytes.data(), k.bytes.size(), k.count, &got[k.first]);
-        if (n != k.count) rt.exact = false;
-        for (uint32_t i = k.first; i < k.first + k.count; ++i) filled[i] = true;
+    std::vector<bool> filled(r.size(), false), done(all.size(), false);
+    for (bool progress = true; progress;) {
+        progress = false;
+        for (size_t j = 0; j < all.size(); ++j) {
+            const Packet& k = all[j];
+            if (done[j]) continue;
+            const bool have1 = k.first < 1u || filled[k.first - 1u];
+            const bool have2 = k.first < 2u || filled[k.first - 2u];
+            if (!have1 || !have2) continue;
+            frc::State st = frc::StateBefore(k.first >= 2u ? &got[k.first - 2u] : nullptr,
+                                             k.first >= 1u ? &got[k.first - 1u] : nullptr);
+            const size_t n = frc::Decode(st, k.bytes.data(), k.bytes.size(), k.count, &got[k.first]);
+            if (n != k.count) rt.exact = false;
+            for (uint32_t i = k.first; i < k.first + k.count; ++i) filled[i] = true;
+            done[j] = true;
+            progress = true;
+        }
     }
     for (size_t i = 0; i < r.size(); ++i)
         if (!filled[i] || !SameBytes(got[i], r[i])) { rt.exact = false; break; }
@@ -217,7 +231,7 @@ static void TestVarCodeEdges() {
 }
 
 static void TestRealisticRecord() {
-    printf("realistic 9,000-sample record: bit-exact, independent packets\n");
+    printf("realistic 9,000-sample record: bit-exact, self-contained packets\n");
     const Record r = MakeFlight(9000u, 7u);
     const RoundTrip rt = RoundTripRecord(r, false);
     CHECK(rt.exact);
@@ -233,7 +247,7 @@ static void TestRealisticRecord() {
 }
 
 static void TestShuffledArrival() {
-    printf("packets decoded in random order\n");
+    printf("packets arriving in random order\n");
     const Record r = MakeFlight(3000u, 11u);
     for (uint32_t seed = 1; seed <= 5; ++seed) CHECK(RoundTripRecord(r, true, seed).exact);
 }

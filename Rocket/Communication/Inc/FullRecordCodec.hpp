@@ -22,16 +22,19 @@
 //   otherwise            "1", 5 bits of (L-1) where L = bit length of v (1..32),
 //                        then the low L-1 bits of v (its top bit is implied)
 //
-// Worst case, a sample of pure noise, is 914 bits (115 B), so a 231 B payload
-// always holds at least 2 samples and a 512-sample page at most 256 packets.
+// Worst case, a sample of pure noise, is 910 bits (bounded here at 914), so the
+// 230 B FullRecordPacket payload always holds at least 2 samples and a
+// 512-sample page needs at most 256 packets.
 //
-// PACKETS ARE INDEPENDENT.  A packet's first sample is coded against the two
+// PACKETS ARE SELF-CONTAINED.  A packet's first sample is coded against the two
 // samples before it IN FLASH, not against anything sent earlier: the decode is
-// lossless, so the receiver's copy of those samples is identical to flash.  A
-// lost packet therefore never blocks the ones after it, a retransmission is
-// built straight from flash, and the stream is a pure function of
-// (record, page) — ADR-0009 invariant 12, extended to pages.
-//
+// lossless, so once the app holds those two samples its copy is identical to
+// flash.  A lost packet therefore never changes what is sent after it: packets
+// can arrive in any order, the app keeps each one and decodes it as soon as the
+// two samples before it are in hand, a retransmission is built straight from
+// flash, and the stream is a pure function of (record, page) -- ADR-0009
+// invariant 12, extended to pages.
+
 // HAL-free and header-only so Tests/FullRecordCodec compiles the real code.
 
 #include <cstddef>
@@ -270,54 +273,110 @@ inline size_t Decode(State& st, const uint8_t* in, size_t bytes, size_t count, F
     return done;
 }
 
-// The packet boundaries of one page: starts[k] is the record index of packet
-// k's first sample, starts[count] the page's end.  `starts` must hold
-// kMaxPacketsPerPage + 1 entries.  Returns the packet count.
+// Incremental page planner: feed a page's samples in order and it finds the
+// packet boundaries, so the locator can plan a page a few samples per loop
+// cycle instead of stalling the loop on a 48 KB flash read.  Greedy, exactly
+// like Encoder::Append: a packet takes samples until the next would not fit.
+// offsets[k] is packet k's first sample as an offset into the page, and
+// offsets[count] is the page's length.
+class PagePlanner {
+public:
+    void Begin(uint32_t page_len, size_t payload_bytes, const State& st) {
+        len_ = page_len; cap_bits_ = payload_bytes * 8u; st_ = st;
+        at_ = 0; used_ = 0; count_ = 0; ok_ = page_len > 0u && payload_bytes > 0u;
+        offsets_[0] = 0;
+        if (page_len == 0u) done_ = true; else done_ = false;
+    }
+    // The next sample of the page.  Ignored once the page is planned.
+    void Feed(const FlightSample& s) {
+        if (done_) return;
+        const size_t bits = SampleBits(st_, s);
+        if (bits > cap_bits_ || (used_ + bits > cap_bits_ && count_ + 1u >= kMaxPacketsPerPage)) {
+            ok_ = false; done_ = true; count_ = 0; return;   // cannot happen within the bound
+        }
+        if (used_ + bits > cap_bits_) {                   // close the packet before this sample
+            ++count_;
+            offsets_[count_] = static_cast<uint16_t>(at_);
+            used_ = 0;
+        }
+        used_ += bits;
+        detail::Advance(st_, s);
+        if (++at_ == len_) {
+            ++count_;
+            offsets_[count_] = static_cast<uint16_t>(len_);
+            done_ = true;
+        }
+    }
+    bool done() const { return done_; }
+    bool ok() const { return ok_ && done_; }
+    uint32_t next() const { return at_; }                 // offset of the sample to feed next
+    uint16_t count() const { return ok() ? count_ : 0u; }
+    uint16_t offset(uint16_t k) const { return offsets_[k]; }
+
+private:
+    uint16_t offsets_[kMaxPacketsPerPage + 1u] = {};
+    State    st_{};
+    uint32_t len_ = 0, at_ = 0;
+    size_t   cap_bits_ = 0, used_ = 0;
+    uint16_t count_ = 0;
+    bool     done_ = true, ok_ = false;
+};
+
+inline uint32_t PageLength(uint32_t n_samples, uint32_t page) {
+    const uint32_t first = page * kSamplesPerPage;
+    if (first >= n_samples) return 0u;
+    return (n_samples - first < kSamplesPerPage) ? n_samples - first : kSamplesPerPage;
+}
+inline uint32_t PageCount(uint32_t n_samples) {
+    return (n_samples + kSamplesPerPage - 1u) / kSamplesPerPage;
+}
+
+// One-shot form of PagePlanner, for tests and the app side: starts[k] is the
+// record index of packet k's first sample, starts[count] the page's end.
+// `starts` must hold kMaxPacketsPerPage + 1 entries.  Returns the packet count.
 //
-// read(i, sample) loads record sample i; it is called for the page's samples
-// in order, plus the two before the page.  A pure function of the record, so
-// the locator can rebuild it for any page at any time.
+// read(i, sample) loads record sample i; it is called for the two samples
+// before the page, then the page's samples in order.  A pure function of the
+// record, so the locator can rebuild it for any page at any time.
 template <typename Read>
 inline uint16_t PlanPage(uint32_t n_samples, uint32_t page, size_t payload_bytes,
                          Read&& read, uint32_t* starts) {
     const uint32_t first = page * kSamplesPerPage;
-    if (first >= n_samples || payload_bytes == 0u) { if (starts) starts[0] = first; return 0u; }
-    const uint32_t end = (first + kSamplesPerPage < n_samples) ? first + kSamplesPerPage : n_samples;
+    const uint32_t len = PageLength(n_samples, page);
+    if (starts) starts[0] = first;
+    if (len == 0u || payload_bytes == 0u) return 0u;
 
     FlightSample b2{}, b1{};
     const bool has1 = first >= 1u && read(first - 1u, b1);
     const bool has2 = first >= 2u && read(first - 2u, b2);
-    State st = StateBefore(has2 ? &b2 : nullptr, has1 ? &b1 : nullptr);
-
-    uint8_t scratch[256];
-    const size_t cap = payload_bytes < sizeof(scratch) ? payload_bytes : sizeof(scratch);
-    uint16_t k = 0;
-    uint32_t i = first;
+    PagePlanner pl;
+    pl.Begin(len, payload_bytes, StateBefore(has2 ? &b2 : nullptr, has1 ? &b1 : nullptr));
     FlightSample s{};
-    bool have = i < end && read(i, s);
-    while (have && k < kMaxPacketsPerPage) {
-        starts[k] = i;
-        Encoder e(scratch, cap, st);
-        while (have && e.Append(s)) {
-            ++i;
-            have = i < end && read(i, s);
-        }
-        if (e.count() == 0u) break;             // cannot happen: worst case fits
-        st = e.state();
-        ++k;
+    while (!pl.done()) {
+        if (!read(first + pl.next(), s)) return 0u;
+        pl.Feed(s);
     }
-    starts[k] = i;
-    return k;
+    const uint16_t n = pl.count();
+    for (uint16_t k = 0; k <= n; ++k) starts[k] = first + pl.offset(k);
+    return n;
 }
 
 // CRC-32 (IEEE 802.3, reflected 0xEDB88320), the record's integrity check over
 // its raw sample bytes in flash order.  Start with crc = 0, chain calls.
+// Nibble-table form: 64 B of table, about 4x the bitwise speed, which is what
+// lets the locator CRC a whole 846 KB record a few samples per loop cycle.
 inline uint32_t Crc32(uint32_t crc, const void* data, size_t len) {
+    static constexpr uint32_t kNibble[16] = {
+        0x00000000u, 0x1DB71064u, 0x3B6E20C8u, 0x26D930ACu, 0x76DC4190u, 0x6B6B51F4u,
+        0x4DB26158u, 0x5005713Cu, 0xEDB88320u, 0xF00F9344u, 0xD6D6A3E8u, 0xCB61B38Cu,
+        0x9B64C2B0u, 0x86D3D2D4u, 0xA00AE278u, 0xBDBDF21Cu,
+    };
     const uint8_t* p = static_cast<const uint8_t*>(data);
     crc = ~crc;
     while (len--) {
         crc ^= *p++;
-        for (int b = 0; b < 8; ++b) crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
+        crc = (crc >> 4) ^ kNibble[crc & 0x0Fu];
+        crc = (crc >> 4) ^ kNibble[crc & 0x0Fu];
     }
     return ~crc;
 }

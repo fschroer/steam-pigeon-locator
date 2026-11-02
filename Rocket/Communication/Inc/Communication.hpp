@@ -17,6 +17,8 @@
 #include "FlightProfileCodec.hpp"
 #include "TransferPlan.hpp"
 #include "MessageProtocol.hpp"
+#include "FullRecordSender.hpp"
+#include "PickupDetector.hpp"
 #include "Deployment.hpp"
 
 // ---------------------------------------------------------------------------
@@ -125,6 +127,11 @@ public:
 	void Process(DeviceState &device_state);
 
 	void OnAckReceived(const FlightDataAck &ack, DeviceState &device_state);
+
+	// Background full-record transfer: run from Process() every loop cycle.
+	void ServiceFullRecordTransfer(DeviceState device_state);
+	FullRecordSender::Phase FullRecordPhase() const { return full_.phase(); }
+	bool PickedUp() const { return pickup_.picked_up(); }
 	bool IsComplete() const { return complete_; }
 	// Call from the main loop while in MetadataRequested or DataRequested.
 	// Reverts to Disarmed if the session has been idle too long (e.g. the app's
@@ -328,6 +335,55 @@ private:
 		bool    pending = false;  // true once the group is complete and parity has not yet been sent
 	};
 	ParityAccumulator parity_acc_[kMaxPackets / kParityGroupSize];
+
+	// -----------------------------------------------------------------------
+	// Background full-record transfer (ADR "The radio download becomes the
+	// primary data path", #60).  Runs only while Disarmed in WaitingLaunch or
+	// Landed, alongside the normal beacon: see FullRecordSender.hpp for the
+	// burst / periodic / listen cycle.  It borrows chunk_buf_ as flash scratch
+	// (the quick-look transfer above never runs at the same time: it needs
+	// DataRequested, which pauses this one), and invalidates that buffer's
+	// cache on every read so the quick-look transfer never trusts stale samples.
+	// -----------------------------------------------------------------------
+	class FullIo final : public FullRecordSender::Io {
+	public:
+		explicit FullIo(Communication &c) : c_(c) {}
+		bool SampleCount(uint8_t record, uint32_t &n) override;
+		bool Read(uint8_t record, uint32_t first, FlightArchive::FlightSample *out, uint32_t n, uint32_t &got) override;
+		bool RadioIdle(uint32_t now_ms) override;
+		void Send(FullRecordPacket &pkt, size_t len) override;
+		void SendPeriodic() override;
+	private:
+		Communication &c_;
+	};
+	FullIo full_io_ { *this };
+	FullRecordSender::Sender full_ { full_io_, chunk_buf_, kChunkSize };
+	PickupDetector pickup_;
+
+	// Deferred from the radio ISR like pending_begin_transfer_: the sender reads
+	// flash, so it only ever runs from Process().  A frame arriving while the
+	// previous one is still unconsumed is dropped; the app repeats both.
+	volatile bool pending_full_req_ = false;
+	FullRecordRequest pending_full_req_msg_ { };
+	volatile bool pending_full_ack_ = false;
+	FullRecordAck pending_full_ack_msg_ { };
+
+	// The periodic frame Factory last asked for, so the sender can send it
+	// between bursts while it holds the beacon (Factory's own 1 Hz call is
+	// deferred, not lost).
+	enum class PeriodicKind : uint8_t { PreLaunch, Telemetry };
+	PeriodicKind periodic_kind_ = PeriodicKind::PreLaunch;
+	bool    periodic_armed_ = false;
+	uint8_t periodic_pad_alert_ = 0;
+	void SendPreLaunchDataNow(bool armed, uint8_t pad_alert);
+	void SendTelemetryDataNow(bool armed);
+
+	// Start time of the transmission in flight.  The SubGHz driver's TX timeout
+	// is not routed to OnRadioTxDone, so a lost TxDone would leave radio_busy_
+	// set and the background transfer waiting forever; FullIo::RadioIdle clears
+	// it after kRadioBusyWatchdogMs, well past the longest frame's airtime.
+	uint32_t radio_tx_start_ms_ = 0;
+	static constexpr uint32_t kRadioBusyWatchdogMs = 2000u;
 
 #if SP_LOSS_INJECT
 	// Loss-injection state (issue #18).  dbg_txdrop_per_group_ data packets at the
