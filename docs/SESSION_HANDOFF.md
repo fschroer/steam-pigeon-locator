@@ -2,6 +2,13 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-11-02 (RAM) — quick-look parity accumulators cut to a ring of 4, 14.1 KB back. Host-tested, nothing on hardware
+
+✅ **What changed:** `Communication::parity_acc_` was one 241-byte accumulator per possible parity group (64, 15.4 KB). The 8-packet window only ever touches 3 groups, so it is now `ParityRing` (new, header-only, 976 B): group g lives in slot g % 4, and a group whose slot is claimed is at least 4 groups behind, so it is wholly acknowledged and its parity is dropped. A `static_assert` ties that to `kWindowSize` and `kParityGroupSize`. Otherwise the behavior is the same: the same XOR, lowest pending group first, and a retransmit still clears its group.
+- **RAM, full link at -Og:** reserved 39.0 KiB of 64 (was 53.2), so 25.0 KiB is free; `Factory` is 31.6 KiB (was 45.7).
+- **Tests:** new `Tests/ParityRing` 3,974/0. It flies 200 lossy windowed transfers through the old 64-entry array and the ring side by side. Every group the window touches agrees at every step, each parity the ring does not send is for a wholly acknowledged group, and each transfer completes intact with parity recovery.
+- **One visible difference:** the old array also sent parity for groups already wholly acknowledged, when it had fallen behind the window. The ring skips those. They repaired nothing, so the radio simply has less to send.
+
 ## 2026-11-02 (feature) — full-record transfer over the USB cable, step 3 of ADR "The radio download becomes the primary data path" (0040, decision 6c). Android NOT compiled, nothing on hardware
 
 ✅ **What changed:**

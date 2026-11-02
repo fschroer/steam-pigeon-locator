@@ -19,6 +19,7 @@
 #include "MessageProtocol.hpp"
 #include "FullRecordSender.hpp"
 #include "SerialLink.hpp"
+#include "ParityRing.hpp"
 #include "PickupDetector.hpp"
 #include "Deployment.hpp"
 
@@ -334,18 +335,11 @@ private:
 	uint16_t window_start_ = 0;
 	bool     complete_     = false;
 
-	// Per-group parity accumulator.  Each entry accumulates the XOR of all
-	// FlightDataPacket payloads in a parity group so that the parity packet
-	// can be emitted as soon as the last member of the group is sent.
-	// kPayloadSize is defined in MessageProtocol.hpp as the usable payload
-	// region of a FlightDataPacket (kMaxPayloadBytes minus header and fixed
-	// fields), so this exactly matches the on-wire payload array.
-	struct ParityAccumulator {
-		uint8_t payload[kPayloadSize] = {};
-		uint8_t count   = 0;     // number of data packets XOR'd in so far
-		bool    pending = false;  // true once the group is complete and parity has not yet been sent
-	};
-	ParityAccumulator parity_acc_[kMaxPackets / kParityGroupSize];
+	// Parity accumulators for the groups the window can touch: each XORs the
+	// FlightDataPacket payloads of one parity group so its parity packet can go
+	// out as soon as the group's last member has.  A ring of 4 rather than one
+	// per possible group (64, 15.4 KB): see ParityRing.hpp for why 4 is enough.
+	ParityRing parity_acc_;
 
 	// -----------------------------------------------------------------------
 	// Background full-record transfer (ADR "The radio download becomes the

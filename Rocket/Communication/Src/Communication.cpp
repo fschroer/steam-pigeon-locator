@@ -650,7 +650,7 @@ void Communication::BeginTransfer(uint8_t record_id) {
 	std::memset(sent_, 0, sizeof(sent_));
 	std::memset(acked_, 0, sizeof(acked_));
 	std::memset(last_tx_time_, 0, sizeof(last_tx_time_));
-	std::memset(parity_acc_, 0, sizeof(parity_acc_));
+	parity_acc_.Reset();
 #if SP_LOSS_INJECT
 	std::memset(dbg_dropped_, 0, sizeof(dbg_dropped_));   // one-shot drops reset per transfer
 #endif
@@ -780,7 +780,7 @@ void Communication::SendDataPacket(uint16_t packet_index, uint32_t now_ms) {
 		// Accumulate this packet's payload into the parity group buffer.
 		// XOR only the bytes actually written; the rest remain zero.
 		const uint16_t group = packet_index / kParityGroupSize;
-		ParityAccumulator &acc = parity_acc_[group];
+		ParityRing::Acc &acc = parity_acc_.ForSend(group);
 		const size_t xor_len = (payload_used < kPayloadSize) ? payload_used : kPayloadSize;
 		for (size_t b = 0; b < xor_len; ++b)
 			acc.payload[b] ^= pkt.payload[b];
@@ -799,7 +799,9 @@ void Communication::SendDataPacket(uint16_t packet_index, uint32_t now_ms) {
 }
 
 bool Communication::SendParityPacket(uint16_t group_index, uint32_t now_ms) {
-	const ParityAccumulator &acc = parity_acc_[group_index];
+	const ParityRing::Acc *acc = parity_acc_.Find(group_index);
+	if (acc == nullptr)
+		return true;   // the ring dropped it: the group is wholly acknowledged
 
 	FlightDataPacket parity { };
 	parity.packet_header.system_id = system_id;
@@ -813,7 +815,7 @@ bool Communication::SendParityPacket(uint16_t group_index, uint32_t now_ms) {
 	parity.total_samples = total_samples_;
 
 	// Copy the pre-computed XOR payload; kPayloadSize matches pkt.payload exactly.
-	std::memcpy(parity.payload, acc.payload, kPayloadSize);
+	std::memcpy(parity.payload, acc->payload, kPayloadSize);
 
 	const size_t msg_size = kMaxPayloadBytes;
 	parity.packet_header.crc = ComputeMessageCrcPartial(reinterpret_cast<const uint8_t*>(&parity), msg_size);
@@ -986,16 +988,13 @@ void Communication::Process(DeviceState &device_state) {
 	// After the data burst, send any pending parity packets one per call.
 	// We only reach this path when radio_busy_ is false (burst is done).
 	if (!radio_busy_) {
-		const uint16_t num_groups = static_cast<uint16_t>(kMaxPackets / kParityGroupSize);
-		for (uint16_t g = 0; g < num_groups; ++g) {
-			if (parity_acc_[g].pending) {
-				if (SendParityPacket(g, now_ms)) {
-					// Success: clear the accumulator for this group.
-					std::memset(&parity_acc_[g], 0, sizeof(parity_acc_[g]));
-				}
-				// Whether it succeeded or not, only attempt one parity per call.
-				break;
+		const uint16_t g = parity_acc_.NextPending();
+		if (g != ParityRing::kNone) {
+			if (SendParityPacket(g, now_ms)) {
+				// Success: clear the accumulator for this group.
+				parity_acc_.Clear(g);
 			}
+			// Whether it succeeded or not, only attempt one parity per call.
 		}
 	}
 
@@ -1006,8 +1005,7 @@ void Communication::Process(DeviceState &device_state) {
 		if (sent_[i] && !acked_[i] && (now_ms - last_tx_time_[i] > kRetxTimeoutMs)) {
 			sent_[i] = false;
 			// Clear parity accumulator so it is rebuilt from the retransmitted data.
-			const uint16_t group = i / kParityGroupSize;
-			std::memset(&parity_acc_[group], 0, sizeof(parity_acc_[group]));
+			parity_acc_.Clear(static_cast<uint16_t>(i / kParityGroupSize));
 		}
 	}
 }
