@@ -2,6 +2,20 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-11-02 (feature) — app-started simulated flight, ADR "An app-started simulated flight computed on the locator" (0041). Host-tested, Android NOT compiled, nothing on hardware
+
+✅ **What changed:**
+- **Locator** (`f7f8baf`): `SimFlight.hpp` is a pure generator (10 ms integer steps, thrust solved by bisection through the same `AscentStep` the flight uses, so the solved apogee is the flown one). The driver hooks are `MS5611::setPressureOverride`, `ISM6HG256X::injectSample` (mapped back through the inverse mounting frame) and `SAMM10Q::injectSample`. Canopies follow **fired charges by channel mode** (`CanopyFromCharges`), not flight state. `Factory` runs the lifecycle (Flying → Closing → 10 s LandedHold → pad), ends it on any arm edge **before** the arm, and adds the second pyro lock. The archive overwrites the oldest simulated record first. Cost from a full link: +192 B RAM, +4.5 KB flash.
+- **Receiver** (`1ba84cf`): MsgType 30 in the length table, the struct copy and the bits; `check-wire-format` 27/0.
+- **Android** (`c1d1333`, `--no-verify`, not compiled): `SimFlightWire`, the Simulated Flight screen (drawer, heard and disarmed), the banner, the "Simulated." callout prefix, the chart label.
+- **iOS** (`3ae6dd3`): rows 3 and 4 on the "iOS OWES THIS" list.
+- **Tests:** `Tests/SimFlight` 88/0 flies profiles through the real `FlightManager`; ArchiveRoundTrip Test 6 (evict-simulated-first); Android `SimFlightWireTest` 5/5 under kotlinc against a hex vector from the C++ struct.
+- **Not done:** an Android build; a bench run. Measure the bisection's start cost on the MCU (ADR budget under 20 ms, unmeasured).
+- **Traps:**
+  - The state machine reaches its drogue event even with no channel set to drogue, so **never drive canopies from flight state**; that is what `CanopyFromCharges` is for.
+  - The gyro FIFO is skipped while a simulation runs and flushed when it stops; the EKF and strapdown are re-seeded through `FinishMountingCommit()` on the first simulated sample.
+  - The USB export is deliberately unmarked: the app's full-record CSV must stay byte-identical to it. Only the console flight list says "simulated".
+
 ## 2026-11-02 (RAM) — quick-look parity accumulators cut to a ring of 4, 14.1 KB back. Host-tested, nothing on hardware
 
 ✅ **What changed:** `Communication::parity_acc_` was one 241-byte accumulator per possible parity group (64, 15.4 KB). The 8-packet window only ever touches 3 groups, so it is now `ParityRing` (new, header-only, 976 B): group g lives in slot g % 4, and a group whose slot is claimed is at least 4 groups behind, so it is wholly acknowledged and its parity is dropped. A `static_assert` ties that to `kWindowSize` and `kParityGroupSize`. Otherwise the behavior is the same: the same XOR, lowest pending group first, and a retransmit still clears its group.

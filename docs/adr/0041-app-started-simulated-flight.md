@@ -1,6 +1,6 @@
 # ADR-0041: An app-started simulated flight computed on the locator
 
-- **Status:** Proposed. Decided by Frank Schroer 2026-11-02, who took every recommendation in the design doc ([Locator RAM use and an app-started simulated flight](https://claude.ai/artifact/RST5bWXPZptk63zwd3GJz9)). Not on hardware.
+- **Status:** Accepted. Decided by Frank Schroer 2026-11-02, who took every recommendation in the design doc ([Locator RAM use and an app-started simulated flight](https://claude.ai/artifact/RST5bWXPZptk63zwd3GJz9)). Implemented 2026-11-02: locator `f7f8baf`, receiver `1ba84cf`, Android `c1d1333` (not compiled), iOS owed (`steam-pigeon-ios` `3ae6dd3`). Not on hardware.
 - **Date:** 2026-11-02
 - **Deciders:** Frank Schroer
 - **Related ADRs:** "A vacuum chamber can fly a whole flight" (0031) and the bench replay (`docs/bench-replay.md`), the two harnesses this does not replace; "Arming gates the pyro bus only" (0021), which is what makes this safe; "Launch detection rejects drops" (0015), whose gate the synthetic boost has to pass; "Landing is a quiescence window" (0018); "A parachute opening is inferred from a sustained descent slowdown" (0036); "The radio download becomes the primary data path" (0040), which a simulated record exercises.
