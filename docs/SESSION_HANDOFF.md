@@ -10,7 +10,7 @@ Orientation note for resuming work. Detail lives in the linked artifacts; this i
 - `PickupDetector.hpp` reports pickup as bit 7 of TelemetryData `physical_deployment_stats`.
 - The receiver relays the new types and holds the transfer's ACK/request in a second forward slot.
 - Android and iOS gain the `MsgType` values, framing of 27/28, constants and layout tests.
-- **Commits:** see the cross-reference commit after this entry (locator, receiver, app, iOS, all on `claude/project-thread-308ix0`).
+- **Commits** (all on `claude/project-thread-308ix0`): locator `dc085c2`, receiver `fcbe968`, app `bec5261` (**not compiled**), iOS `b05f0b6` (**not compiled**).
 - **Tests:**
   - `Tests/FullRecordSender` 38/0 (simulated half-duplex link and app, bit-exact at 10 % loss each way, no TX in a forward window).
   - `Tests/FullRecordCodec` 869/0.
