@@ -52,6 +52,7 @@ Write an ADR for a decision that is costly to reverse, or that future work must 
 | [0035](0035-flight-build-at-og.md) | The locator's flight build compiles at -Og, not -O0 | Accepted |
 | [0036](0036-deployment-opening-inference.md) | A parachute opening is inferred from a sustained descent slowdown, and the app says "opening detected", not "deployed" | Accepted |
 | [0037](0037-motor-burnout-vs-apogee-coast-gate.md) | Motor burnout is read from the axial acceleration; apogee detection still waits for drag to decay | Accepted |
+| [0038](0038-sensor-failure-degrades-not-restarts.md) | A sensor that fails its power-on check degrades the locator; it does not restart it | Proposed |
 | [0039](0039-50hz-loop-variable-rate-archive-magnetometer.md) | 50 Hz loop, variable-rate archive and magnetometer | Proposed |
 | [0040](0040-full-record-radio-download-and-cloud-upload.md) | The radio download becomes the primary data path — full bit-exact records, background transfer and Firebase upload | Proposed |
 | [0041](0041-app-started-simulated-flight.md) | An app-started simulated flight computed on the locator | Accepted |

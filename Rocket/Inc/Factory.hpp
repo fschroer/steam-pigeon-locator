@@ -92,6 +92,11 @@ private:
 	// setting actually take effect?", which otherwise cannot be seen without
 	// flying and reading the archived body accel back out (#36 item 5).
 	void PrintMountingDiag();
+	// 's' console key, and once at the end of Init(): each sensor's health and,
+	// if any failed its power-on check, what that disables (ADR-0038).  Answers
+	// in any arm state — it is one line, and "why will it not arm?" is asked by
+	// someone who has just been refused.
+	void PrintSensorStatus();
 	// 'v' console key: profile the battery-sense chain (reference, converter,
 	// load switch, divider, filter cap) and print it.  The app's 8-step gauge
 	// renders every reading below 3750 mV as the same empty bar, and
@@ -120,8 +125,12 @@ private:
 	static constexpr uint16_t kSlotTelemetry  = SamplesForMs(100);
 	static constexpr uint16_t kSlotDividerOff = SamplesForMs(150);
 	static constexpr uint16_t kSlotLedOff     = SamplesForMs(250);
+	// End of the once-a-second yellow sensor-fault flash (ADR-0038), which
+	// kSlotLedOff starts; count 7 under the 20 Hz loop.
+	static constexpr uint16_t kSlotFaultLedOff = SamplesForMs(350);
 	static_assert(kSlotDividerOn < kSlotTelemetry && kSlotTelemetry < kSlotDividerOff
-	              && kSlotDividerOff < kSlotLedOff && kSlotLedOff < SAMPLES_PER_SECOND,
+	              && kSlotDividerOff < kSlotLedOff && kSlotLedOff < kSlotFaultLedOff
+	              && kSlotFaultLedOff < SAMPLES_PER_SECOND,
 	              "once-per-second slots must be distinct and in order");
 
 	static constexpr uint16_t kUart2RxBufSize = 256;  // power of two
