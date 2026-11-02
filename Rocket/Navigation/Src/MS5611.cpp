@@ -239,6 +239,8 @@ bool MS5611::readSample(BaroSample &out) {
 	float p_pa = 0.0f;
 	float t_c = 0.0f;
 	computeCompensated(m_D1, m_D2, p_pa, t_c);
+	if (m_sim_override_)
+		p_pa = m_sim_pressure_pa_;   // simulated flight (ADR-0041); temperature stays real
 
 	out.timestamp_ms = HAL_GetTick();
 	out.pressure_pa = p_pa;

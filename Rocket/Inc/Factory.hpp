@@ -272,4 +272,19 @@ private:
 	// makes.
 	bool       vac_sim_running_   = false;
 	uint32_t   vac_sim_tick_      = 0;
+
+	// App-started simulated flight (ADR "An app-started simulated flight
+	// computed on the locator", 0041).  In every build.  Navigation generates
+	// the sensors; Factory owns the gates, the canopy feedback, the record's
+	// mark and the return to the pad.
+	enum class SimStage : uint8_t { Off, Flying, Closing, LandedHold };
+	SimStage   sim_stage_          = SimStage::Off;
+	bool       sim_marked_         = false;   // record's simulated stat written
+	uint32_t   sim_landed_since_ms_ = 0;
+	static constexpr uint32_t kSimLandedHoldMs = 10000u;
+	// Take the app's SimFlightRequest and run the lifecycle.  Disarmed/Armed only.
+	void ServiceSimFlight(FlightStates& flight_state);
+	// End it now: stop the generator and, if it had launched, land the flight
+	// so the record closes like any other.
+	void EndSimFlight();
 };

@@ -482,6 +482,60 @@ static void TestRecordWrapAround()
 }
 
 // ---------------------------------------------------------------------------
+// Test 6: a full archive overwrites a simulated record before a real one
+// (ADR "An app-started simulated flight computed on the locator", 0041).
+// Records 3 and 6 carry the simulated mark; the next three openings must take
+// 3, then 6, then the oldest real record (0).  With the rule off, 0 first.
+// ---------------------------------------------------------------------------
+static void FillOne(RocketArchive& archive, uint16_t recId, uint32_t tag, bool simulated)
+{
+    CHECK(archive.PrepareRecord(recId));
+    CHECK(archive.InitializeFlightRecord(recId));
+    archive.WriteFlightDataSample(recId, MakeSample(tag));
+    if (simulated)
+        CHECK(archive.WriteStat(recId, FlightArchive::Statistic::PhysicalDeploymentStats,
+                                FlightArchive::kRecordSimulatedBit));
+    archive.FlushFlightData(recId);
+    archive.CloseFlightRecord(recId);
+    archive.SetRecordValid(recId);
+}
+
+static void TestSimulatedEvictedFirst()
+{
+    printf("\n--- Test 6: a full archive overwrites simulated records first ---\n");
+    RamFlashDriver flash(kFlashSize);
+    RocketArchive::Config cfg = MakeConfig();
+    cfg.evictFirstStatId = FlightArchive::Statistic::PhysicalDeploymentStats;
+    cfg.evictFirstMask   = FlightArchive::kRecordSimulatedBit;
+    RocketArchive archive(flash, cfg);
+    CHECK(archive.Init());
+    CHECK(archive.ScanArchive());
+    for (uint16_t r = 0u; r < kRecordCount; ++r)
+    {
+        const uint16_t recId = archive.GetNextAvailableArchiveRecord();
+        CHECK(recId == r);
+        FillOne(archive, recId, r, r == 3u || r == 6u);
+    }
+    const uint16_t expect[3] = { 3u, 6u, 0u };
+    for (int i = 0; i < 3; ++i)
+    {
+        const uint16_t next = archive.GetNextAvailableArchiveRecord();
+        printf("  opening %d takes record %u (expected %u)\n", i + 1, next, expect[i]);
+        CHECK(next == expect[i]);
+        FillOne(archive, next, 100u + i, false);   // replaced by a real flight
+    }
+
+    // The same flash with the rule off: oldest first, simulated or not.
+    RamFlashDriver flash2(kFlashSize);
+    RocketArchive plain(flash2, MakeConfig());
+    CHECK(plain.Init());
+    CHECK(plain.ScanArchive());
+    for (uint16_t r = 0u; r < kRecordCount; ++r)
+        FillOne(plain, plain.GetNextAvailableArchiveRecord(), r, r == 3u);
+    CHECK(plain.GetNextAvailableArchiveRecord() == 0u);
+}
+
+// ---------------------------------------------------------------------------
 // Test 5: pre-launch ring drain — throttle, ordering, and epoch rebasing
 //
 // Mirrors FlightManager's pre-launch ring + throttled drain against the real
@@ -617,6 +671,7 @@ int main()
     TestTruncatedRecordRecovery();
     TestRecordWrapAround();
     TestPreLaunchDrainThrottle();
+    TestSimulatedEvictedFirst();
 
     printf("\n==========================================================\n");
     printf(" Results: %d passed, %d failed\n", g_pass, g_fail);

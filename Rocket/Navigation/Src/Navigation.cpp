@@ -358,6 +358,102 @@ bool Navigation::Init(const uint16_t output_rate_hz) {
 
 // ---------------------------------------------------------------------------
 // setPhase — forward FlightState to EKF and update baro LPF alpha.
+// ---------------------------------------------------------------------------
+// App-started simulated flight (ADR "An app-started simulated flight computed
+// on the locator", 0041).  Factory gates the request; this refuses it only for
+// what it alone can see: sensors that are not healthy, a board that is moving,
+// or a mounting calibration in progress.
+// ---------------------------------------------------------------------------
+bool Navigation::startSimFlight(const SimFlight::Profile& p, int32_t origin_lat_1e7, int32_t origin_lon_1e7) {
+    if (!m_initialized || m_sim_.active() || m_mounting_cal_active) return false;
+    if (!SimFlight::Valid(p)) return false;
+    if (m_imu.getStatus().health != SensorHealth::Ok || m_baro.getStatus().health != SensorHealth::Ok) return false;
+    const ImuSample& imu = m_imu.raw();
+    const float g = Math::norm(imu.accel_selected_mps2) / G0_F;
+    if (std::fabs(g - 1.0f) > 0.2f) return false;
+    if (!m_baro.aglReferenceReady()) return false;   // p0 must be a real ground reference
+
+    m_sim_p0_pa_ = m_baro.getGroundPressurePa();
+    const GpsSample& fix = m_gps.raw();
+    if (fix.position_valid && !m_gps.isFixStale()) {
+        m_sim_lat0_rad_ = fix.lat_rad;
+        m_sim_lon0_rad_ = fix.lon_rad;
+        m_sim_alt0_m_   = fix.alt_m_msl;
+        m_sim_has_origin_ = true;
+    } else if (origin_lat_1e7 != 0 || origin_lon_1e7 != 0) {
+        constexpr double kDeg1e7ToRad = 3.14159265358979323846 / 180.0 * 1e-7;
+        m_sim_lat0_rad_ = origin_lat_1e7 * kDeg1e7ToRad;
+        m_sim_lon0_rad_ = origin_lon_1e7 * kDeg1e7ToRad;
+        m_sim_alt0_m_   = m_baro.getGroundAltitudeMsl();
+        m_sim_has_origin_ = true;
+    } else {
+        m_sim_has_origin_ = false;   // no track: GPS reports nothing new
+    }
+    m_sim_.Start(p, HAL_GetTick());
+    m_sim_seed_pending_ = true;
+    return true;
+}
+
+void Navigation::stopSimFlight() {
+    if (!m_sim_.active()) return;
+    m_sim_.Stop();
+    m_sim_seed_pending_ = false;
+    m_baro.setPressureOverride(false);
+    // Discard the real rotation the FIFO buffered while the simulation ran.
+    m_imu.fifoFlush();
+}
+
+// Body frame -> sensor frame through the inverse of the mounting frame, so the
+// mounting transform downstream maps it back exactly (body[i] =
+// sign[i] * sensor[src[i]]).
+void Navigation::simFillImu(ImuSample& imu, uint32_t now) {
+    const Vec3f fb = m_sim_.AccelBody();
+    const Vec3f wb = m_sim_.GyroBody();
+    auto to_sensor = [this](const Vec3f& b) {
+        const float in[3] = { b.x, b.y, b.z };
+        float out[3] = { 0.0f, 0.0f, 0.0f };
+        for (int i = 0; i < 3; ++i)
+            out[m_mounting.src[i]] = static_cast<float>(m_mounting.sign[i]) * in[i];
+        return Vec3f{ out[0], out[1], out[2] };
+    };
+    const Vec3f f = to_sensor(fb);
+    imu.timestamp_ms = now;
+    imu.accel_low_g_mps2  = f;
+    imu.accel_high_g_mps2 = f;
+    imu.gyro_rps = to_sensor(wb);
+    const float kLowGFull = 16.0f * G0_F;
+    imu.saturated_low_g = std::fabs(f.x) > kLowGFull || std::fabs(f.y) > kLowGFull || std::fabs(f.z) > kLowGFull;
+    imu.saturated_high_g = false;
+    switch (m_imu.accelSource()) {
+        case ImuAccelSource::LowG:  imu.accel_selected_mps2 = imu.accel_low_g_mps2;  break;
+        case ImuAccelSource::HighG: imu.accel_selected_mps2 = imu.accel_high_g_mps2; break;
+        default: imu.accel_selected_mps2 = imu.saturated_low_g ? imu.accel_high_g_mps2 : imu.accel_low_g_mps2; break;
+    }
+    imu.low_g_valid = imu.high_g_valid = imu.gyro_valid = true;
+    m_imu.injectSample(imu);
+}
+
+void Navigation::simFillGps(GpsSample& gps, uint32_t now) const {
+    constexpr double kR = 6378137.0;
+    gps.timestamp_ms = now;
+    gps.lat_rad = m_sim_lat0_rad_ + m_sim_.north_m() / kR;
+    gps.lon_rad = m_sim_lon0_rad_ + m_sim_.east_m() / (kR * std::cos(m_sim_lat0_rad_));
+    gps.alt_m_msl = m_sim_alt0_m_ + m_sim_.height_m();
+    gps.vel_n_mps = m_sim_.vel_n();
+    gps.vel_e_mps = m_sim_.vel_e();
+    gps.vel_d_mps = m_sim_.vel_d();
+    gps.ground_speed_mps = std::sqrt(gps.vel_n_mps * gps.vel_n_mps + gps.vel_e_mps * gps.vel_e_mps);
+    gps.heading_rad = std::atan2(gps.vel_e_mps, gps.vel_n_mps);
+    gps.num_sv = 12u;
+    gps.fix_type = 3u;
+    gps.h_acc_m = 2.5f;
+    gps.v_acc_m = 4.0f;
+    gps.s_acc_mps = 0.3f;
+    gps.position_valid = true;
+    gps.velocity_valid = true;
+    // time_valid and timestamp_s stay the receiver's: the record's date is real.
+}
+
 // Called by FlightManager::UpdateFlightState() at each state transition.
 // ---------------------------------------------------------------------------
 void Navigation::setPhase(FlightStates state) {
@@ -444,10 +540,23 @@ bool Navigation::Update() {
 
     if (!m_test_active_) {
 #endif
+        // Simulated flight (ADR-0041): an arm stops it here too.  Arming starts
+        // the mounting calibration, which must average real gravity, and this
+        // runs before Factory sees the arm edge.
+        if (m_sim_.active() && m_mounting_cal_active)
+            stopSimFlight();
+        const bool sim = m_sim_.active();
+        if (sim) {
+            m_sim_.AdvanceTo(now);
+            m_baro.setPressureOverride(true, m_sim_.PressurePa(m_sim_p0_pa_));
+        }
+
         const uint16_t t_sr = Diag::Now();
         imu_new  = m_imu.readSample(imu);
         baro_new = m_baro.readSample(baro);
         Diag::mark(Diag::Seg::SensorRead, t_sr);
+        if (sim && imu_new)
+            simFillImu(imu, now);
 
         // Magnetometer before the GPS: both are on I2C2, and a GPS that
         // clock-stretches holds the bus only for its own transaction.
@@ -467,6 +576,15 @@ bool Navigation::Update() {
                 const uint16_t t_gps = Diag::Now();
                 gps_new = m_gps.readSample(gps);
                 Diag::mark(Diag::Seg::GpsRead, t_gps);   // every 2nd cycle
+                // The receiver is still read, so its stream stays drained; the
+                // simulation's fix replaces whatever it produced (ADR-0041).
+                if (sim) {
+                    gps_new = m_sim_has_origin_;
+                    if (gps_new) {
+                        simFillGps(gps, now);
+                        m_gps.injectSample(gps, now);
+                    }
+                }
             }
         }
 #if SP_BENCH_REPLAY
@@ -516,6 +634,14 @@ bool Navigation::Update() {
     // Apply mounting frame: remap all IMU axes to standard body frame.
     // Must happen after the raw-accumulation above and before EKF use below.
     if (imu_new) applyMountingFrame(imu);
+
+    // The simulation's first sample stands the rocket on a rail.  Re-seed the
+    // EKF and strapdown from it, as a mounting commit does, rather than leave
+    // them on the board's real attitude on the bench (ADR-0041).
+    if (m_sim_seed_pending_ && imu_new && m_sim_.active()) {
+        FinishMountingCommit();
+        m_sim_seed_pending_ = false;
+    }
 
 #if SP_VACUUM_SIM
     // Vacuum-chamber flight sim: overwrite the body-frame accel with the
@@ -637,6 +763,10 @@ bool Navigation::Update() {
             // loop-rate step when the FIFO is empty/unconfigured, or during
             // bench replay (one injected sample per loop, no hardware FIFO).
             bool propagated = false;
+            // A simulated flight has no FIFO behind it: one simulated rate per
+            // loop, like bench replay (ADR-0041).  The real FIFO is flushed
+            // when the simulation stops.
+            if (!m_sim_.active()) {
 #if SP_BENCH_REPLAY
             if (!m_test_active_) {
 #endif
@@ -691,6 +821,7 @@ bool Navigation::Update() {
 #if SP_BENCH_REPLAY
             }
 #endif
+            }   // !m_sim_.active()
             if (!propagated)
                 m_attitude.propagate(imu.gyro_rps, dt_s, now);
 

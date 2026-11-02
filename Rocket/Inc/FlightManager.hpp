@@ -59,6 +59,10 @@ public:
         ResetPreLaunchBuffer();
     }
 
+    // Land now: the record-span limit, and a simulated flight ended mid-air
+    // (ADR-0041).  Does nothing on the pad or once landed.
+    void ForceLand();
+
     FlightStates GetFlightState() const { return flight_state_; }
     void SetFlight_State(FlightStates flight_state) { flight_state_ = flight_state; }
 

@@ -460,8 +460,13 @@ void UserInteraction::DisplayDataMenu() {
 		archive_.ReadEvent(i, FlightArchive::Statistic::MaxAltitudeM, apogee, valid_record);
 		uint32_t apogee_timestamp = 0;
 		archive_.ReadEvent(i, FlightArchive::Statistic::ApogeeTimestampMs, apogee_timestamp, valid_record);
+		// ADR-0041: only a simulated record writes this slot.
+		uint8_t physical = 0u;
+		bool simulated = false;
+		archive_.ReadEvent(i, FlightArchive::Statistic::PhysicalDeploymentStats, physical, simulated);
+		simulated = simulated && (physical & FlightArchive::kRecordSimulatedBit) != 0u;
 		export_line.WriteMany(archive_position, flight_date_time, Fmt(apogee, 11, 1),
-				Fmt(apogee_timestamp / 1000.0f, 19, 1), crlf_);
+				Fmt(apogee_timestamp / 1000.0f, 19, 1), simulated ? "  simulated" : "", crlf_);
 //    }
 	}
 	export_line.WriteMany(data_guidance_text_, crlf_);

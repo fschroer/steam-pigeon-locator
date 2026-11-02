@@ -40,6 +40,10 @@ public:
 
     SensorStatus getStatus() const { return m_status; }
     const ImuSample& raw() const { return m_last; }
+    // ADR-0041: the simulated flight replaces the sample this driver just read
+    // (sensor frame), so raw() and everything downstream see the simulation.
+    void injectSample(const ImuSample& s) { m_last = s; }
+    ImuAccelSource accelSource() const { return m_accel_source; }
     float GetLowGLsbPerG() const { return m_lowg_lsb_per_g; }
     float GetHighGLsbPerG() const { return m_highg_lsb_per_g; }
     float GetGyroLsbPerDps() const { return m_gyro_lsb_per_dps; }

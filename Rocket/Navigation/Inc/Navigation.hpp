@@ -7,6 +7,7 @@
 #include "InsEkf15.hpp"
 #include "AttitudeEstimator.hpp"
 #include "Constants.hpp"
+#include "SimFlight.hpp"
 
 // ---------------------------------------------------------------------------
 // Bench replay (#35 / #36) — DISABLED by default.
@@ -167,6 +168,18 @@ public:
     // wrote int bytes into a float-typed slot, so every reader reinterpreted the
     // bits and saw ~0.
     float getMaxAltitude()         const { return m_max_altitude_agl_m; }
+
+    // ── App-started simulated flight (ADR-0041) ─────────────────────────────
+    // While active, every sensor but the magnetometer is replaced at the driver
+    // boundary by SimFlight::Generator, so the whole chain downstream runs on
+    // it.  Factory owns the gates (disarmed, on the pad, not busy); this checks
+    // only what it alone can see, the sensors.  origin_*_1e7 is the phone's
+    // position, used when the receiver has no fix (both 0 = none).
+    bool startSimFlight(const SimFlight::Profile& p, int32_t origin_lat_1e7, int32_t origin_lon_1e7);
+    void stopSimFlight();
+    bool simFlightActive() const { return m_sim_.active(); }
+    void setSimCanopy(SimFlight::Canopy c) { m_sim_.SetCanopy(c); }
+    const SimFlight::Generator& simFlight() const { return m_sim_; }
 
     SensorStatus imuStatus()  const { return m_imu.getStatus(); }
     SensorStatus baroStatus() const { return m_baro.getStatus(); }
@@ -333,6 +346,18 @@ private:
     NoseAxis       m_nose_axis_           = NoseAxis::Auto;
     MountingFrame  m_mounting             = {{0,1,2},{1,1,1}}; // identity (standard)
     bool           m_mounting_cal_active  = false;
+
+    // ADR-0041 simulated flight.
+    SimFlight::Generator m_sim_ {};
+    float    m_sim_p0_pa_        = 0.0f;   // ground pressure at the start
+    double   m_sim_lat0_rad_     = 0.0;
+    double   m_sim_lon0_rad_     = 0.0;
+    double   m_sim_alt0_m_       = 0.0;
+    bool     m_sim_has_origin_   = false;
+    bool     m_sim_seed_pending_ = false;  // re-seed EKF + strapdown on the first sample
+    // Replace this cycle's IMU / GPS samples with the simulation's.
+    void simFillImu(ImuSample& imu, uint32_t now);
+    void simFillGps(GpsSample& gps, uint32_t now) const;
     uint16_t       m_mounting_cal_count   = 0;
     Vec3f          m_mounting_accel_accum = {};
 

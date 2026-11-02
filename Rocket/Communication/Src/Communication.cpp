@@ -173,7 +173,8 @@ void Communication::SendTelemetryDataNow(bool armed, bool radio) {
 	// Bit 7 is recovery status, not deployment: picked up after landing, one of
 	// the app's triggers for a background full-record transfer.
 	msg.physical_deployment_stats = static_cast<uint8_t>(flight_.GetPhysicalDeploymentStats()
-			| (pickup_.picked_up() ? kTelemetryPickedUpBit : 0u));
+			| (pickup_.picked_up() ? kTelemetryPickedUpBit : 0u)
+			| (nav_.simFlightActive() ? kTelemetrySimulatedBit : 0u));   // ADR-0041
 	msg.agl = baro_sample.altitude_m_agl;
 	// Raw NED velocity: GPS horizontal + raw-baro vertical (−d(AGL)/dt = +down).
 	msg.vel_ned_mps = Vec3f{ gps_sample.vel_n_mps, gps_sample.vel_e_mps, -baro_sample.velocity };
@@ -274,6 +275,14 @@ void Communication::SendFlightEvents() {
 	bool present = false;
 	archive_.ReadEvent(record_id_, FlightArchive::Statistic::FlightTimestampS, msg.flight_timestamp_s, present);
 	archive_.ReadEvent(record_id_, FlightArchive::Statistic::MaxAltitudeM, msg.max_altitude_m, present);
+	{
+		// ADR-0041: only a simulated record writes this slot.
+		uint8_t physical = 0u;
+		bool simulated = false;
+		archive_.ReadEvent(record_id_, FlightArchive::Statistic::PhysicalDeploymentStats, physical, simulated);
+		if (simulated && (physical & FlightArchive::kRecordSimulatedBit) != 0u)
+			msg.flags |= kFlightEventsSimulated;
+	}
 
 	ReadEventTimestamp(archive_, record_id_, FlightArchive::Statistic::LaunchTimestampMs,
 			FlightEvent::Launch, msg);
@@ -524,6 +533,14 @@ void Communication::OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
 			}
 			break;
 		}
+
+		case MsgType::SimFlightRequest:
+			// Every gate is Factory's, in the main loop, where the flight state
+			// machine and Navigation run (ADR-0041).  A cancel is queued the same
+			// way and is never refused there.  Latest wins.
+			std::memcpy(&pending_sim_req_msg_, payload, sizeof(SimFlightRequest));
+			pending_sim_req_ = true;
+			break;
 
 		case MsgType::PadAlertSnoozeRequest: {
 			// Minutes sits after the header AND the target id (ADR-0020).
@@ -1193,6 +1210,12 @@ ParseResult Communication::ParseLoraFrame(const uint8_t *data, std::size_t len, 
 		// minutes), so no ParsedMessage member is needed — only the length has
 		// to be right for the address check ahead of it to have found the id.
 		if (len != sizeof(PadAlertSnoozeRequest))
+			return ParseResult::LengthMismatch;
+		out.type = hdr.msg_type;
+		return ParseResult::Ok;
+	case MsgType::SimFlightRequest:
+		// Read from the frame in the handler, like PadAlertSnoozeRequest.
+		if (len != sizeof(SimFlightRequest))
 			return ParseResult::LengthMismatch;
 		out.type = hdr.msg_type;
 		return ParseResult::Ok;

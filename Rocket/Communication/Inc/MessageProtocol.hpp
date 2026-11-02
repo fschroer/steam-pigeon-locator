@@ -76,7 +76,11 @@ enum class MsgType : uint8_t {
 	FullRecordRequest = 26, // App→locator: send page N of a record (0xFFFF stops).
 	FullRecordData = 27,    // Locator→app: one packet of a page, FullRecordCodec payload.
 	FullRecordParity = 28,  // Locator→app: XOR of up to kParityGroupSize data packets.
-	FullRecordAck = 29      // App→locator: bitmap of the page's packets received.
+	FullRecordAck = 29,     // App→locator: bitmap of the page's packets received.
+	// App→locator: start (or cancel) a simulated flight the locator computes
+	// from a profile (ADR "An app-started simulated flight computed on the
+	// locator", 0041).  Accepted only disarmed, on the pad.
+	SimFlightRequest = 30
 };
 
 // Flight event summary indices.  One entry per archived event timestamp; the
@@ -245,16 +249,18 @@ struct FlightMetadata {
 struct FlightEventsMessage {
 	PacketHeader packet_header;
 	uint8_t  record;              // archive slot this summary describes
-	uint8_t  reserved;            // pad to keep the u16/u32 fields naturally sized
+	uint8_t  flags;               // bit 0: a simulated flight (ADR-0041); was reserved, always 0
 	uint16_t present_mask;        // bit (1 << FlightEvent) set ⇒ that timestamp is valid
 	uint32_t flight_timestamp_s;  // GPS wall clock at flight start (Statistic::FlightTimestampS)
 	uint32_t event_timestamp_ms[kFlightEventCount];  // ms since the launch epoch, indexed by FlightEvent
 	float    max_altitude_m;      // raw-baro apogee peak (Statistic::MaxAltitudeM)
 	uint8_t  deployment_ch_stats[4];   // per channel: mode (bits 0-2) | fired (3) | pre-fire cont. (4) | post-fire cont. (5)
 };
-// NOTE: Statistic::MaxVelocityMps, MaxAccelerationMps2 and PhysicalDeploymentStats
-// exist in the archive enum but are never written by FlightManager, so they are
-// deliberately absent here — sending them would ship guaranteed zeros.  Add them
+static constexpr uint8_t kFlightEventsSimulated = 0x01u;   // FlightEventsMessage::flags
+// NOTE: Statistic::MaxVelocityMps and MaxAccelerationMps2 exist in the archive
+// enum but are never written by FlightManager, and PhysicalDeploymentStats only
+// as ADR-0041's simulated mark (which reaches the app as flags bit 0), so they
+// are deliberately absent here — sending them would ship guaranteed zeros.  Add them
 // once the locator actually records them (and bump the size assert below).
 
 // On-wire packet for flight profile transfer
@@ -340,6 +346,11 @@ struct FullRecordAck {              // app→locator, MsgType::FullRecordAck
 // left its settled reading, or the board has turned, for a sustained window.  One
 // of the app's three triggers for starting a background transfer.
 static constexpr uint8_t kTelemetryPickedUpBit = 0x80u;
+// Set while the locator flies an app-started simulated flight (ADR "An
+// app-started simulated flight computed on the locator", 0041): every sensor
+// is synthetic and the locator is disarmed.  The app labels the flight
+// SIMULATED.  Same spare-bit scheme, so the message keeps its size.
+static constexpr uint8_t kTelemetrySimulatedBit = 0x40u;
 
 // ── Addressed app→locator commands (ADR-0020, #34) ──────────────────────────
 //
@@ -403,6 +414,29 @@ struct PadAlertSnoozeRequest {
 	uint32_t target_locator_id;
 	uint8_t minutes;       // 0 cancels an active snooze
 };
+
+// Start or cancel an app-started simulated flight (ADR "An app-started
+// simulated flight computed on the locator", 0041).  A start outside the ADR's
+// ranges, or while the locator is armed, off the pad or busy, is ignored; a
+// cancel is never refused.  origin_* is the phone's position, used only when the
+// locator has no fix of its own (both 0 = none).
+struct SimFlightRequest {
+	PacketHeader packet_header;
+	uint32_t target_locator_id;
+	uint16_t apogee_m;         // 30..3000
+	int32_t  origin_lat_1e7;
+	int32_t  origin_lon_1e7;
+	uint16_t wind_from_deg;    // 0..359, where the wind blows from
+	uint16_t seed;             // sensor noise
+	uint8_t  action;           // 0 cancel, 1 start
+	uint8_t  burn_ds;          // 3..50, tenths of a second
+	uint8_t  drogue_mps;       // 5..60
+	uint8_t  main_dmps;        // 20..150, tenths of a m/s
+	uint8_t  wind_mps;         // 0..20
+	uint8_t  reserved;
+};
+static constexpr uint8_t kSimFlightCancel = 0u;
+static constexpr uint8_t kSimFlightStart  = 1u;
 
 // NOTE: there is deliberately no "is this command addressed?" predicate here.
 // The locator requires an address from EVERY frame it acts on (ADR-0020), because
@@ -475,5 +509,16 @@ static_assert(offsetof(FullRecordPacketHeader, record)        == 24, "FullRecord
 static_assert(offsetof(FullRecordAck, record_crc)             == 10, "FullRecordAck offsets changed — sync app + iOS");
 static_assert(offsetof(FullRecordAck, bitmap)                 == 18, "FullRecordAck offsets changed — sync app + iOS");
 static_assert(offsetof(FullRecordRequest, page)               == 10, "FullRecordRequest offsets changed — sync app + iOS");
+// ADR-0041.  The receiver sizes this from its own table; the app builds it by offset.
+static_assert(sizeof(SimFlightRequest)               ==  30, "SimFlightRequest size changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightRequest, apogee_m)       == 10, "SimFlightRequest offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightRequest, origin_lat_1e7) == 12, "SimFlightRequest offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightRequest, origin_lon_1e7) == 16, "SimFlightRequest offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightRequest, wind_from_deg)  == 20, "SimFlightRequest offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightRequest, seed)           == 22, "SimFlightRequest offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightRequest, action)         == 24, "SimFlightRequest offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightRequest, wind_mps)       == 28, "SimFlightRequest offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(FlightEventsMessage, flags)       ==  7, "FlightEventsMessage flags moved — sync app + iOS");
+static_assert(static_cast<uint8_t>(MsgType::SimFlightRequest) == 30, "MsgType::SimFlightRequest changed — sync receiver + app + iOS");
 
 } // namespace Communication

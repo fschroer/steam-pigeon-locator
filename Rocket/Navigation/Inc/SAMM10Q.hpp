@@ -53,6 +53,16 @@ public:
 
     SensorStatus getStatus() const { return m_status; }
     const GpsSample& raw() const { return m_last; }
+    // ADR-0041: the simulated flight's fix replaces the receiver's, and counts
+    // as a fresh solution, so the stale-fix watchdog and archiveFixType see it.
+    void injectSample(const GpsSample& s, uint32_t now_ms) {
+        m_last = s;
+        m_last_pvt_ms = now_ms;
+        m_status.last_update_ms = now_ms;
+        m_status.data_valid = s.position_valid;
+        m_status.data_fresh = true;
+        m_status.health = s.position_valid ? SensorHealth::Ok : SensorHealth::Warning;
+    }
 
     bool hasSeenAck() const { return m_seen_ack; }
     bool hasSeenNak() const { return m_seen_nak; }

@@ -169,6 +169,17 @@ public:
 	// power cycle clears it. A snooze that outlived either would be an off
 	// switch, and would hand back exactly the forgotten arm ADR-0021 exists to
 	// catch. There is no "snooze indefinitely".
+	// The latest SimFlightRequest from the app, once (ADR-0041).  Factory gates it.
+	bool TakeSimFlightRequest(SimFlightRequest& out) {
+		if (!pending_sim_req_) return false;
+		const uint32_t primask = __get_PRIMASK();
+		__disable_irq();
+		out = pending_sim_req_msg_;
+		pending_sim_req_ = false;
+		__set_PRIMASK(primask);
+		return true;
+	}
+
 	bool IsPadAlertSnoozed() const { return PadAlertSnoozeRemainingMs() > 0; }
 
 	int32_t PadAlertSnoozeRemainingMs() const {
@@ -340,6 +351,10 @@ private:
 	// out as soon as the group's last member has.  A ring of 4 rather than one
 	// per possible group (64, 15.4 KB): see ParityRing.hpp for why 4 is enough.
 	ParityRing parity_acc_;
+
+	// ADR-0041: written in the radio RX callback, taken by Factory.
+	SimFlightRequest pending_sim_req_msg_ {};
+	volatile bool    pending_sim_req_ = false;
 
 	// -----------------------------------------------------------------------
 	// Background full-record transfer (ADR "The radio download becomes the

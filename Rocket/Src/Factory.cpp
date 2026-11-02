@@ -132,6 +132,18 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 
 	if (device_state_ != prev_device_state_) {
 		if (device_state_ == DeviceState::Armed) {
+			// Any arm ends a simulated flight BEFORE it takes effect (ADR-0041).
+			// A launched one is landed and its record closed here, so the
+			// StartOpenNewFlight below opens a fresh record instead of
+			// abandoning the simulated one half-written.
+			if (sim_stage_ != SimStage::Off) {
+				EndSimFlight();
+				if (archive_.IsActiveOpen() && flight_.GetFlightState() == FlightStates::Landed) {
+					flight_.WriteEkfDiagSnapshot(FlightArchive::Statistic::EkfDiagAtClose);
+					archive_.CloseCurrentFlight();
+				}
+				sim_stage_ = SimStage::Off;
+			}
 			// Arming shuts the detection window for the rest of the session.  The
 			// console rate is a bench concern; leaving it movable by whatever the
 			// RX pin picks up during a flight buys nothing and risks the link the
@@ -276,7 +288,9 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 		// switch: DeviceState::Test fires charges for the remote deployment test
 		// (FR-A7) and Config/Metadata/Data leave the line as they found it, so a
 		// blanket disable here would break the deployment test outright.
-		if (device_state_ == DeviceState::Armed)
+		// A simulated flight never shares a cycle with a live pyro bus
+		// (ADR-0041): the arm edge above ends it, and this is the second lock.
+		if (device_state_ == DeviceState::Armed && !navigation_.simFlightActive())
 			EnableDeployment();
 		else
 			DisableDeployment();
@@ -559,6 +573,7 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			flight_.SetPpsStatus(pps);
 		}
 		flight_.SetArmed(device_state_ == DeviceState::Armed);
+		ServiceSimFlight(flight_state);
 		Diag::begin(Diag::Seg::FlightState);
 		flight_.UpdateFlightState();
 		Diag::end(Diag::Seg::FlightState);
@@ -1627,4 +1642,100 @@ void Factory::ServiceBus() {
 
 void Factory::UartSend(const char *msg) {
 	HAL_UART_Transmit(&huart2_, reinterpret_cast<const uint8_t*>(msg), static_cast<uint16_t>(strlen(msg)), 100);
+}
+
+// ============================================================================
+// App-started simulated flight (ADR "An app-started simulated flight computed
+// on the locator", 0041)
+// ============================================================================
+
+void Factory::EndSimFlight() {
+	navigation_.stopSimFlight();
+	if (flight_.GetFlightState() >= FlightStates::Launched)
+		flight_.ForceLand();
+}
+
+void Factory::ServiceSimFlight(FlightStates& flight_state) {
+	Communication::SimFlightRequest req {};
+	if (comm_.TakeSimFlightRequest(req)) {
+		if (req.action == Communication::kSimFlightCancel) {
+			// Never refused, like the deployment-test cancel.
+			if (sim_stage_ == SimStage::Flying) {
+				EndSimFlight();
+				sim_stage_ = flight_.GetFlightState() == FlightStates::Landed ? SimStage::Closing : SimStage::Off;
+			}
+		} else if (req.action == Communication::kSimFlightStart
+				&& sim_stage_ == SimStage::Off
+				&& device_state_ == DeviceState::Disarmed
+				&& flight_state == FlightStates::WaitingLaunch
+				&& !pad_reset_pending_
+				&& archive_.IsActiveOpen()) {
+			SimFlight::Profile p;
+			p.apogee_m      = static_cast<float>(req.apogee_m);
+			p.burn_s        = static_cast<float>(req.burn_ds) * 0.1f;
+			p.drogue_mps    = static_cast<float>(req.drogue_mps);
+			p.main_mps      = static_cast<float>(req.main_dmps) * 0.1f;
+			p.wind_mps      = static_cast<float>(req.wind_mps);
+			p.wind_from_deg = static_cast<float>(req.wind_from_deg);
+			p.seed          = req.seed;
+			if (navigation_.startSimFlight(p, req.origin_lat_1e7, req.origin_lon_1e7)) {
+				sim_stage_  = SimStage::Flying;
+				sim_marked_ = false;
+				UartSend("\r\nSIM|started\r\n");
+			}
+		}
+	}
+
+	switch (sim_stage_) {
+	case SimStage::Off:
+		return;
+	case SimStage::Flying: {
+		// Navigation can stop it on its own (an arm's mounting calibration).
+		if (!navigation_.simFlightActive()) {
+			EndSimFlight();
+			sim_stage_ = flight_.GetFlightState() == FlightStates::Landed ? SimStage::Closing : SimStage::Off;
+			return;
+		}
+		// The canopies open when this locator's charges would have deployed
+		// them, by each channel's configured mode.
+		const RocketPersistentSettings& cfg = archive_.GetLocatorSettings();
+		const uint8_t stats[4] = { flight_.GetDeploymentStats(1), flight_.GetDeploymentStats(2),
+		                           flight_.GetDeploymentStats(3), flight_.GetDeploymentStats(4) };
+		const DeployMode modes[4] = { cfg.deployment_ch1_mode, cfg.deployment_ch2_mode,
+		                              cfg.deployment_ch3_mode, cfg.deployment_ch4_mode };
+		navigation_.setSimCanopy(SimFlight::CanopyFromCharges(stats, modes, bit_shift_fired));
+		// Mark the record once it has launched: only a simulated record writes
+		// this slot, and a full archive overwrites such a record first.
+		if (!sim_marked_ && flight_state >= FlightStates::Launched) {
+			archive_.WriteEvent(FlightArchive::Statistic::PhysicalDeploymentStats, FlightArchive::kRecordSimulatedBit);
+			sim_marked_ = true;
+		}
+		if (flight_state == FlightStates::Landed) {
+			// Landed: the real sensors take over, still and on the bench, and the
+			// Landed path in ProcessRocketEvents closes the record as usual.
+			navigation_.stopSimFlight();
+			sim_stage_ = SimStage::Closing;
+		}
+		return;
+	}
+	case SimStage::Closing:
+		if (!archive_.IsActiveOpen()) {
+			sim_stage_ = SimStage::LandedHold;
+			sim_landed_since_ms_ = HAL_GetTick();
+		}
+		return;
+	case SimStage::LandedHold:
+		if (HAL_GetTick() - sim_landed_since_ms_ >= kSimLandedHoldMs) {
+			// Back to the pad, with a fresh record open for the next flight,
+			// real or simulated.  Nothing was lost, so the recovery beacon stops.
+			flight_.PrepareForArm();
+			flight_state = flight_.GetFlightState();
+			landed_beacon_ = false;
+			datestamp_saved_ = false;
+			archive_.StartOpenNewFlight();
+			sim_stage_ = SimStage::Off;
+			UartSend("\r\nSIM|back on the pad\r\n");
+		}
+		return;
+	}
 }

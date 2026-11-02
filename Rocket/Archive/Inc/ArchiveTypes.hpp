@@ -48,6 +48,14 @@ namespace FlightArchive
 			Count
 	};
 
+    // Statistic::PhysicalDeploymentStats was defined and never written until
+    // ADR-0041 ("An app-started simulated flight computed on the locator").  A
+    // simulated record writes this bit there at launch; a real flight's record
+    // leaves the slot absent, as before.  The same value as the telemetry's
+    // kTelemetrySimulatedBit, on purpose, since both live in a
+    // physical_deployment_stats byte.
+    constexpr uint8_t kRecordSimulatedBit = 0x40u;
+
     // Saturating snapshot of InsEkf15::EkfDiag, sized to one StatSlot payload.
     struct EkfDiagSnapshot
     {

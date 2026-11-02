@@ -113,6 +113,11 @@ RocketArchive::Config Archive::MakeConfig(IFlashDriver &flash) {
 	cfg.recordCount = record_count;
 	cfg.samplesPerRecord = kRecordCapacitySamples;
 	cfg.statSlotCount = static_cast<uint16_t>(FlightArchive::Statistic::Count);
+	// A full archive overwrites a simulated record before a real one (ADR "An
+	// app-started simulated flight computed on the locator").  Only simulated
+	// records carry this stat; see Factory's simulated-flight lifecycle.
+	cfg.evictFirstStatId = static_cast<RocketArchive::StatId>(FlightArchive::Statistic::PhysicalDeploymentStats);
+	cfg.evictFirstMask = FlightArchive::kRecordSimulatedBit;
 	return cfg;
 }
 

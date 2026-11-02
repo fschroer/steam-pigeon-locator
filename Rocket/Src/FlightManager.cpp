@@ -791,14 +791,8 @@ void FlightManager::UpdateFlightState() {
 
     // Force-close the flight once the record span is full so the landing timestamp
     // is never larger than the recorded data span.
-    if (flight_state_ >= FlightStates::Launched && flight_state_ < FlightStates::Landed
-            && flight_time_ms >= kMaxFlightMs) {
-        flight_state_ = FlightStates::Landed;
-        nav_.setPhase(FlightStates::Landed);
-        m_rate_events_.has_landing = true;
-        m_rate_events_.landing_ms  = flight_time_ms;
-        archive_.WriteEvent(FlightArchive::Statistic::LandingTimestampMs, flight_time_ms);
-    }
+    if (flight_time_ms >= kMaxFlightMs)
+        ForceLand();
 
     // --- Ring drain ---
     // Once launched, write buffered samples oldest-first into the archive,
@@ -891,6 +885,19 @@ void FlightManager::DeployIfClear(uint8_t channel) {
         Deploy(channel, DeployState::On);
     else
         deployment_queued_[channel - 1] = true;
+}
+
+// Land now, wherever the flight is: the record-span limit above, and a
+// simulated flight ended in the air (ADR-0041).  No landed tail is armed, so
+// RecordComplete() turns true as soon as the ring has drained.
+void FlightManager::ForceLand() {
+    if (flight_state_ < FlightStates::Launched || flight_state_ >= FlightStates::Landed)
+        return;
+    flight_state_ = FlightStates::Landed;
+    nav_.setPhase(FlightStates::Landed);
+    m_rate_events_.has_landing = true;
+    m_rate_events_.landing_ms  = flight_time_ms;
+    archive_.WriteEvent(FlightArchive::Statistic::LandingTimestampMs, flight_time_ms);
 }
 
 void FlightManager::ResetFlight() {

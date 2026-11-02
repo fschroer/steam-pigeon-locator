@@ -48,6 +48,13 @@ public:
 	const BaroSample& raw() const {
 		return m_last;
 	}
+	// ADR-0041: while on, each conversion's compensated pressure is replaced by
+	// p_pa before the median, IIR, AGL and velocity chain, which then runs on it
+	// exactly as on a real reading.  The ADC keeps its own cadence.
+	void setPressureOverride(bool on, float p_pa = 0.0f) {
+		m_sim_override_ = on;
+		m_sim_pressure_pa_ = p_pa;
+	}
 
 	bool zeroAglReference(float alpha = 0.02f);
 	float getGroundAltitudeMsl() const {
@@ -150,6 +157,8 @@ private:
 	}();
 	static constexpr float kIirCoeff          = 1.0f / kIirAlpha;   // 4.0 @ 20 Hz, ~8.3 @ 45 Hz
 	float                  m_iir_pressure_pa_ = 0.0f;
+	bool                   m_sim_override_    = false;   // ADR-0041
+	float                  m_sim_pressure_pa_ = 0.0f;
 	bool                   m_iir_initialized_ = false;
 
 	volatile uint32_t d2_converting_ms_ = 0;
