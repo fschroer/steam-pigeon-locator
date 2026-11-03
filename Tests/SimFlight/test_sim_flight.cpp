@@ -462,6 +462,52 @@ static void B2_NoDrogueChannelFallsBallistic() {
     CHECK_MSG(f.peak_descent < -40.0f, "fastest descent %.1f m/s: a drogue opened", f.peak_descent);
 }
 
+// A9: a real design against OpenRocket.  Frank's "Scratch Built Tron Short
+// 2.6" .ork on a Cesaroni 164H90-12A, which is also the app's default rocket
+// (DefaultRocket.kt).  The curve is the app's 32-point thinning of the .ork
+// simulation's thrust column; Cd is OpenRocket's over the ascent.  OpenRocket's
+// saved run: 641.0 m at 9.84 s (sea level, 15 C, 2 m/s wind, 1 m rail).
+// OpenRocket models what this does not (fin and body lift, angle of attack,
+// damping).  Calm, it lands within 0.5 percent; OpenRocket's own run had
+// 2 m/s of wind, which costs this model about 1 percent, so that band is 2.
+static void A9_TronAgainstOpenRocket() {
+    printf("\n--- A9: Tron Short 2.6 (H90) against OpenRocket ---\n");
+    static const float kCurve[][2] = { {0.021f, 10.00f}, {0.028f, 154.00f}, {0.055f, 155.00f}, {0.075f, 108.00f}, {0.093f, 112.00f}, {0.130f, 120.00f}, {0.154f, 119.50f}, {0.243f, 117.40f}, {0.350f, 115.00f}, {0.427f, 112.60f}, {0.440f, 112.30f}, {0.481f, 111.00f}, {0.506f, 110.30f}, {0.542f, 109.10f}, {0.591f, 107.70f}, {0.703f, 104.20f}, {0.719f, 103.80f}, {0.765f, 102.30f}, {0.807f, 101.10f}, {0.860f, 99.50f}, {0.943f, 96.90f}, {1.043f, 93.90f}, {1.093f, 92.30f}, {1.336f, 85.00f}, {1.400f, 83.00f}, {1.480f, 84.00f}, {1.560f, 73.00f}, {1.660f, 33.80f}, {1.690f, 22.00f}, {1.760f, 8.00f}, {1.798f, 4.70f}, {1.850f, 0.00f} };
+    Profile p{};
+    p.n_points = static_cast<uint8_t>(sizeof(kCurve) / sizeof(kCurve[0]));
+    for (uint8_t i = 0; i < p.n_points; ++i) { p.t_s[i] = kCurve[i][0]; p.f_n[i] = kCurve[i][1]; }
+    p.motor_loaded_kg = 0.190f; p.motor_prop_kg = 0.084f;
+    p.dry_mass_kg = 0.501f; p.ref_diam_m = 0.0674f;
+    const float cd[SimFlight::kMachPoints] = { 0.661f, 0.665f, 0.691f, 0.705f, 0.774f, 1.071f, 1.002f, 0.898f };
+    for (uint8_t i = 0; i < SimFlight::kMachPoints; ++i) p.cd[i] = cd[i];
+    p.rail_len_m = 1.0f; p.temp_c = 15.0f; p.wind_mps = 2.0f; p.wind_from_deg = 270.0f;
+    p.drogue_mps = 7.0f; p.main_mps = 7.0f;
+    CHECK(SimFlight::Valid(p));
+    auto fly = [](const Profile& q, float& t_apogee) {
+        Generator g;
+        g.Start(q, 1000u, 101325.0f);
+        t_apogee = 0.0f;
+        for (uint32_t ms = 1000u; ms < 1000u + 60000u; ms += 10u) {
+            g.AdvanceTo(ms);
+            if (g.apogee_t_s() >= 0.0f) { t_apogee = g.apogee_t_s() - g.launch_t_s(); break; }
+        }
+        return g.peak_m();
+    };
+    float t_windy = 0.0f, t_calm = 0.0f;
+    const float windy = fly(p, t_windy);
+    Profile calm = p; calm.wind_mps = 0.0f;
+    const float still = fly(calm, t_calm);
+    printf("  2 m/s wind: apogee %.1f m  t %.2f s    calm: apogee %.1f m  t %.2f s    (OpenRocket, 2 m/s: 641.0 m, 9.84 s)\n",
+           windy, t_windy, still, t_calm);
+    // Calm, the model is the point mass OpenRocket's run nearly is: 0.5 percent.
+    CHECK_MSG(std::fabs(still - 641.0f) <= 0.005f * 641.0f, "calm apogee %.1f", still);
+    CHECK_MSG(std::fabs(t_calm - 9.84f) <= 0.15f, "calm t_apogee %.2f", t_calm);
+    // In wind, zero-angle-of-attack weathercocking turns harder than
+    // OpenRocket's damped restoring moment: 1 percent low on this rocket.
+    CHECK_MSG(std::fabs(windy - 641.0f) <= 0.02f * 641.0f, "windy apogee %.1f", windy);
+    CHECK_MSG(windy < still, "wind should cost height");
+}
+
 int main() {
     printf("SimFlight tests (SAMPLES_PER_SECOND=%u)\n", static_cast<unsigned>(SAMPLES_PER_SECOND));
     printf("\n--- A1: vertical flights against an independent reference ---\n");
@@ -475,6 +521,7 @@ int main() {
     A6_CanopyRates();
     A7_Pressure();
     A8_Validation();
+    A9_TronAgainstOpenRocket();
 
     B1_EventsWhereThePhysicsSays("54 mm H", SmallH());
     B1_EventsWhereThePhysicsSays("98 mm L, transonic", BigL());
