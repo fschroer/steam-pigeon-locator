@@ -2,6 +2,14 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-11-03 (first simulated flight) — four fixes from Frank's first run. Host-tested, Android NOT compiled
+
+Frank flew the Tron in 10 m/s of wind (H128W, 7.5° rail). Everything below came out of that run.
+- **Gyro sampling (`e946c8f`).** `SimFlight::GyroBody()` returned only the last 10 ms step's rate, while the strapdown reads it once per 20 ms loop. The attitude drifted 28° on that flight; it now returns the average since the last read (0.04°). Test A4.
+- **Simulated bit through the landed hold (`0eef32a`).** The bit is now session-based, so the app does not start a full-record transfer for a simulated landing. The app also stops calling a radio transfer a lost locator, and serves cached Flight Profiles metadata during one (Android `fbf14fc`).
+- **Callouts (Android `ce5d1ce`; ADR-0041 amended).** "Drogue during ascent" was the voice running 4–5 s behind; the panel was right. "Simulated." is now said once and at landing, and stale altitude callouts are dropped on every flight.
+- **Still open:** GPS went stale after the simulated landing (no NAV-PVT for more than 5 s; suspect the dynamic-model change at Landed), needs a bench look. The map's 1 s marks after an unreset trace waits on Frank. The weathercock model: Frank chose to add stability margin and length (in progress).
+
 ## 2026-11-03 (build) — the flight build is Release at -O2; ADR-0035 amended. Not on hardware
 
 **Frank flashes Release.** ADR-0035 said Debug was the flight build, and it was wrong. Release at -O3 overflowed flash by 208 B after the physics simulated flight.
