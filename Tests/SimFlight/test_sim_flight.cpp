@@ -238,18 +238,22 @@ static void A3_Weathercocking() {
 }
 
 // Propagate a triad with the gyro and compare it with the generator's.
-static void A4_GyroReproducesAttitude() {
-    printf("\n--- A4: integrating the gyro lands on the nose ---\n");
-    Profile p = SmallH(); p.wind_mps = 8.0f; p.wind_from_deg = 200.0f;
-    p.rail_angle_deg = 5.0f; p.launch_az_deg = 30.0f;
+static Profile TronProfile();
+
+// Integrates the gyro the way the locator's strapdown does: one reading per
+// read interval, times that interval.  10 ms reads every step; 20 ms is the
+// locator's 50 Hz loop, which reads once per two steps and is what caught the
+// last-step-only gyro (first hardware run, 2026-11-03).  The windy profile
+// with a short rail turns the rocket hard at rail exit, in one step.
+static float GyroNoseError(const Profile& p, uint32_t read_ms) {
     Generator g; g.Start(p, 0u, kP0);
     V3 X = g.nose(), Y = g.body_y(), Z = g.body_z();
     float worst = 0.0f;
-    for (uint32_t ms = 10u; ms < 60000u; ms += 10u) {
+    for (uint32_t ms = read_ms; ms < 60000u; ms += read_ms) {
         g.AdvanceTo(ms);
         const Vec3f w = g.GyroBody();
         const V3 ww = w.x * X + w.y * Y + w.z * Z;
-        const float ang = SimFlight::Norm(ww) * Generator::kStepS;
+        const float ang = SimFlight::Norm(ww) * (static_cast<float>(read_ms) * 0.001f);
         if (ang > 0.0f) {
             const V3 k = (1.0f / SimFlight::Norm(ww)) * ww;
             auto rot = [&](V3 v) { return std::cos(ang) * v + std::sin(ang) * SimFlight::Cross(k, v) + ((1.0f - std::cos(ang)) * SimFlight::Dot(k, v)) * k; };
@@ -260,8 +264,20 @@ static void A4_GyroReproducesAttitude() {
         if (err > worst) worst = err;
         if (g.phase() == SimFlight::Phase::Landed) break;
     }
-    printf("  worst nose error over the flight %.3f deg\n", worst * 180.0f / SimFlight::kPi);
-    CHECK_MSG(worst < 1.0f * SimFlight::kPi / 180.0f, "gyro-integrated nose off by %.2f deg", worst * 180.0f / SimFlight::kPi);
+    return worst * 180.0f / SimFlight::kPi;
+}
+
+static void A4_GyroReproducesAttitude() {
+    printf("\n--- A4: integrating the gyro lands on the nose ---\n");
+    Profile p = SmallH(); p.wind_mps = 8.0f; p.wind_from_deg = 200.0f;
+    p.rail_angle_deg = 5.0f; p.launch_az_deg = 30.0f;
+    Profile hard = TronProfile(); hard.wind_mps = 10.0f; hard.rail_angle_deg = 7.5f;   // Frank's 2026-11-03 run
+    const float e10 = GyroNoseError(p, 10u), e20 = GyroNoseError(p, 20u);
+    const float h10 = GyroNoseError(hard, 10u), h20 = GyroNoseError(hard, 20u), h30 = GyroNoseError(hard, 30u);
+    printf("  worst nose error: 54 mm H %.3f / %.3f deg (10 / 20 ms reads); Tron in 10 m/s %.3f / %.3f / %.3f deg (10 / 20 / 30 ms)\n",
+           e10, e20, h10, h20, h30);
+    CHECK_MSG(e10 < 1.0f && e20 < 1.0f, "54 mm H gyro-integrated nose off by %.2f / %.2f deg", e10, e20);
+    CHECK_MSG(h10 < 1.0f && h20 < 1.0f && h30 < 1.0f, "Tron gyro-integrated nose off by %.2f / %.2f / %.2f deg", h10, h20, h30);
 }
 
 static void A5_Accelerometer() {

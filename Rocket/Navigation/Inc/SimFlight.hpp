@@ -165,6 +165,7 @@ public:
         pos_ = V3{}; vel_ = V3{}; acc_ = V3{};
         rail_s_ = rail_x_ = 0.0f;
         omega_ = V3{};
+        gyro_sum_ = Vec3f{}; gyro_t_ = 0.0f;
         canopy_ = Canopy::None;
         phase_ = Phase::Pad;
         apogee_t_ = launch_t_ = rail_exit_t_ = -1.0f;
@@ -235,11 +236,23 @@ public:
                       Dot(f, by_) + kAccelNoiseMps2 * Gauss(),
                       Dot(f, bz_) + kAccelNoiseMps2 * Gauss() };
     }
-    // Body rates: the rotation that moved the triad over the last step.
+    // Body rates: the AVERAGE rate since the previous call, so a reader that
+    // integrates rate x its own interval recovers every step's rotation.
+    // Reading only the last step's rate lost or doubled whatever turned in the
+    // others: the locator reads once per 20 ms loop against 10 ms steps, and a
+    // rail-exit turn that fits in one step came out as 0x or 2x, so the
+    // strapdown's tilt was off by tens of degrees from run to run (first
+    // hardware run, 2026-11-03).  Consumes the accumulator.
     Vec3f GyroBody() {
-        return Vec3f{ Dot(omega_, bx_) + kGyroNoiseRps * Gauss(),
-                      Dot(omega_, by_) + kGyroNoiseRps * Gauss(),
-                      Dot(omega_, bz_) + kGyroNoiseRps * Gauss() };
+        Vec3f w{};
+        if (gyro_t_ > 0.0f) {
+            const float inv = 1.0f / gyro_t_;
+            w = Vec3f{ gyro_sum_.x * inv, gyro_sum_.y * inv, gyro_sum_.z * inv };
+        }
+        gyro_sum_ = Vec3f{}; gyro_t_ = 0.0f;
+        return Vec3f{ w.x + kGyroNoiseRps * Gauss(),
+                      w.y + kGyroNoiseRps * Gauss(),
+                      w.z + kGyroNoiseRps * Gauss() };
     }
     // Displacement from the start, and velocity, in local north/east/down.
     float north_m() const { return pos_.n; }
@@ -372,12 +385,18 @@ private:
         bz_ = bz_ - Dot(bz_, bx_) * bx_;
         bz_ = (1.0f / Norm(bz_)) * bz_;
         by_ = Cross(bz_, bx_);
+        // The axis is fixed by the rotation, so its body components are the
+        // same before and after it.
+        gyro_sum_.x += ang * Dot(k, bx_);
+        gyro_sum_.y += ang * Dot(k, by_);
+        gyro_sum_.z += ang * Dot(k, bz_);
     }
 
     void Step() {
         const float dt = kStepS;
         const uint32_t pad = kPadHoldMs / 10u;   // steps: kStepS is 10 ms
         ++n_;
+        gyro_t_ += dt;
         t_ = static_cast<float>(n_) * dt;
         const float tm0 = t_ - dt - launch_t_s();   // motor time at the step's start
         const float tm1 = tm0 + dt;
@@ -490,6 +509,8 @@ private:
     uint32_t n_ = 0u;
     float    t_ = 0.0f;
     V3       pos_{}, vel_{}, acc_{}, wind_{}, rail_{}, omega_{};
+    Vec3f    gyro_sum_{};       // body-frame rotation since the last GyroBody, rad
+    float    gyro_t_ = 0.0f;    // and the time it covers, s
     V3       bx_{ 0.0f, 0.0f, 1.0f }, by_{ 1.0f, 0.0f, 0.0f }, bz_{ 0.0f, 1.0f, 0.0f };
     float    rail_s_ = 0.0f, rail_x_ = 0.0f;
     float    imp_[kMaxCurvePoints] = {};
