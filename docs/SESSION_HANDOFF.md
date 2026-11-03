@@ -2,6 +2,14 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-11-03 (build) — the flight build is Release at -O2; ADR-0035 amended. Not on hardware
+
+**Frank flashes Release.** ADR-0035 said Debug was the flight build, and it was wrong. Release at -O3 overflowed flash by 208 B after the physics simulated flight.
+- `77b6853`: `UserInteraction::ToStr` now formats numbers without `log10`/`pow`. It also fixes a leak: it used to `new[]` on every menu line and never free it. That alone leaves Release at -O3 with 1,104 B free, on Frank's GCC 14.3.1.
+- Frank then chose Release at **-O2** (the commit after this note): 192,192 B text in the cloud link, against 261,776 at -O3.
+- **Before the -O2 build flies:** rerun ADR-0035's bench list, and read the CycleProfiler worst case at 50 Hz.
+- **Still open, both optional now:** float-math cleanup in InsEkf15/WGS84 (about 3–5 KB). Trimming console features, which needs Frank's word on what he still uses.
+
 ## 2026-11-03 (feature) — the simulated flight is computed from the rocket, ADR-0041 amendment. Host-tested, Android NOT compiled, nothing on hardware
 
 Frank replaced quick mode with physics. The app describes the rocket in one SimFlightStart (MsgType 31, 196 B): up to 32 thrust points, motor loaded and propellant mass, dry mass, diameter, Cd on the Mach grid {0, 0.3, 0.5, 0.7, 0.85, 1.0, 1.2, 1.5}, rail length and angle, launch direction, temperature, wind, drogue and main rates. SimFlightRequest (30) is cancel-only. The locator integrates at 10 ms (Heun), with the rail constraint and zero-angle-of-attack weathercocking in 3-D, and reports the attitude change through the gyro exactly.

@@ -1,6 +1,6 @@
 # ADR-0035: The locator's flight build compiles at -Og, not -O0
 
-- **Status:** Accepted
+- **Status:** Accepted, amended 2026-11-03 (the flight build is Release, at -O2; see the amendment)
 - **Date:** 2026-10-06
 - **Deciders:** Frank Schroer
 - **Related issues:** [#57](https://github.com/fschroer/steam-pigeon-locator/issues/57), [#50](https://github.com/fschroer/steam-pigeon-locator/issues/50)
@@ -51,3 +51,24 @@ All four built with the same three warnings: `-Wclass-memaccess` on `memset` of 
 - **Per-file levels** (keep the most-debugged files at -O0). A second configuration to maintain by hand, and the IDE regenerates the makefiles from `.cproject`, so it would have to be set per file there.
 - **Keep -O0 and trim code.** Buys hundreds of bytes where tens of KB are needed, and spends the effort on the wrong problem.
 - **More `#pragma GCC optimize` stopgaps.** Each one is a local exception nobody remembers to remove. #50's two were already the limit of that approach.
+
+## Amendment, 2026-11-03: the flight build is Release, at -O2
+
+Decided by Frank Schroer 2026-11-03.
+
+**This ADR's premise was wrong.** It says the locator flies the Debug configuration and calls Release a stale stub. Frank flashes from the Release directory, and the project's own record already said so: `SESSION_HANDOFF.md` ("Build config": "Fly/measure on -O3"), commit `c137a39` made Release buildable, and the loop-timing work (worst case 47 → 23 ms) was measured on Release. Only Debug has a launch configuration, which is probably how the error was made. Moving Debug from -O0 to -Og was harmless, but it never touched the binary that flies.
+
+**What happened.** Release at -O3 had about 3.3 KB of flash left before the physics simulated flight (ADR-0041 amendment, about 9.6 KB at -O3). At `9eea00c` it overflowed by 208 B. `77b6853` (console number formatting without `log10`/`pow`) brought it back to 1,104 B free on Frank's GCC 14.3.1. That is not margin.
+
+**Decision.**
+
+1. **The flight build is the Release configuration**, and it compiles C and C++ at **-O2**, not -O3. The setting is in `.cproject`.
+2. **Debug stays at -Og** for bench work with the debugger attached. It is not what flies, and a size or timing figure from it does not describe the flight binary.
+
+**Why -O2.** At 50 Hz with no FPU, CPU time matters, so a smaller-but-slower level (-Og, -Os) is the wrong trade for the flight build. Most of what -O3 adds over -O2 is aggressive inlining and loop unrolling, which buys little here and costs a great deal of flash. Cloud link at `77b6853` (GCC 13.2, same flags otherwise): **-O3 261,776 B text, -O2 192,192 B text**, so about 68 KB comes back. The IDE's own toolchain will differ by a KB or so.
+
+**Consequences.**
+
+- **-O2 is a new binary.** Before it flies, rerun this ADR's bench list at -O2: a vacuum-chamber flight, a deployment test, a whole-record download, `SP_BENCH_REPLAY` and a console session. Also read the `CycleProfiler` worst case (USB menu `t`) at 50 Hz against the 20 ms window. -O2 should be close to -O3's speed, but nobody has measured it.
+- Sizes and timings in docs must say which configuration they are from.
+- The decision-1 rationale above (debuggability at -Og) still holds for Debug. It just isn't the flight build.

@@ -49,7 +49,7 @@ Write an ADR for a decision that is costly to reverse, or that future work must 
 | [0032](0032-baro-outlier-filtering.md) | Reject baro outliers with a rank filter ahead of the IIR, and stop capping the ascent rate | Accepted |
 | [0033](0033-serialized-ble-writes.md) | Outbound BLE writes are serialized by the app — a busy transport is not a device failure | Accepted |
 | [0034](0034-deployment-settings-bounds.md) | Deployment settings have one bounds table, enforced at every boundary — typed values are refused, not clamped | Accepted |
-| [0035](0035-flight-build-at-og.md) | The locator's flight build compiles at -Og, not -O0 | Accepted |
+| [0035](0035-flight-build-at-og.md) | The locator's flight build compiles at -Og, not -O0 | Accepted; amended 2026-11-03: the flight build is Release at -O2 |
 | [0036](0036-deployment-opening-inference.md) | A parachute opening is inferred from a sustained descent slowdown, and the app says "opening detected", not "deployed" | Accepted |
 | [0037](0037-motor-burnout-vs-apogee-coast-gate.md) | Motor burnout is read from the axial acceleration; apogee detection still waits for drag to decay | Accepted |
 | [0038](0038-sensor-failure-degrades-not-restarts.md) | A sensor that fails its power-on check degrades the locator; it does not restart it | Proposed |
