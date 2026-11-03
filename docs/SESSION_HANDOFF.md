@@ -2,6 +2,18 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-11-03 (feature) — the simulated flight is computed from the rocket, ADR-0041 amendment. Host-tested, Android NOT compiled, nothing on hardware
+
+Frank replaced quick mode with physics. The app describes the rocket in one SimFlightStart (MsgType 31, 196 B): up to 32 thrust points, motor loaded and propellant mass, dry mass, diameter, Cd on the Mach grid {0, 0.3, 0.5, 0.7, 0.85, 1.0, 1.2, 1.5}, rail length and angle, launch direction, temperature, wind, drogue and main rates. SimFlightRequest (30) is cancel-only. The locator integrates at 10 ms (Heun), with the rail constraint and zero-angle-of-attack weathercocking in 3-D, and reports the attitude change through the gyro exactly.
+
+- **Commits:** locator `72a022f` (model, message, tests), `ddcea29` (`temp_c` = −128 means use the MS5611's temperature; Frank asked for the baro temperature, and no message carried it), `3f7e7dc` (A9 against OpenRocket). Receiver `2441f6f`: MsgType 31 and the app-message buffer raised from 64 to 249 B, which would otherwise drop the 196 B start. The receiver's RAM is unmeasured. Android `d291019`; iOS owed rows `840386e`.
+- **Cost on the locator:** 189,048 B text and 40,972 B static RAM, about +7 KB flash and +0.8 KB RAM. Soft float, since the M4 here has no FPU. The per-step cost on the MCU has not been measured.
+- **Verified on the host:** within 0.1% of an independent RK4 reference on three synthetic rockets. Against OpenRocket on Frank's *Scratch Built Tron Short 2.6* .ork (Cesaroni 164H90-12A): 641.8 m calm, against OpenRocket's 641.0 m in 2 m/s of wind. In that wind the generator gives 634.5 m, because zero-AoA turns harder than a damped restoring moment. SimFlight 85/0. The wire bytes are checked against a host build of the C++ struct.
+- **Android:** `data/simflight/` (motor files, thinning, Cd fit, canopy calculator, stores, the thrustcurve.org client, `DefaultRocket` from the Tron .ork) and the screen are rewritten. The pure Kotlin passes 15/15 under kotlinc. **The screen, store and API client have never been compiled.** The thrustcurve.org client was written from the published API and never run, because this container gets a 403 from the site. First on the Pixel: build, open the screen, search "H90", start.
+- **Traps:**
+  - OpenRocket's CSV rounds the reference area to 0.004 m², which puts apogee 6% low. The fitter uses only Mach and Cd, and the diameter comes from the rocket.
+  - The .ork's chute opens on motor ejection, but the simulation opens canopies only on locator charges. The default therefore sets both rates to that chute's 7 m/s.
+
 ## 2026-11-02 (feature) — app-started simulated flight, ADR "An app-started simulated flight computed on the locator" (0041). Host-tested, Android NOT compiled, nothing on hardware
 
 ✅ **What changed:**
