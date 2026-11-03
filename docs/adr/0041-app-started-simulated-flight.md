@@ -139,7 +139,7 @@ After Start the app returns to the map, where the flight plays on the live scree
 - **RAM:** 192 B, from a full link at -Og.
 - **Flash:** 4.5 KB, from the same link.
 - **Per cycle:** one or two 10 ms integration steps, so nothing measurable.
-- **At start:** the bisection runs about 600 coarse steps × 24 iterations, once. The ADR budget is under 20 ms with the FPU, and that has not been measured on hardware.
+- **At start:** the bisection runs about 600 coarse steps × 24 iterations, once, in a single loop cycle. ~~The ADR budget is under 20 ms with the FPU~~ **Corrected 2026-11-03:** the build is `-mfloat-abi=soft` and this STM32WL core has no FPU, so in software float this is likely on the order of 100 ms or more. It runs on the pad before launch detection can matter, so it is harmless to flight logic, but it stalls telemetry and the gyro FIFO once. Unmeasured; spreading the solve over several cycles, or the physics-based profile in the design doc "A physics-based simulated flight", removes it.
 
 ## Consequences
 
