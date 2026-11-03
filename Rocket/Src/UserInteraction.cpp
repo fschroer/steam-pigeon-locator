@@ -370,26 +370,30 @@ int UserInteraction::MakeCSVExportLine(char *target, const char *source1, const 
 	return i;
 }
 
+// A uint16_t as text, optionally in tenths ("12.5", "0.5").  The result is in
+// a small static ring, valid until two later calls: every caller hands it
+// straight to MakeLine.  It used to be new[]'d and never freed, one leak per
+// menu line shown, and counted digits with log10() and pow(), which pulled
+// about 4.5 KB of double-precision libm into the image.
 const char* UserInteraction::ToStr(uint16_t source, bool tenths) {
-	uint16_t l_source = source;
-	int source_len = 0;
-	if (source > 0)
-		source_len = log10(source) + 1;
-	else
-		source_len = 1;
-	char *target = new char[source_len + (tenths ? 1 : 0) + (tenths && source < 10 ? 1 : 0) + 1];
+	static char ring[2][8];   // "6553.5" + NUL fits
+	static uint8_t next = 0;
+	char *target = ring[next];
+	next ^= 1u;
+	char digits[5];
+	int n = 0;
+	uint16_t v = source;
+	do { digits[n++] = static_cast<char>('0' + v % 10u); v /= 10u; } while (v != 0u);
+	if (tenths && n == 1)
+		digits[n++] = '0';   // 5 -> "0.5"
 	int j = 0;
-	if (tenths && source < 10)
-		target[j++] = '0';
-	for (int i = pow(10, source_len - 1); i > 0; i /= 10) {
-		if (tenths && i == 1)
+	while (n > 0) {
+		if (tenths && n == 1)
 			target[j++] = '.';
-		int digit = l_source / i;
-		l_source -= digit * i;
-		target[j++] = digit + '0';
+		target[j++] = digits[--n];
 	}
 	target[j] = 0;
-	return (const char*) target;
+	return target;
 }
 
 bool UserInteraction::StrCmp(char *string1, const char *string2, int length) {
