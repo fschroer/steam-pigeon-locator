@@ -1710,6 +1710,32 @@ void Factory::EndSimFlight() {
 		flight_.ForceLand();
 }
 
+// The wire's fixed-point fields to the generator's units.  Range checks are
+// SimFlight::Valid's, in Navigation::startSimFlight, so a bad field anywhere
+// rejects the whole request (ADR-0034's rule for settings).
+static void ProfileFromWire(const Communication::SimFlightStart& w, SimFlight::Profile& p) {
+	p.n_points = w.n_points <= SimFlight::kMaxCurvePoints ? w.n_points : 0u;   // 0 fails Valid
+	for (uint8_t i = 0; i < p.n_points; ++i) {
+		p.t_s[i] = static_cast<float>(w.t_ms[i]) * 0.001f;
+		p.f_n[i] = w.peak_thrust_n * (static_cast<float>(w.thrust_frac[i]) * (1.0f / 65535.0f));
+	}
+	p.motor_loaded_kg = w.motor_loaded_kg;
+	p.motor_prop_kg   = w.motor_prop_kg;
+	p.dry_mass_kg     = w.dry_mass_kg;
+	p.ref_diam_m      = w.ref_diameter_m;
+	for (uint8_t i = 0; i < SimFlight::kMachPoints; ++i)
+		p.cd[i] = static_cast<float>(w.cd_milli[i]) * 0.001f;
+	p.rail_len_m      = static_cast<float>(w.rail_len_cm) * 0.01f;
+	p.rail_angle_deg  = static_cast<float>(w.rail_angle_ddeg) * 0.1f;
+	p.launch_az_deg   = static_cast<float>(w.launch_az_deg);
+	p.temp_c          = static_cast<float>(w.temp_c);
+	p.wind_mps        = static_cast<float>(w.wind_mps);
+	p.wind_from_deg   = static_cast<float>(w.wind_from_deg);
+	p.drogue_mps      = static_cast<float>(w.drogue_mps);
+	p.main_mps        = static_cast<float>(w.main_dmps) * 0.1f;
+	p.seed            = w.seed;
+}
+
 void Factory::ServiceSimFlight(FlightStates& flight_state) {
 	Communication::SimFlightRequest req {};
 	if (comm_.TakeSimFlightRequest(req)) {
@@ -1719,25 +1745,22 @@ void Factory::ServiceSimFlight(FlightStates& flight_state) {
 				EndSimFlight();
 				sim_stage_ = flight_.GetFlightState() == FlightStates::Landed ? SimStage::Closing : SimStage::Off;
 			}
-		} else if (req.action == Communication::kSimFlightStart
-				&& sim_stage_ == SimStage::Off
-				&& device_state_ == DeviceState::Disarmed
-				&& flight_state == FlightStates::WaitingLaunch
-				&& !pad_reset_pending_
-				&& archive_.IsActiveOpen()) {
-			SimFlight::Profile p;
-			p.apogee_m      = static_cast<float>(req.apogee_m);
-			p.burn_s        = static_cast<float>(req.burn_ds) * 0.1f;
-			p.drogue_mps    = static_cast<float>(req.drogue_mps);
-			p.main_mps      = static_cast<float>(req.main_dmps) * 0.1f;
-			p.wind_mps      = static_cast<float>(req.wind_mps);
-			p.wind_from_deg = static_cast<float>(req.wind_from_deg);
-			p.seed          = req.seed;
-			if (navigation_.startSimFlight(p, req.origin_lat_1e7, req.origin_lon_1e7)) {
-				sim_stage_  = SimStage::Flying;
-				sim_marked_ = false;
-				UartSend("\r\nSIM|started\r\n");
-			}
+		}
+		// action 1 was the retired quick-mode start: ignored (ADR-0041 amendment).
+	}
+	Communication::SimFlightStart start {};
+	if (comm_.TakeSimFlightStart(start)
+			&& sim_stage_ == SimStage::Off
+			&& device_state_ == DeviceState::Disarmed
+			&& flight_state == FlightStates::WaitingLaunch
+			&& !pad_reset_pending_
+			&& archive_.IsActiveOpen()) {
+		SimFlight::Profile p;
+		ProfileFromWire(start, p);
+		if (navigation_.startSimFlight(p, start.origin_lat_1e7, start.origin_lon_1e7)) {
+			sim_stage_  = SimStage::Flying;
+			sim_marked_ = false;
+			UartSend("\r\nSIM|started\r\n");
 		}
 	}
 

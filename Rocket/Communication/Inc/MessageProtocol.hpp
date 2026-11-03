@@ -80,7 +80,10 @@ enum class MsgType : uint8_t {
 	// App→locator: start (or cancel) a simulated flight the locator computes
 	// from a profile (ADR "An app-started simulated flight computed on the
 	// locator", 0041).  Accepted only disarmed, on the pad.
-	SimFlightRequest = 30
+	SimFlightRequest = 30,
+	// App→locator: start a simulated flight from a physical rocket profile
+	// (ADR-0041 as amended 2026-11-03).  Since then type 30 only cancels.
+	SimFlightStart = 31
 };
 
 // Flight event summary indices.  One entry per archived event timestamp; the
@@ -415,11 +418,13 @@ struct PadAlertSnoozeRequest {
 	uint8_t minutes;       // 0 cancels an active snooze
 };
 
-// Start or cancel an app-started simulated flight (ADR "An app-started
-// simulated flight computed on the locator", 0041).  A start outside the ADR's
-// ranges, or while the locator is armed, off the pad or busy, is ignored; a
-// cancel is never refused.  origin_* is the phone's position, used only when the
-// locator has no fix of its own (both 0 = none).
+// Cancel an app-started simulated flight (ADR "An app-started simulated flight
+// computed on the locator", 0041).  A cancel is never refused.
+//
+// Until 2026-11-03 this also STARTED one, from a target apogee and burn time
+// (action 1).  That quick mode was replaced by the physics model and its start
+// is now ignored; SimFlightStart (31) starts a simulation.  The layout is kept so
+// the cancel stays byte-identical for every app and receiver that sends it.
 struct SimFlightRequest {
 	PacketHeader packet_header;
 	uint32_t target_locator_id;
@@ -437,6 +442,38 @@ struct SimFlightRequest {
 };
 static constexpr uint8_t kSimFlightCancel = 0u;
 static constexpr uint8_t kSimFlightStart  = 1u;
+
+// Start a simulated flight from a physical rocket (ADR-0041 as amended
+// 2026-11-03).  Everything the locator integrates, in one frame: the motor's
+// thrust curve (thrust as a fraction of peak, so a 10 N and a 5,000 N motor get
+// the same resolution), its loaded and propellant mass, the rocket's dry mass,
+// reference diameter and Cd on SimFlight::kMachGrid, the rail, the day and the
+// descent rates.  Ignored unless every field is in range (SimFlight::Valid),
+// and refused unless disarmed, on the pad and still.  origin_* as above.
+struct SimFlightStart {
+	PacketHeader packet_header;
+	uint32_t target_locator_id;
+	int32_t  origin_lat_1e7;
+	int32_t  origin_lon_1e7;
+	uint16_t seed;              // sensor noise
+	uint16_t wind_from_deg;     // 0..359, where the wind blows from
+	uint16_t launch_az_deg;     // 0..359, the way the rail leans
+	uint16_t rail_len_cm;       // 0..2000
+	uint8_t  rail_angle_ddeg;   // 0..200, tenths of a degree from vertical
+	uint8_t  wind_mps;          // 0..20
+	uint8_t  drogue_mps;        // 5..60
+	uint8_t  main_dmps;         // 20..150, tenths of a m/s
+	int8_t   temp_c;            // -40..50, at the ground
+	uint8_t  n_points;          // 2..32 thrust-curve points used
+	float    peak_thrust_n;
+	float    motor_loaded_kg;
+	float    motor_prop_kg;
+	float    dry_mass_kg;       // without the motor
+	float    ref_diameter_m;
+	uint16_t cd_milli[8];       // Cd x 1000 on SimFlight::kMachGrid
+	uint16_t t_ms[32];          // time after ignition
+	uint16_t thrust_frac[32];   // thrust / peak_thrust_n x 65535
+};
 
 // NOTE: there is deliberately no "is this command addressed?" predicate here.
 // The locator requires an address from EVERY frame it acts on (ADR-0020), because
@@ -518,6 +555,20 @@ static_assert(offsetof(SimFlightRequest, wind_from_deg)  == 20, "SimFlightReques
 static_assert(offsetof(SimFlightRequest, seed)           == 22, "SimFlightRequest offsets changed — sync receiver + app + iOS");
 static_assert(offsetof(SimFlightRequest, action)         == 24, "SimFlightRequest offsets changed — sync receiver + app + iOS");
 static_assert(offsetof(SimFlightRequest, wind_mps)       == 28, "SimFlightRequest offsets changed — sync receiver + app + iOS");
+static_assert(sizeof(SimFlightStart)                  == 196, "SimFlightStart size changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightStart, origin_lat_1e7)   == 10, "SimFlightStart offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightStart, seed)             == 18, "SimFlightStart offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightStart, rail_len_cm)      == 24, "SimFlightStart offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightStart, rail_angle_ddeg)  == 26, "SimFlightStart offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightStart, temp_c)           == 30, "SimFlightStart offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightStart, n_points)         == 31, "SimFlightStart offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightStart, peak_thrust_n)    == 32, "SimFlightStart offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightStart, ref_diameter_m)   == 48, "SimFlightStart offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightStart, cd_milli)         == 52, "SimFlightStart offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightStart, t_ms)             == 68, "SimFlightStart offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightStart, thrust_frac)      == 132, "SimFlightStart offsets changed — sync receiver + app + iOS");
+static_assert(sizeof(SimFlightStart) <= kMaxPayloadBytes, "SimFlightStart must fit one radio frame");
+static_assert(static_cast<uint8_t>(MsgType::SimFlightStart) == 31, "MsgType::SimFlightStart changed — sync receiver + app + iOS");
 static_assert(offsetof(FlightEventsMessage, flags)       ==  7, "FlightEventsMessage flags moved — sync app + iOS");
 static_assert(static_cast<uint8_t>(MsgType::SimFlightRequest) == 30, "MsgType::SimFlightRequest changed — sync receiver + app + iOS");
 

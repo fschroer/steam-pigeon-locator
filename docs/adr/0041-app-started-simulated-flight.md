@@ -1,6 +1,6 @@
 # ADR-0041: An app-started simulated flight computed on the locator
 
-- **Status:** Accepted. Decided by Frank Schroer 2026-11-02, who took every recommendation in the design doc ([Locator RAM use and an app-started simulated flight](https://claude.ai/artifact/RST5bWXPZptk63zwd3GJz9)). Implemented 2026-11-02: locator `f7f8baf`, receiver `1ba84cf`, Android `c1d1333` (not compiled), iOS owed (`steam-pigeon-ios` `3ae6dd3`). Not on hardware.
+- **Status:** Accepted, amended 2026-11-03 (the physics model: see the amendment at the end). Decided by Frank Schroer 2026-11-02, who took every recommendation in the design doc ([Locator RAM use and an app-started simulated flight](https://claude.ai/artifact/RST5bWXPZptk63zwd3GJz9)). Implemented 2026-11-02: locator `f7f8baf`, receiver `1ba84cf`, Android `c1d1333` (not compiled), iOS owed (`steam-pigeon-ios` `3ae6dd3`). Not on hardware.
 - **Date:** 2026-11-02
 - **Deciders:** Frank Schroer
 - **Related ADRs:** "A vacuum chamber can fly a whole flight" (0031) and the bench replay (`docs/bench-replay.md`), the two harnesses this does not replace; "Arming gates the pyro bus only" (0021), which is what makes this safe; "Launch detection rejects drops" (0015), whose gate the synthetic boost has to pass; "Landing is a quiescence window" (0018); "A parachute opening is inferred from a sustained descent slowdown" (0036); "The radio download becomes the primary data path" (0040), which a simulated record exercises.
@@ -157,3 +157,68 @@ After Start the app returns to the map, where the flight plays on the live scree
 3. Receiver: the length-table entry.
 4. Android: the screen, the marking and the callouts.
 5. iOS: the "iOS OWES THIS" list in `steam-pigeon-ios/docs/UI_PARITY.md`.
+
+## Amendment, 2026-11-03: the flight is computed from the rocket
+
+Decided by Frank Schroer 2026-11-03, on the design doc [A physics-based simulated flight](https://claude.ai/artifact/8DUUpLNdN48odqJn2vsad6) and its decision cards. It replaces decision 3's formula and decision 6's start. Everything else above stands: the driver-boundary substitution, the closed-loop canopies, the safety gates, the marking, the lifecycle.
+
+### A1. The quick mode is gone
+
+The target-apogee profile and its thrust bisection are removed (Frank, 2026-11-03). Every simulation is described by a motor and a rocket, and apogee is a result. That also removes the start-up solve that, with no FPU, would have stalled one loop cycle for 100 ms or more.
+
+### A2. The model
+
+`SimFlight::Generator` integrates a point mass in 3-D, in 10 ms Heun steps:
+- **Thrust** from the motor's curve, linear between points, from (0, 0) as RASP files imply.
+- **Mass** = dry + motor loaded − propellant × (impulse delivered / total impulse).
+- **Air**: the barometer's measured ground pressure and the profile's ground temperature, a 6.5 K/km lapse, density from a 16-entry table at 1 km steps, and the speed of sound from the temperature.
+- **Drag** ½ρ|v_rel|²·Cd(M)·A against the velocity relative to the air, with Cd linear between 8 points on the fixed Mach grid 0, 0.3, 0.5, 0.7, 0.85, 1.0, 1.2, 1.5.
+- **Rail**: constrained along the rail, at its angle and lean direction, until the rocket has traveled its length. It does not move until the thrust exceeds the weight along the rail.
+- **Off the rail** the body points along the air-relative velocity, at zero angle of attack. A crosswind therefore turns the rocket into the wind, and a leaning rail carries it the way it leans, with no center of pressure, inertia or Barrowman input. With the rail vertical and no wind the flight is exactly vertical, which is what Frank's "vertical now" answer asked for; it is recorded as a departure from that answer, kept because it costs no inputs.
+- **Descent** as before, now against the air-relative velocity in 3-D, so the drift comes out of the drag.
+
+The body frame is a triad moved each step by the smallest rotation taking the old nose to the new one, and the gyro reports that rotation. Specific force is (a − g) in that frame.
+
+**Validation.** `Tests/SimFlight` flies three synthetic rockets (none a real kit) against an independent RK4 reference at 1 ms with its own atmosphere, thrust, mass and Cd code. Apogee, time to apogee and burnout speed agree within 0.1%. Integrating the gyro over a windy, leaning flight lands within 0.21° of the nose. All 80 checks pass, through the real FlightManager at 50 Hz. A comparison against an OpenRocket export of one of Frank's rockets is still to come.
+
+### A3. The command
+
+**`SimFlightStart`, MsgType 31**, addressed, 196 B, in one radio frame. Frank's answer was a separate profile message followed by the start. The receiver keeps one pending command and a later one overwrites it, so a start sent right behind its profile would erase the profile. One message has no such race, and still fits a 255 B frame.
+
+| Offset | Field | Type |
+|---|---|---|
+| 0 | header | PacketHeader |
+| 6 | target_locator_id | u32 |
+| 10 | origin_lat_1e7, origin_lon_1e7 | i32 each; both 0 = none |
+| 18 | seed | u16 |
+| 20 | wind_from_deg | u16, 0..359 |
+| 22 | launch_az_deg | u16, 0..359, the way the rail leans |
+| 24 | rail_len_cm | u16, 0..2000 |
+| 26 | rail_angle_ddeg | u8, 0..200 (0.1°) |
+| 27 | wind_mps | u8, 0..20 |
+| 28 | drogue_mps | u8, 5..60 |
+| 29 | main_dmps | u8, 20..150 (0.1 m/s) |
+| 30 | temp_c | i8, −40..50 |
+| 31 | n_points | u8, 2..32 |
+| 32 | peak_thrust_n | f32 |
+| 36 | motor_loaded_kg | f32, ≤ 100 |
+| 40 | motor_prop_kg | f32, > 0 and < loaded |
+| 44 | dry_mass_kg | f32, 0.01..200 |
+| 48 | ref_diameter_m | f32, 0.005..0.5 |
+| 52 | cd_milli[8] | u16 each, Cd × 1000, 0.05..3.0 |
+| 68 | t_ms[32] | u16 each, strictly increasing, ≤ 60 s |
+| 132 | thrust_frac[32] | u16 each, thrust / peak × 65535 |
+
+A request with any field out of range, or whose peak thrust cannot lift the loaded rocket, is rejected whole. `SimFlightRequest` (30) now only cancels; its start is ignored, and its layout is unchanged.
+
+### A4. The app
+
+- **Motor**: a thrustcurve.org search with every downloaded motor cached on the phone, or a .eng or .rse file. The app thins the curve to at most 32 points, keeping the total impulse.
+- **Rocket**: typed and saved by name on the phone. Cd is typed once (spread over the Mach grid with a standard transonic rise), typed as the 8 points, or fitted from an OpenRocket simulation CSV export.
+- **Recovery**: typed descent rates, each with a canopy calculator (diameter and Cd, at the burnout mass) that fills it. Only the rate is sent.
+- **Day**: ground temperature typed, default 15 °C. No weather lookup.
+- **Default rocket**: built from an .ork file Frank will provide.
+
+### A5. Cost
+
+From a full link at -Og: +7.0 KB flash and +0.8 KB static RAM over the quick mode (a 196 B pending command, and the profile and atmosphere in the generator). RAM in use is 40.0 KiB of 64 KiB. The per-step cost in software float is not measured; it is two thrust, mass and drag evaluations, one atan2 and a few trigonometric calls per 10 ms step.

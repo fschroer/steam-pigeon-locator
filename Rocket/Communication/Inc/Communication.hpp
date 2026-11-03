@@ -179,6 +179,16 @@ public:
 		__set_PRIMASK(primask);
 		return true;
 	}
+	// The latest SimFlightStart from the app, once (ADR-0041 as amended).
+	bool TakeSimFlightStart(SimFlightStart& out) {
+		if (!pending_sim_start_) return false;
+		const uint32_t primask = __get_PRIMASK();
+		__disable_irq();
+		out = pending_sim_start_msg_;
+		pending_sim_start_ = false;
+		__set_PRIMASK(primask);
+		return true;
+	}
 
 	bool IsPadAlertSnoozed() const { return PadAlertSnoozeRemainingMs() > 0; }
 
@@ -355,6 +365,8 @@ private:
 	// ADR-0041: written in the radio RX callback, taken by Factory.
 	SimFlightRequest pending_sim_req_msg_ {};
 	volatile bool    pending_sim_req_ = false;
+	SimFlightStart   pending_sim_start_msg_ {};
+	volatile bool    pending_sim_start_ = false;
 
 	// -----------------------------------------------------------------------
 	// Background full-record transfer (ADR "The radio download becomes the

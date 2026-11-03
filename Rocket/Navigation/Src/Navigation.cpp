@@ -413,7 +413,7 @@ bool Navigation::startSimFlight(const SimFlight::Profile& p, int32_t origin_lat_
     } else {
         m_sim_has_origin_ = false;   // no track: GPS reports nothing new
     }
-    m_sim_.Start(p, HAL_GetTick());
+    m_sim_.Start(p, HAL_GetTick(), m_sim_p0_pa_);
     m_sim_seed_pending_ = true;
     return true;
 }

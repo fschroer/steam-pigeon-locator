@@ -550,6 +550,12 @@ void Communication::OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
 			pending_sim_req_ = true;
 			break;
 
+		case MsgType::SimFlightStart:
+			// Gated and range-checked by Factory and SimFlight::Valid.
+			std::memcpy(&pending_sim_start_msg_, payload, sizeof(SimFlightStart));
+			pending_sim_start_ = true;
+			break;
+
 		case MsgType::PadAlertSnoozeRequest: {
 			// Minutes sits after the header AND the target id (ADR-0020).
 			const uint8_t minutes = payload[sizeof(PacketHeader) + sizeof(uint32_t)];
@@ -1224,6 +1230,11 @@ ParseResult Communication::ParseLoraFrame(const uint8_t *data, std::size_t len, 
 	case MsgType::SimFlightRequest:
 		// Read from the frame in the handler, like PadAlertSnoozeRequest.
 		if (len != sizeof(SimFlightRequest))
+			return ParseResult::LengthMismatch;
+		out.type = hdr.msg_type;
+		return ParseResult::Ok;
+	case MsgType::SimFlightStart:
+		if (len != sizeof(SimFlightStart))
 			return ParseResult::LengthMismatch;
 		out.type = hdr.msg_type;
 		return ParseResult::Ok;
