@@ -732,6 +732,13 @@ bool SAMM10Q::parseNavPvtFromBuffer(GpsSample& out) {
                     (out.fix_type >= 3) &&
                     std::isfinite(out.lat_rad) &&
                     std::isfinite(out.lon_rad) &&
+                    // On the globe.  A NAV-PVT that passed its checksum once
+                    // carried -132.87, 195.19 with hAcc 85 km while the locator
+                    // sat on the pad (2026-11-02 21:11:03), and the app crashed
+                    // drawing it.  Whether the receiver said it or a misaligned
+                    // chunk passed the 16-bit checksum, it is not a position.
+                    lat_e7 >= -900000000 && lat_e7 <= 900000000 &&
+                    lon_e7 >= -1800000000 && lon_e7 <= 1800000000 &&
                     !(lat_e7 == 0 && lon_e7 == 0);
 
                 out.velocity_valid =

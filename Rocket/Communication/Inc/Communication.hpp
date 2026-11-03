@@ -373,6 +373,12 @@ private:
 	SimFlightStart   pending_sim_start_msg_ {};
 	volatile bool    pending_sim_start_ = false;
 	bool             sim_session_ = false;
+	// The last position the GPS driver called valid, in degrees, and whether
+	// there has been one.  See SendablePosition.
+	double           last_good_lat_deg_ = 0.0;
+	double           last_good_lon_deg_ = 0.0;
+	bool             have_good_fix_ = false;
+	void SendablePosition(const GpsSample& gps, double& lat_deg, double& lon_deg);
 
 	// -----------------------------------------------------------------------
 	// Background full-record transfer (ADR "The radio download becomes the

@@ -31,6 +31,21 @@ Communication::Communication(DeviceUID &deviceUID, FlightManager &flight, Rocket
 //  Initialization
 // ============================================================================
 
+// The position a periodic frame carries.  The newest sample when the GPS driver
+// called it valid, else the last one it did, else 0,0 (the app's "no fix").  The
+// raw sample was sent as received, valid or not, and once that was -132.87,
+// 195.19 from a receiver sitting on the pad, which crashed the app's map
+// (2026-11-02 21:11:03).  gps_status still tells the app the fix is not current.
+void Communication::SendablePosition(const GpsSample& gps, double& lat_deg, double& lon_deg) {
+	if (gps.position_valid) {
+		last_good_lat_deg_ = gps.lat_rad * RAD2DEG;
+		last_good_lon_deg_ = gps.lon_rad * RAD2DEG;
+		have_good_fix_ = true;
+	}
+	lat_deg = have_good_fix_ ? last_good_lat_deg_ : 0.0;
+	lon_deg = have_good_fix_ ? last_good_lon_deg_ : 0.0;
+}
+
 void Communication::Init(IRadio &radio) {
 	radio_ = &radio;
 	radio_->SetChannel(902300000 + archive_.GetLocatorSettings().lora_channel * 200000);
@@ -92,10 +107,9 @@ void Communication::SendPreLaunchDataNow(bool armed, uint8_t pad_alert, bool rad
 	msg.packet_header.msg_count = 0;
 	msg.packet_header.crc = 0;
 
-	msg.latitude = gps_sample.lat_rad * RAD2DEG;
-	msg.longitude = gps_sample.lon_rad * RAD2DEG;
-	msg.raw_latitude = gps_sample.lat_rad * RAD2DEG;
-	msg.raw_longitude = gps_sample.lon_rad * RAD2DEG;
+	SendablePosition(gps_sample, msg.latitude, msg.longitude);
+	msg.raw_latitude = msg.latitude;
+	msg.raw_longitude = msg.longitude;
 	msg.satellites = gps_sample.num_sv;
 	msg.hacc = gps_sample.h_acc_m;
 	msg.imu_status = nav_.imuStatus().health;
@@ -158,8 +172,7 @@ void Communication::SendTelemetryDataNow(bool armed, bool radio) {
 	msg.packet_header.msg_count = 0;
 	msg.packet_header.crc = 0;
 
-	msg.latitude = gps_sample.lat_rad * RAD2DEG;
-	msg.longitude = gps_sample.lon_rad * RAD2DEG;
+	SendablePosition(gps_sample, msg.latitude, msg.longitude);
 	msg.satellites = gps_sample.num_sv;
 	msg.hacc = gps_sample.h_acc_m;
 	msg.imu_status = nav_.imuStatus().health;
