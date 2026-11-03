@@ -149,6 +149,7 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 					archive_.CloseCurrentFlight();
 				}
 				sim_stage_ = SimStage::Off;
+				comm_.SetSimSession(false);
 			}
 			// Arming shuts the detection window for the rest of the session.  The
 			// console rate is a bench concern; leaving it movable by whatever the
@@ -1738,6 +1739,11 @@ static void ProfileFromWire(const Communication::SimFlightStart& w, SimFlight::P
 }
 
 void Factory::ServiceSimFlight(FlightStates& flight_state) {
+	ServiceSimFlightStage(flight_state);
+	comm_.SetSimSession(sim_stage_ != SimStage::Off);
+}
+
+void Factory::ServiceSimFlightStage(FlightStates& flight_state) {
 	Communication::SimFlightRequest req {};
 	if (comm_.TakeSimFlightRequest(req)) {
 		if (req.action == Communication::kSimFlightCancel) {

@@ -174,7 +174,7 @@ void Communication::SendTelemetryDataNow(bool armed, bool radio) {
 	// the app's triggers for a background full-record transfer.
 	msg.physical_deployment_stats = static_cast<uint8_t>(flight_.GetPhysicalDeploymentStats()
 			| (pickup_.picked_up() ? kTelemetryPickedUpBit : 0u)
-			| (nav_.simFlightActive() ? kTelemetrySimulatedBit : 0u));   // ADR-0041
+			| ((sim_session_ || nav_.simFlightActive()) ? kTelemetrySimulatedBit : 0u));   // ADR-0041
 	msg.agl = baro_sample.altitude_m_agl;
 	// Raw NED velocity: GPS horizontal + raw-baro vertical (−d(AGL)/dt = +down).
 	msg.vel_ned_mps = Vec3f{ gps_sample.vel_n_mps, gps_sample.vel_e_mps, -baro_sample.velocity };

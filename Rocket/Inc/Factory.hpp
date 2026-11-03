@@ -293,6 +293,7 @@ private:
 	static constexpr uint32_t kSimLandedHoldMs = 10000u;
 	// Take the app's SimFlightRequest and run the lifecycle.  Disarmed/Armed only.
 	void ServiceSimFlight(FlightStates& flight_state);
+	void ServiceSimFlightStage(FlightStates& flight_state);
 	// End it now: stop the generator and, if it had launched, land the flight
 	// so the record closes like any other.
 	void EndSimFlight();

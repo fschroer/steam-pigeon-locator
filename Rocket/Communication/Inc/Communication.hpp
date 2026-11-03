@@ -180,6 +180,11 @@ public:
 		return true;
 	}
 	// The latest SimFlightStart from the app, once (ADR-0041 as amended).
+	// ADR-0041: Factory reports a simulated flight from start until it is back
+	// on the pad, so the telemetry's simulated bit also covers the landed hold.
+	// The physics stops at landing, and a Landed frame without the bit read to
+	// the app as a real landing, which started an automatic full-record transfer.
+	void SetSimSession(bool on) { sim_session_ = on; }
 	bool TakeSimFlightStart(SimFlightStart& out) {
 		if (!pending_sim_start_) return false;
 		const uint32_t primask = __get_PRIMASK();
@@ -367,6 +372,7 @@ private:
 	volatile bool    pending_sim_req_ = false;
 	SimFlightStart   pending_sim_start_msg_ {};
 	volatile bool    pending_sim_start_ = false;
+	bool             sim_session_ = false;
 
 	// -----------------------------------------------------------------------
 	// Background full-record transfer (ADR "The radio download becomes the

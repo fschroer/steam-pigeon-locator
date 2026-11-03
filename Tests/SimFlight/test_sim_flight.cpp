@@ -462,16 +462,7 @@ static void B2_NoDrogueChannelFallsBallistic() {
     CHECK_MSG(f.peak_descent < -40.0f, "fastest descent %.1f m/s: a drogue opened", f.peak_descent);
 }
 
-// A9: a real design against OpenRocket.  Frank's "Scratch Built Tron Short
-// 2.6" .ork on a Cesaroni 164H90-12A, which is also the app's default rocket
-// (DefaultRocket.kt).  The curve is the app's 32-point thinning of the .ork
-// simulation's thrust column; Cd is OpenRocket's over the ascent.  OpenRocket's
-// saved run: 641.0 m at 9.84 s (sea level, 15 C, 2 m/s wind, 1 m rail).
-// OpenRocket models what this does not (fin and body lift, angle of attack,
-// damping).  Calm, it lands within 0.5 percent; OpenRocket's own run had
-// 2 m/s of wind, which costs this model about 1 percent, so that band is 2.
-static void A9_TronAgainstOpenRocket() {
-    printf("\n--- A9: Tron Short 2.6 (H90) against OpenRocket ---\n");
+static Profile TronProfile() {
     static const float kCurve[][2] = { {0.021f, 10.00f}, {0.028f, 154.00f}, {0.055f, 155.00f}, {0.075f, 108.00f}, {0.093f, 112.00f}, {0.130f, 120.00f}, {0.154f, 119.50f}, {0.243f, 117.40f}, {0.350f, 115.00f}, {0.427f, 112.60f}, {0.440f, 112.30f}, {0.481f, 111.00f}, {0.506f, 110.30f}, {0.542f, 109.10f}, {0.591f, 107.70f}, {0.703f, 104.20f}, {0.719f, 103.80f}, {0.765f, 102.30f}, {0.807f, 101.10f}, {0.860f, 99.50f}, {0.943f, 96.90f}, {1.043f, 93.90f}, {1.093f, 92.30f}, {1.336f, 85.00f}, {1.400f, 83.00f}, {1.480f, 84.00f}, {1.560f, 73.00f}, {1.660f, 33.80f}, {1.690f, 22.00f}, {1.760f, 8.00f}, {1.798f, 4.70f}, {1.850f, 0.00f} };
     Profile p{};
     p.n_points = static_cast<uint8_t>(sizeof(kCurve) / sizeof(kCurve[0]));
@@ -482,6 +473,20 @@ static void A9_TronAgainstOpenRocket() {
     for (uint8_t i = 0; i < SimFlight::kMachPoints; ++i) p.cd[i] = cd[i];
     p.rail_len_m = 1.0f; p.temp_c = 15.0f; p.wind_mps = 2.0f; p.wind_from_deg = 270.0f;
     p.drogue_mps = 7.0f; p.main_mps = 7.0f;
+    return p;
+}
+
+// A9: a real design against OpenRocket.  Frank's "Scratch Built Tron Short
+// 2.6" .ork on a Cesaroni 164H90-12A, which is also the app's default rocket
+// (DefaultRocket.kt).  The curve is the app's 32-point thinning of the .ork
+// simulation's thrust column; Cd is OpenRocket's over the ascent.  OpenRocket's
+// saved run: 641.0 m at 9.84 s (sea level, 15 C, 2 m/s wind, 1 m rail).
+// OpenRocket models what this does not (fin and body lift, angle of attack,
+// damping).  Calm, it lands within 0.5 percent; OpenRocket's own run had
+// 2 m/s of wind, which costs this model about 1 percent, so that band is 2.
+static void A9_TronAgainstOpenRocket() {
+    printf("\n--- A9: Tron Short 2.6 (H90) against OpenRocket ---\n");
+    Profile p = TronProfile();
     CHECK(SimFlight::Valid(p));
     auto fly = [](const Profile& q, float& t_apogee) {
         Generator g;
@@ -528,6 +533,7 @@ int main() {
     Profile windy = SmallFast(); windy.wind_mps = 7.0f; windy.wind_from_deg = 300.0f; windy.rail_angle_deg = 5.0f;
     B1_EventsWhereThePhysicsSays("29 mm G, 7 m/s wind", windy);
     B2_NoDrogueChannelFallsBallistic();
+    B1_EventsWhereThePhysicsSays("Tron Short 2.6, H90", TronProfile());
 
     printf("\nResults: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
