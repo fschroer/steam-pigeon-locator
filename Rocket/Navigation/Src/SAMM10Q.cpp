@@ -92,6 +92,8 @@ bool SAMM10Q::init(float sample_rate_hz) {
     m_stale_nmea_seen  = false;
     m_stream_class     = StreamClass::Unknown;
 
+    ++m_boot.inits;
+    m_boot.result = BootCfgResult::NoDevice;
     if (!waitForBoot(1000)) {
         m_status.error_count++;
         m_status.health = SensorHealth::Error;
@@ -360,21 +362,21 @@ bool SAMM10Q::configureReceiverValset(float sample_rate_hz) {
     uint8_t msg[128];
     uint16_t msg_len = 0;
 
-    // NAV-PVT stays off for this first VALSET so nothing competes with the
-    // UBX-ACK-ACK being verified; the second VALSET below turns it on.
-    if (!buildValsetInitialConfig(msg, msg_len, sample_rate_hz, 0)) {
+    // One VALSET carries the whole configuration, NAV-PVT output included.
+    // This used to be two: the first with NAV-PVT off "so nothing competes with
+    // the ACK", the second turning it on only once the first was ACKed.  That
+    // left a state with no way out: NMEA off, NAV-PVT off, so a receiver that
+    // applied the first and had its ACK missed (or never got the second) said
+    // nothing at all on I2C, and nothing on the pad ever wrote to it again.  A
+    // VALSET is applied whole or rejected whole, so with one message the
+    // receiver is either fully configured or still at its NMEA defaults, both
+    // of which the stream counters show.  The ACK parser already skips any
+    // NAV-PVT that arrives ahead of the ACK.
+    if (!buildValsetInitialConfig(msg, msg_len, sample_rate_hz, 1)) {
+        m_boot.result = BootCfgResult::BuildFailed;
         return false;
     }
-
-    if (sendUbxAndWaitAck(msg, msg_len, 0x06, 0x8A, 1000)) {
-			if (!buildValsetUbxNavPvtConfig(msg, msg_len)) {
-					return false;
-			}
-
-			return sendUbxAndWaitAck(msg, msg_len, 0x06, 0x8A, 1000);
-			}
-    else
-    	return false;
+    return sendUbxAndWaitAck(msg, msg_len, 0x06, 0x8A, 1000);
 }
 
 bool SAMM10Q::buildValsetInitialConfig(uint8_t* out, uint16_t& out_len, float sample_rate_hz, uint8_t nav_pvt_rate) {
@@ -423,52 +425,10 @@ bool SAMM10Q::buildValsetInitialConfig(uint8_t* out, uint16_t& out_len, float sa
     ok &= appendCfgItem(payload, sizeof(payload), p, CfgItemU2{UbxCfgKey::CFG_RATE_NAV, 1});
     ok &= appendCfgItem(payload, sizeof(payload), p, CfgItemE1{UbxCfgKey::CFG_RATE_TIMEREF, 1});
 
-    // UBX-NAV-PVT output rate on I2C/DDC.  0 during init (see caller), 1 when the
-    // stale-fix watchdog re-asserts the whole configuration in one shot.
+    // UBX-NAV-PVT output rate on I2C/DDC.  Every caller now passes 1 (boot and
+    // the stale-fix watchdog alike); the parameter stays so a test build can
+    // send the block with output off.
     ok &= appendCfgItem(payload, sizeof(payload), p, CfgItemU1{UbxCfgKey::CFG_MSGOUT_UBX_NAV_PVT_I2C, nav_pvt_rate});
-
-    if (!ok) {
-        out_len = 0;
-        return false;
-    }
-
-    const uint16_t len = p;
-
-    out[0] = 0xB5;
-    out[1] = 0x62;
-    out[2] = 0x06;
-    out[3] = 0x8A;
-    out[4] = static_cast<uint8_t>(len & 0xFF);
-    out[5] = static_cast<uint8_t>((len >> 8) & 0xFF);
-
-    std::memcpy(&out[6], payload, len);
-
-    uint8_t ckA = 0;
-    uint8_t ckB = 0;
-    ubxChecksum(&out[2], static_cast<uint16_t>(4 + len), ckA, ckB);
-
-    out[6 + len] = ckA;
-    out[7 + len] = ckB;
-
-    out_len = static_cast<uint16_t>(8 + len);
-    return true;
-}
-
-bool SAMM10Q::buildValsetUbxNavPvtConfig(uint8_t* out, uint16_t& out_len) {
-    uint8_t payload[128];
-    uint16_t p = 0;
-
-    // UBX-CFG-VALSET header payload:
-    // version, layers, reserved[2]
-    payload[p++] = 0x00; // version
-    payload[p++] = 0x01; // RAM layer
-    payload[p++] = 0x00;
-    payload[p++] = 0x00;
-
-    bool ok = true;
-
-    // Enable UBX-NAV-PVT output on I2C/DDC once per nav solution.
-    ok &= appendCfgItem(payload, sizeof(payload), p, CfgItemU1{UbxCfgKey::CFG_MSGOUT_UBX_NAV_PVT_I2C, 1});
 
     if (!ok) {
         out_len = 0;
@@ -504,6 +464,7 @@ bool SAMM10Q::sendUbxAndWaitAck(const uint8_t* msg, uint16_t len, uint8_t cls, u
 	    readFifo(dump, dumpLen);   // discard anything currently in FIFO
 
 	if (!sendUbx(msg, len)) {
+        m_boot.result = BootCfgResult::SendFailed;
         return false;
     }
     HAL_Delay(25); // Wait for receiver to process and send UBX-ACK-ACK/NAK
@@ -552,18 +513,24 @@ bool SAMM10Q::sendUbx(const uint8_t* msg, uint16_t len, uint32_t budget_ms) {
 
 bool SAMM10Q::waitForAck(uint8_t cls, uint8_t id, uint32_t timeout_ms) {
 	const uint32_t start = HAL_GetTick();
+	m_boot.ack_wait_bytes = 0;
+	m_boot.ack_wait_bus_errors = 0;
 
 	while ((HAL_GetTick() - start) < timeout_ms) {
 		uint16_t chunk = 0;
 		uint8_t tmp[128];
 
+		// A failed read used to end the wait on the spot, so one clock stretch
+		// past the byte timeout (the receiver stretches up to 20 ms before its
+		// first fix) counted as a missing ACK.  Keep waiting out the timeout.
 		if (!readFifo(tmp, chunk)) {
-				m_status.health = SensorHealth::Warning;
-				return false;
+				++m_boot.ack_wait_bus_errors;
+				HAL_Delay(10);
+				continue;
 		}
+		m_boot.ack_wait_bytes += chunk;
 
-		if (!appendToRxBuffer(tmp, chunk))
-			return false;
+		appendToRxBuffer(tmp, chunk);
 
 		uint8_t ackCls = 0;
 		uint8_t ackId = 0;
@@ -571,6 +538,7 @@ bool SAMM10Q::waitForAck(uint8_t cls, uint8_t id, uint32_t timeout_ms) {
 
 		while (parseAckFromBuffer(ackCls, ackId, nak)) {
 				if (ackCls == cls && ackId == id) {
+						m_boot.result = nak ? BootCfgResult::Nak : BootCfgResult::Ack;
 						return !nak;
 				}
 		}
@@ -578,6 +546,7 @@ bool SAMM10Q::waitForAck(uint8_t cls, uint8_t id, uint32_t timeout_ms) {
 		HAL_Delay(10);
 	}
 
+	m_boot.result = BootCfgResult::Timeout;
 	return false;
 }
 
@@ -639,8 +608,31 @@ bool SAMM10Q::readFifo(uint8_t *buf, uint16_t &len) {
   uint16_t available = static_cast<uint16_t>((cnt[0] << 8) | cnt[1]);
   if (available == 0xFFFFu) available = 0;   // bus idle-high: not a count
   m_ctr.last_available = available;
-  if (available == 0)
-      return true;                           // nothing waiting: len = 0
+  if (available == 0) {
+      // Nothing waiting, but read one byte from the stream register anyway.
+      // The receiver stops its I2C data stream when the host has not read it
+      // for 1.5 s (integration manual 3.2.2.2; CFG-I2C-EXTENDEDTIMEOUT is off),
+      // and only addressing the stream starts it again.  The fixed 128 byte
+      // read that this replaced did that on every poll.  Reading only the
+      // count does not appear to: from 2026-11-01, when the count read went
+      // in, the receiver could go silent after boot (count 0 on every poll,
+      // PPS still blinking) until something wrote to it, and the in-flight
+      // recovery write and the dynamic-model writes are the only things that
+      // do.  One byte costs ~25 us.  It is filler (0xFF) unless a byte
+      // arrived since the count was read, in which case it is data and kept.
+      LL_I2C_HandleTransfer(m_hi2c->Instance, (0x42 << 1), LL_I2C_ADDRSLAVE_7BIT,
+                            1, LL_I2C_MODE_AUTOEND, LL_I2C_GENERATE_START_READ);
+      if (!wait_flag(LL_I2C_IsActiveFlag_RXNE, kByteTimeoutMs, true)) return false;
+      const uint8_t b = LL_I2C_ReceiveData8(m_hi2c->Instance);
+      if (!wait_flag(LL_I2C_IsActiveFlag_STOP, kStopTimeoutMs, false)) return false;
+      LL_I2C_ClearFlag_STOP(m_hi2c->Instance);
+      if (b != 0xFFu) {
+          ++m_ctr.probe_data;
+          buf[0] = b;
+          len = 1;
+      }
+      return true;
+  }
   const uint16_t chunk = (available < kMaxChunk) ? available : kMaxChunk;
 
   // Phase 3: read exactly that many from the stream register (0xFF).

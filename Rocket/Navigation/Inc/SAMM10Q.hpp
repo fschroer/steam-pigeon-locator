@@ -97,7 +97,24 @@ public:
         uint32_t dropped = 0;        // bytes pushed out of the full rx buffer
         uint32_t oversize = 0;       // a sync whose length cannot fit the buffer
         uint16_t last_available = 0; // FIFO count at the last poll
+        uint32_t probe_data = 0;     // count said 0, yet the stream byte was data
     };
+
+    // How the boot configuration went (2026-11-03), for the console.  inits
+    // counts init() calls since power-up (Navigation retries a failed one);
+    // the rest describe the last.  ack_wait_bytes is what the receiver put on
+    // the bus while the ACK was awaited: a VALSET always produces an ACK or a
+    // NAK, so a Timeout with 0 bytes means the read path saw nothing at all.
+    enum class BootCfgResult : uint8_t {
+        NotRun = 0, NoDevice, BuildFailed, SendFailed, Ack, Nak, Timeout
+    };
+    struct BootReport {
+        uint8_t       inits = 0;
+        BootCfgResult result = BootCfgResult::NotRun;
+        uint16_t      ack_wait_bytes = 0;
+        uint16_t      ack_wait_bus_errors = 0;
+    };
+    const BootReport& bootReport() const { return m_boot; }
     const Counters& counters() const { return m_ctr; }
     uint32_t lastPvtAgeMs() const;
 
@@ -126,11 +143,9 @@ private:
 
     bool configureReceiverValset(float sample_rate_hz);
     // nav_pvt_rate is the CFG_MSGOUT_UBX_NAV_PVT_I2C value written alongside the
-    // port/protocol/rate items.  init() passes 0 and enables NAV-PVT in a second
-    // VALSET so the ACK of the first is unambiguous; recovery passes 1 to
-    // re-assert everything in a single un-ACKed write.
+    // port/protocol/rate items.  Boot (ACKed) and recovery (un-ACKed) both pass
+    // 1: the whole configuration always travels in one VALSET.
     bool buildValsetInitialConfig(uint8_t* out, uint16_t& out_len, float sample_rate_hz, uint8_t nav_pvt_rate);
-    bool buildValsetUbxNavPvtConfig(uint8_t* out, uint16_t& out_len);
 
     static StreamClass classifyStream(const uint8_t* buf, uint16_t len);
     void serviceStaleRecovery(uint32_t now);
@@ -243,6 +258,7 @@ private:
     uint32_t    m_recovery_attempts = 0;
     StreamClass m_stream_class      = StreamClass::Unknown;
     Counters    m_ctr{};
+    BootReport  m_boot{};
     // Sticky across an outage: a single 128 byte read can land entirely in FIFO
     // filler even while the receiver is talking, so the per-read classification
     // is too noisy to archive directly.  Cleared on every successful parse.

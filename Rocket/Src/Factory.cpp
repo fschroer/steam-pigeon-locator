@@ -1533,6 +1533,17 @@ void Factory::PrintSensorStatus() {
 				age == 0xFFFFFFFFu ? -1L : (long)age,
 				(unsigned long)navigation_.gpsRecoveryAttempts(), (unsigned)navigation_.gpsDynModel());
 		UartSend(g);
+		static const char* const kBootText[] = {
+			"not run", "no device", "build failed", "send failed", "ACK", "NAK", "timeout" };
+		const auto& r = navigation_.gpsBootReport();
+		const unsigned ri = static_cast<unsigned>(r.result);
+		snprintf(g, sizeof(g),
+				"DIAG|GPS: boot config %s after %u init(s), %u bytes and %u bus errors while waiting, "
+				"stream probe data %lu\r\n",
+				ri < sizeof(kBootText) / sizeof(kBootText[0]) ? kBootText[ri] : "?",
+				(unsigned)r.inits, (unsigned)r.ack_wait_bytes, (unsigned)r.ack_wait_bus_errors,
+				(unsigned long)c.probe_data);
+		UartSend(g);
 	}
 	const uint8_t failed = navigation_.failedSensors();
 	if (failed == 0u)

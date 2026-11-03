@@ -32,6 +32,7 @@ The analysis is in the Claude Doc "50 Hz loop budget with MMC5983MA". Its findin
    - The median, IIR and velocity windows are sized for 45 Hz so they keep the same time spans: median 11, velocity 21, IIR α ≈ 0.12 (0.25 at 20 Hz).
    - Die temperature is 200 ms old at worst, which is negligible against its thermal time constant.
 4. **GPS reads are length-aware (#22).** The driver reads the 0xFD/0xFE byte count first and reads at most 128 bytes, so an empty FIFO is no longer read in full.
+   - **Amended 2026-11-03:** when the count is 0 the driver still reads one byte from the stream register (0xFF). The receiver stops its I2C stream after 1.5 s without a host read, and only addressing the stream restarts it; reading the count alone did not, and the receiver could stay silent after boot with PPS blinking. The byte is kept if it is data.
 5. **The strapdown FIFO drain is capped per cycle (#24).** The cap is 24 words at 50 Hz. The strapdown dt estimate updates only when two consecutive drains have emptied the FIFO.
 6. **MMC5983MA magnetometer on I2C2 at 0x30.**
    - It runs in continuous mode at 50 Hz with automatic SET/RESET, and is read each cycle before the GPS poll.

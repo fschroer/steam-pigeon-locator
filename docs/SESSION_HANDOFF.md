@@ -2,6 +2,13 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-11-03 (GPS) — the receiver going silent after boot. Host-tested and linked at -O2, NOT on hardware
+
+- **Symptom:** PPS blinking, app at 0 satellites, console `GPS no fresh fix`. `DIAG|GPS` showed 499 polls, 0 I2C failures, 0 bytes, FIFO count 0 on every poll. Intermittent across power cycles; a simulated flight brought it back.
+- **Leading cause:** the length-aware read (#22, 7f58202, 2026-11-01) reads only the 0xFD/0xFE count when nothing is waiting. The receiver stops its I2C stream after 1.5 s unread (integration manual 3.2.2.2) and only addressing the stream restarts it, so a boot gap over 1.5 s could leave it stopped for good. The in-flight recovery VALSET and the dynamic-model writes are the only writes, which is why a sim flight revived it. **Fix:** a 1-byte stream read when the count is 0, as the old fixed read did every poll.
+- **Also fixed:** the boot VALSET was two messages, the first with NMEA and NAV-PVT both off; a missed ACK on it left a receiver that says nothing. Now one VALSET (applied whole or not at all), and a failed read no longer ends the ACK wait.
+- **To confirm on hardware:** press `s` after several power cycles. The new third `DIAG|GPS` line gives the boot config result (ACK/NAK/timeout), init count, bytes seen while waiting, and `stream probe data` (bytes the 1-byte read caught that the count missed). Not tried: CFG-I2C-EXTENDEDTIMEOUT, which would let a 4 KB backlog build up behind a slow host.
+
 ## 2026-11-03 (first simulated flight) — four fixes from Frank's first run. Host-tested, Android NOT compiled
 
 Frank flew the Tron in 10 m/s of wind (H128W, 7.5° rail). Everything below came out of that run.

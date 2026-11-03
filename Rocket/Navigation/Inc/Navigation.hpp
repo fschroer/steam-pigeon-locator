@@ -187,6 +187,7 @@ public:
     SensorStatus gpsStatus()  const { return m_gps.getStatus(); }
     const SAMM10Q::Counters& gpsCounters() const { return m_gps.counters(); }
     uint32_t gpsLastPvtAgeMs() const { return m_gps.lastPvtAgeMs(); }
+    const SAMM10Q::BootReport& gpsBootReport() const { return m_gps.bootReport(); }
     uint32_t gpsRecoveryAttempts() const { return m_gps.recoveryAttempts(); }
     uint8_t  gpsDynModel() const { return static_cast<uint8_t>(m_gps.dynamicModel()); }
 
