@@ -81,6 +81,26 @@ public:
     StreamClass streamClass() const { return m_stream_class; }
     uint32_t recoveryAttempts() const { return m_recovery_attempts; }
 
+    // What the receiver has put on the bus since boot, for the console's
+    // DIAG|GPS line.  Added 2026-11-03 to find why a receiver with a fix (PPS
+    // blinking, 10 satellites when a fix got through) delivered a NAV-PVT only
+    // every 20 to 67 s on the pad.  Counters only: nothing reads them to decide.
+    struct Counters {
+        uint32_t polls = 0;          // readSample calls after init
+        uint32_t i2c_fail = 0;       // readFifo returned false (NACK or timeout)
+        uint32_t bytes = 0;          // bytes read from the FIFO
+        uint32_t chunks_full = 0;    // polls that read the 128 B cap: a backlog
+        uint32_t idle = 0, ubx = 0, nmea = 0, unknown = 0;   // stream class per poll
+        uint32_t nav_pvt = 0;        // NAV-PVTs parsed
+        uint32_t other_ubx = 0;      // good-checksum UBX that is not NAV-PVT
+        uint32_t bad_checksum = 0;   // a sync whose checksum failed
+        uint32_t dropped = 0;        // bytes pushed out of the full rx buffer
+        uint32_t oversize = 0;       // a sync whose length cannot fit the buffer
+        uint16_t last_available = 0; // FIFO count at the last poll
+    };
+    const Counters& counters() const { return m_ctr; }
+    uint32_t lastPvtAgeMs() const;
+
     // Select the dynamic platform model for the current flight regime.  Queues
     // the write rather than issuing it here: this is called from a flight-state
     // transition, and keeping every GPS bus transaction on the readSample() poll
@@ -222,6 +242,7 @@ private:
     uint32_t    m_last_recovery_ms  = 0;
     uint32_t    m_recovery_attempts = 0;
     StreamClass m_stream_class      = StreamClass::Unknown;
+    Counters    m_ctr{};
     // Sticky across an outage: a single 128 byte read can land entirely in FIFO
     // filler even while the receiver is talking, so the per-read classification
     // is too noisy to archive directly.  Cleared on every successful parse.

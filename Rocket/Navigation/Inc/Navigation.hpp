@@ -185,6 +185,10 @@ public:
     SensorStatus imuStatus()  const { return m_imu.getStatus(); }
     SensorStatus baroStatus() const { return m_baro.getStatus(); }
     SensorStatus gpsStatus()  const { return m_gps.getStatus(); }
+    const SAMM10Q::Counters& gpsCounters() const { return m_gps.counters(); }
+    uint32_t gpsLastPvtAgeMs() const { return m_gps.lastPvtAgeMs(); }
+    uint32_t gpsRecoveryAttempts() const { return m_gps.recoveryAttempts(); }
+    uint8_t  gpsDynModel() const { return static_cast<uint8_t>(m_gps.dynamicModel()); }
 
     // ADR-0038 — the sensors that failed their power-on check (SensorFaults bits),
     // and whether what survived is enough to arm.  The rule lives in

@@ -115,7 +115,9 @@ bool SAMM10Q::readSample(GpsSample& out) {
 		return false;
 	}
 
+	++m_ctr.polls;
 	if (!readFifo(tmp, chunk)) {
+			++m_ctr.i2c_fail;
 			m_status.health = SensorHealth::Warning;
 			serviceStaleRecovery(HAL_GetTick());
 			return false;
@@ -124,6 +126,14 @@ bool SAMM10Q::readSample(GpsSample& out) {
 	// An empty FIFO is now a zero-length read (#22); it used to be 128 bytes of
 	// 0xFF filler, which classifyStream calls Idle.  Keep calling it that.
 	m_stream_class = (chunk == 0) ? StreamClass::Idle : classifyStream(tmp, chunk);
+	m_ctr.bytes += chunk;
+	if (chunk >= sizeof(tmp)) ++m_ctr.chunks_full;
+	switch (m_stream_class) {
+	case StreamClass::Idle: ++m_ctr.idle; break;
+	case StreamClass::Ubx:  ++m_ctr.ubx;  break;
+	case StreamClass::Nmea: ++m_ctr.nmea; break;
+	default:                ++m_ctr.unknown; break;
+	}
 
 	// After the FIFO read transaction has completed, so the two never overlap.
 	servicePendingDynModel();
@@ -209,6 +219,10 @@ void SAMM10Q::servicePendingDynModel() {
 	if (!buildValsetDynModel(msg, msg_len)) return;
 
 	sendUbx(msg, msg_len, kRecoveryBudgetMs);
+}
+
+uint32_t SAMM10Q::lastPvtAgeMs() const {
+	return m_seen_nav_pvt ? (HAL_GetTick() - m_last_pvt_ms) : 0xFFFFFFFFu;
 }
 
 bool SAMM10Q::isFixStale() const {
@@ -624,6 +638,7 @@ bool SAMM10Q::readFifo(uint8_t *buf, uint16_t &len) {
 
   uint16_t available = static_cast<uint16_t>((cnt[0] << 8) | cnt[1]);
   if (available == 0xFFFFu) available = 0;   // bus idle-high: not a count
+  m_ctr.last_available = available;
   if (available == 0)
       return true;                           // nothing waiting: len = 0
   const uint16_t chunk = (available < kMaxChunk) ? available : kMaxChunk;
@@ -646,6 +661,7 @@ bool SAMM10Q::appendToRxBuffer(const uint8_t* src, uint16_t len) {
     if (len == 0) return true;
 
     if (len >= kRxBufSize) {
+        m_ctr.dropped += m_rxlen + (len - kRxBufSize);
         std::memcpy(m_rxbuf, &src[len - kRxBufSize], kRxBufSize);
         m_rxlen = kRxBufSize;
         return true;
@@ -653,6 +669,7 @@ bool SAMM10Q::appendToRxBuffer(const uint8_t* src, uint16_t len) {
 
     if ((m_rxlen + len) > kRxBufSize) {
         const uint16_t drop = static_cast<uint16_t>((m_rxlen + len) - kRxBufSize);
+        m_ctr.dropped += drop;
         if (drop < m_rxlen) {
             std::memmove(m_rxbuf, m_rxbuf + drop, m_rxlen - drop);
             m_rxlen = static_cast<uint16_t>(m_rxlen - drop);
@@ -681,6 +698,9 @@ bool SAMM10Q::parseNavPvtFromBuffer(GpsSample& out) {
         const uint16_t total = static_cast<uint16_t>(6 + len + 2);
 
         if ((i + total) > m_rxlen) {
+            // A false sync claiming more than the buffer holds waits here
+            // until appendToRxBuffer pushes it out; counted, not changed.
+            if (total > kRxBufSize || total < 8u) ++m_ctr.oversize;
             break;
         }
 
@@ -760,8 +780,12 @@ bool SAMM10Q::parseNavPvtFromBuffer(GpsSample& out) {
 
                 discardConsumedPrefix(static_cast<uint16_t>(i + total));
                 m_seen_nav_pvt = true;
+                ++m_ctr.nav_pvt;
                 return true;
             }
+            ++m_ctr.other_ubx;
+        } else {
+            ++m_ctr.bad_checksum;
         }
 
         i = static_cast<uint16_t>(i + total);

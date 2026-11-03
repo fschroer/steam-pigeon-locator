@@ -1511,6 +1511,29 @@ void Factory::PrintSensorStatus() {
 	snprintf(b, sizeof(b), "\r\nDIAG|SENSORS: IMU %s, barometer %s, GPS %s\r\n",
 			SensorHealthText(imu), SensorHealthText(baro), SensorHealthText(gps));
 	UartSend(b);
+	// What the GPS receiver has put on the bus since boot (2026-11-03): press
+	// 's' twice some seconds apart and the differences are rates.  At 10 Hz a
+	// healthy receiver adds ~10 NAV-PVT and ~1,000 bytes a second.
+	{
+		const auto& c = navigation_.gpsCounters();
+		const uint32_t age = navigation_.gpsLastPvtAgeMs();
+		char g[240];
+		snprintf(g, sizeof(g),
+				"DIAG|GPS: t %lu ms, polls %lu, i2c fail %lu, bytes %lu (full %lu, fifo %u), "
+				"idle/ubx/nmea/other %lu/%lu/%lu/%lu\r\n",
+				(unsigned long)HAL_GetTick(), (unsigned long)c.polls, (unsigned long)c.i2c_fail,
+				(unsigned long)c.bytes, (unsigned long)c.chunks_full, (unsigned)c.last_available,
+				(unsigned long)c.idle, (unsigned long)c.ubx, (unsigned long)c.nmea, (unsigned long)c.unknown);
+		UartSend(g);
+		snprintf(g, sizeof(g),
+				"DIAG|GPS: nav-pvt %lu, other ubx %lu, bad ck %lu, oversize %lu, dropped %lu, "
+				"last pvt %ld ms ago, recoveries %lu, dynmodel %u\r\n",
+				(unsigned long)c.nav_pvt, (unsigned long)c.other_ubx, (unsigned long)c.bad_checksum,
+				(unsigned long)c.oversize, (unsigned long)c.dropped,
+				age == 0xFFFFFFFFu ? -1L : (long)age,
+				(unsigned long)navigation_.gpsRecoveryAttempts(), (unsigned)navigation_.gpsDynModel());
+		UartSend(g);
+	}
 	const uint8_t failed = navigation_.failedSensors();
 	if (failed == 0u)
 		return;
