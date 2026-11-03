@@ -413,7 +413,13 @@ bool Navigation::startSimFlight(const SimFlight::Profile& p, int32_t origin_lat_
     } else {
         m_sim_has_origin_ = false;   // no track: GPS reports nothing new
     }
-    m_sim_.Start(p, HAL_GetTick(), m_sim_p0_pa_);
+    // The barometer's own temperature when the app asked for it.  It reads the
+    // board, which a sun-warmed bay runs above the air; a 10 C error moves the
+    // density about 3.5%.  No temperature word yet (raw() not valid) keeps 15 C.
+    SimFlight::Profile q = p;
+    if (q.temp_from_baro && m_baro.raw().valid)
+        q.temp_c = std::fmin(50.0f, std::fmax(-40.0f, m_baro.raw().temperature_c));
+    m_sim_.Start(q, HAL_GetTick(), m_sim_p0_pa_);
     m_sim_seed_pending_ = true;
     return true;
 }

@@ -441,6 +441,8 @@ struct SimFlightRequest {
 	uint8_t  reserved;
 };
 static constexpr uint8_t kSimFlightCancel = 0u;
+// SimFlightStart.temp_c: use the locator's own barometer temperature.
+static constexpr int8_t kSimTempFromBaro = -128;
 static constexpr uint8_t kSimFlightStart  = 1u;
 
 // Start a simulated flight from a physical rocket (ADR-0041 as amended
@@ -463,7 +465,7 @@ struct SimFlightStart {
 	uint8_t  wind_mps;          // 0..20
 	uint8_t  drogue_mps;        // 5..60
 	uint8_t  main_dmps;         // 20..150, tenths of a m/s
-	int8_t   temp_c;            // -40..50, at the ground
+	int8_t   temp_c;            // -40..50 at the ground, or -128: the locator's baro
 	uint8_t  n_points;          // 2..32 thrust-curve points used
 	float    peak_thrust_n;
 	float    motor_loaded_kg;

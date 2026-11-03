@@ -198,7 +198,7 @@ The body frame is a triad moved each step by the smallest rotation taking the ol
 | 27 | wind_mps | u8, 0..20 |
 | 28 | drogue_mps | u8, 5..60 |
 | 29 | main_dmps | u8, 20..150 (0.1 m/s) |
-| 30 | temp_c | i8, −40..50 |
+| 30 | temp_c | i8, −40..50, or −128 (`kSimTempFromBaro`): use the locator's barometer temperature |
 | 31 | n_points | u8, 2..32 |
 | 32 | peak_thrust_n | f32 |
 | 36 | motor_loaded_kg | f32, ≤ 100 |
@@ -216,7 +216,7 @@ A request with any field out of range, or whose peak thrust cannot lift the load
 - **Motor**: a thrustcurve.org search with every downloaded motor cached on the phone, or a .eng or .rse file. The app thins the curve to at most 32 points, keeping the total impulse.
 - **Rocket**: typed and saved by name on the phone. Cd is typed once (spread over the Mach grid with a standard transonic rise), typed as the 8 points, or fitted from an OpenRocket simulation CSV export.
 - **Recovery**: typed descent rates, each with a canopy calculator (diameter and Cd, at the burnout mass) that fills it. Only the rate is sent.
-- **Day**: ground temperature typed, default 15 °C. No weather lookup.
+- **Day**: by default the locator uses its own MS5611 temperature at the start, clamped to −40..50 °C (15 °C if no temperature word has been read yet). The flyer can type an override instead. No weather lookup and no phone sensor: no telemetry message carries the baro temperature, few phones have an ambient sensor, and the ones that do read the inside of the case. The baro reads the board, which a sun-warmed bay runs above the air; 10 °C of error moves density about 3.5% and apogee a percent or two. (Frank, 2026-11-03.)
 - **Default rocket**: built from an .ork file Frank will provide.
 
 ### A5. Cost

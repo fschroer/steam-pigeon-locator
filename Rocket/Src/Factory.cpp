@@ -1728,7 +1728,8 @@ static void ProfileFromWire(const Communication::SimFlightStart& w, SimFlight::P
 	p.rail_len_m      = static_cast<float>(w.rail_len_cm) * 0.01f;
 	p.rail_angle_deg  = static_cast<float>(w.rail_angle_ddeg) * 0.1f;
 	p.launch_az_deg   = static_cast<float>(w.launch_az_deg);
-	p.temp_c          = static_cast<float>(w.temp_c);
+	p.temp_from_baro  = (w.temp_c == Communication::kSimTempFromBaro);
+	p.temp_c          = p.temp_from_baro ? 15.0f : static_cast<float>(w.temp_c);
 	p.wind_mps        = static_cast<float>(w.wind_mps);
 	p.wind_from_deg   = static_cast<float>(w.wind_from_deg);
 	p.drogue_mps      = static_cast<float>(w.drogue_mps);

@@ -66,6 +66,9 @@ struct Profile {
     float   rail_angle_deg = 0.0f;   // from vertical
     float   launch_az_deg  = 0.0f;   // direction the rail leans toward
     float   temp_c         = 15.0f;  // at the ground
+    // The app sent "use your own" (kSimTempFromBaro): startSimFlight replaces
+    // temp_c with the barometer's temperature, clamped to the range.
+    bool    temp_from_baro = false;
     float   wind_mps       = 0.0f;
     float   wind_from_deg  = 270.0f; // meteorological: where the wind blows FROM
     // Recovery.
