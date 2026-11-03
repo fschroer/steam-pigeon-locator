@@ -174,18 +174,19 @@ The target-apogee profile and its thrust bisection are removed (Frank, 2026-11-0
 - **Air**: the barometer's measured ground pressure and the profile's ground temperature, a 6.5 K/km lapse, density from a 16-entry table at 1 km steps, and the speed of sound from the temperature.
 - **Drag** ½ρ|v_rel|²·Cd(M)·A against the velocity relative to the air, with Cd linear between 8 points on the fixed Mach grid 0, 0.3, 0.5, 0.7, 0.85, 1.0, 1.2, 1.5.
 - **Rail**: constrained along the rail, at its angle and lean direction, until the rocket has traveled its length. It does not move until the thrust exceeds the weight along the rail.
-- **Off the rail** the body points along the air-relative velocity, at zero angle of attack. A crosswind therefore turns the rocket into the wind, and a leaning rail carries it the way it leans, with no center of pressure, inertia or Barrowman input. With the rail vertical and no wind the flight is exactly vertical, which is what Frank's "vertical now" answer asked for; it is recorded as a departure from that answer, kept because it costs no inputs.
+- **Off the rail** the body is a rigid body in pitch and yaw. The air pushes on it with a normal force q·A·CNα·sin α against the crossflow, acting at the center of pressure, which sits the stability margin (calibers × diameter) aft of the CG. That moment turns the nose into the relative wind against a pitch inertia of m·L²/12. Aerodynamic damping (the same force, from the rotation rate, at the same arm) and jet damping (ṁ·(0.4 L)²) slow it. CNα is a constant 15 per radian: OpenRocket's run of the Tron gives 14.4 to 17 through the boost. Roll is not modeled. The rotation is integrated semi-implicitly, in up to 8 substeps when a fast, stiff rocket needs them. With the rail vertical and no wind the flight is exactly vertical.
+  - *Amended 2026-11-03 (Frank chose "add stability margin and length").* Before this, the body pointed along the air-relative velocity at zero angle of attack, so the turn at rail exit was instant. On Frank's first simulated flight (an H128W off a 1 m rail in 10 m/s of wind) that leaned the rocket 335 m downrange by apogee. A slow rocket leaving a short rail in strong wind is exactly where an instant turn is most wrong. The two new inputs are on the rocket: the margin as OpenRocket shows it with the motor loaded, and the overall length.
 - **Descent** as before, now against the air-relative velocity in 3-D, so the drift comes out of the drag.
 
 The body frame is a triad moved each step by the smallest rotation taking the old nose to the new one, and the gyro reports that rotation. Specific force is (a − g) in that frame.
 
 **Validation.** `Tests/SimFlight` flies three synthetic rockets (none a real kit) against an independent RK4 reference at 1 ms with its own atmosphere, thrust, mass and Cd code. Apogee, time to apogee and burnout speed agree within 0.1%. Integrating the gyro over a windy, leaning flight lands within 0.21° of the nose. All 80 checks pass, through the real FlightManager at 50 Hz.
 
-**Against OpenRocket (A9).** Frank's *Scratch Built Tron Short 2.6* .ork on a Cesaroni 164H90-12A, which is also the app's default rocket. The inputs are the .ork's: thrust from its saved simulation, thinned to 32 points by the app's code, 501 g dry, 67.4 mm, and OpenRocket's own Cd over the ascent. Calm, the generator reaches 641.8 m at 9.78 s; OpenRocket's run, with 2 m/s of wind, has 641.0 m at 9.84 s. With the same 2 m/s, the generator gets 634.5 m: zero-angle-of-attack weathercocking turns the rocket harder off a 1 m rail than OpenRocket's damped restoring moment does, which costs about 1% here. A flight in more wind will read lower than OpenRocket by more. The fix, if it matters, is a restoring moment, which needs CP, CG and inertia (the Barrowman warning's inputs). Note that OpenRocket's CSV rounds the reference area (0.004 m² here), which sets apogee 6% low if you use it. Use the diameter.
+**Against OpenRocket (A9).** Frank's *Scratch Built Tron Short 2.6* .ork on a Cesaroni 164H90-12A, which is also the app's default rocket. The inputs are the .ork's: thrust from its saved simulation, thinned to 32 points by the app's code, 501 g dry, 67.4 mm, and OpenRocket's own Cd over the ascent. Calm, the generator reaches 641.8 m at 9.78 s; OpenRocket's run, with 2 m/s of wind, has 641.0 m at 9.84 s. With the same 2 m/s, the generator gets 639.9 m (0.2% below OpenRocket). The instant turn it used before gave 634.5 m. In 10 m/s with the rail 7.5° from vertical, it reaches 583.9 m, 182 m upwind at apogee; OpenRocket has not been run for that case. For the Tron, the margin is 2.5 calibers (OpenRocket's CP and CG at rail exit give 2.49) and the length 1,075 mm. The rod inertia is 0.060 kg·m², against OpenRocket's 0.071. Note that OpenRocket's CSV rounds the reference area (0.004 m² here), which sets apogee 6% low if you use it. Use the diameter.
 
 ### A3. The command
 
-**`SimFlightStart`, MsgType 31**, addressed, 196 B, in one radio frame. Frank's answer was a separate profile message followed by the start. The receiver keeps one pending command and a later one overwrites it, so a start sent right behind its profile would erase the profile. One message has no such race, and still fits a 255 B frame.
+**`SimFlightStart`, MsgType 31**, addressed, 199 B (196 until the stability-margin amendment), in one radio frame. Frank's answer was a separate profile message followed by the start. The receiver keeps one pending command and a later one overwrites it, so a start sent right behind its profile would erase the profile. One message has no such race, and still fits a 255 B frame.
 
 | Offset | Field | Type |
 |---|---|---|
@@ -210,17 +211,19 @@ The body frame is a triad moved each step by the smallest rotation taking the ol
 | 52 | cd_milli[8] | u16 each, Cd × 1000, 0.05..3.0 |
 | 68 | t_ms[32] | u16 each, strictly increasing, ≤ 60 s |
 | 132 | thrust_frac[32] | u16 each, thrust / peak × 65535 |
+| 196 | length_mm | u16, 100..5000, overall length |
+| 198 | stability_dcal | u8, 5..100, static margin in tenths of a caliber, motor loaded |
 
 A request with any field out of range, or whose peak thrust cannot lift the loaded rocket, is rejected whole. `SimFlightRequest` (30) now only cancels; its start is ignored, and its layout is unchanged.
 
 ### A4. The app
 
 - **Motor**: a thrustcurve.org search with every downloaded motor cached on the phone, or a .eng or .rse file. The app thins the curve to at most 32 points, keeping the total impulse.
-- **Rocket**: typed and saved by name on the phone. Cd is typed once (spread over the Mach grid with a standard transonic rise), typed as the 8 points, or fitted from an OpenRocket simulation CSV export.
+- **Rocket**: typed and saved by name on the phone, including its length and stability margin (a rocket saved before these existed loads with 1,000 mm and 2.0 calibers). Cd is typed once (spread over the Mach grid with a standard transonic rise), typed as the 8 points, or fitted from an OpenRocket simulation CSV export.
 - **Recovery**: typed descent rates, each with a canopy calculator (diameter and Cd, at the burnout mass) that fills it. Only the rate is sent.
 - **Day**: by default the locator uses its own MS5611 temperature at the start, clamped to −40..50 °C (15 °C if no temperature word has been read yet). The flyer can type an override instead. No weather lookup and no phone sensor: no telemetry message carries the baro temperature, few phones have an ambient sensor, and the ones that do read the inside of the case. The baro reads the board, which a sun-warmed bay runs above the air; 10 °C of error moves density about 3.5% and apogee a percent or two. (Frank, 2026-11-03.)
 - **Default rocket**: built from an .ork file Frank will provide.
 
 ### A5. Cost
 
-From a full link at -Og: +7.0 KB flash and +0.8 KB static RAM over the quick mode (a 196 B pending command, and the profile and atmosphere in the generator). RAM in use is 40.0 KiB of 64 KiB. The per-step cost in software float is not measured; it is two thrust, mass and drag evaluations, one atan2 and a few trigonometric calls per 10 ms step.
+From a full link at -Og: +7.0 KB flash and +0.8 KB static RAM over the quick mode (a 196 B pending command, now 199 B, and the profile and atmosphere in the generator). RAM in use is 40.0 KiB of 64 KiB. The per-step cost in software float is not measured; it is two thrust, mass and drag evaluations, one atan2 and a few trigonometric calls per 10 ms step.

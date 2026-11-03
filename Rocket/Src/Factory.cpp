@@ -1724,6 +1724,8 @@ static void ProfileFromWire(const Communication::SimFlightStart& w, SimFlight::P
 	p.motor_prop_kg   = w.motor_prop_kg;
 	p.dry_mass_kg     = w.dry_mass_kg;
 	p.ref_diam_m      = w.ref_diameter_m;
+	p.length_m        = static_cast<float>(w.length_mm) * 0.001f;
+	p.stability_cal   = static_cast<float>(w.stability_dcal) * 0.1f;
 	for (uint8_t i = 0; i < SimFlight::kMachPoints; ++i)
 		p.cd[i] = static_cast<float>(w.cd_milli[i]) * 0.001f;
 	p.rail_len_m      = static_cast<float>(w.rail_len_cm) * 0.01f;

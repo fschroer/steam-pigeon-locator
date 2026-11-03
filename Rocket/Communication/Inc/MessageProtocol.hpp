@@ -475,6 +475,9 @@ struct SimFlightStart {
 	uint16_t cd_milli[8];       // Cd x 1000 on SimFlight::kMachGrid
 	uint16_t t_ms[32];          // time after ignition
 	uint16_t thrust_frac[32];   // thrust / peak_thrust_n x 65535
+	// Added 2026-11-03 for the restoring-moment weathercock model.
+	uint16_t length_mm;         // 100..5000, overall length
+	uint8_t  stability_dcal;    // 5..100, static margin in tenths of a caliber
 };
 
 // NOTE: there is deliberately no "is this command addressed?" predicate here.
@@ -557,7 +560,7 @@ static_assert(offsetof(SimFlightRequest, wind_from_deg)  == 20, "SimFlightReques
 static_assert(offsetof(SimFlightRequest, seed)           == 22, "SimFlightRequest offsets changed — sync receiver + app + iOS");
 static_assert(offsetof(SimFlightRequest, action)         == 24, "SimFlightRequest offsets changed — sync receiver + app + iOS");
 static_assert(offsetof(SimFlightRequest, wind_mps)       == 28, "SimFlightRequest offsets changed — sync receiver + app + iOS");
-static_assert(sizeof(SimFlightStart)                  == 196, "SimFlightStart size changed — sync receiver + app + iOS");
+static_assert(sizeof(SimFlightStart)                  == 199, "SimFlightStart size changed — sync receiver + app + iOS");
 static_assert(offsetof(SimFlightStart, origin_lat_1e7)   == 10, "SimFlightStart offsets changed — sync receiver + app + iOS");
 static_assert(offsetof(SimFlightStart, seed)             == 18, "SimFlightStart offsets changed — sync receiver + app + iOS");
 static_assert(offsetof(SimFlightStart, rail_len_cm)      == 24, "SimFlightStart offsets changed — sync receiver + app + iOS");
@@ -569,6 +572,8 @@ static_assert(offsetof(SimFlightStart, ref_diameter_m)   == 48, "SimFlightStart 
 static_assert(offsetof(SimFlightStart, cd_milli)         == 52, "SimFlightStart offsets changed — sync receiver + app + iOS");
 static_assert(offsetof(SimFlightStart, t_ms)             == 68, "SimFlightStart offsets changed — sync receiver + app + iOS");
 static_assert(offsetof(SimFlightStart, thrust_frac)      == 132, "SimFlightStart offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightStart, length_mm)        == 196, "SimFlightStart offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightStart, stability_dcal)   == 198, "SimFlightStart offsets changed — sync receiver + app + iOS");
 static_assert(sizeof(SimFlightStart) <= kMaxPayloadBytes, "SimFlightStart must fit one radio frame");
 static_assert(static_cast<uint8_t>(MsgType::SimFlightStart) == 31, "MsgType::SimFlightStart changed — sync receiver + app + iOS");
 static_assert(offsetof(FlightEventsMessage, flags)       ==  7, "FlightEventsMessage flags moved — sync app + iOS");

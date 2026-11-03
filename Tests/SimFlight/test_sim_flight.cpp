@@ -89,12 +89,12 @@ static Profile SmallH() {      // 54 mm, ~200 N s
 }
 static Profile BigL() {        // 98 mm, ~2,800 N s, reaches transonic
     Profile p; SetMotor(p, 2800.0f, 3.5f, 3.0f, 1.6f);
-    p.dry_mass_kg = 6.0f; p.ref_diam_m = 0.098f; SetCd(p, 0.50f);
+    p.dry_mass_kg = 6.0f; p.ref_diam_m = 0.098f; SetCd(p, 0.50f); p.length_m = 2.2f;
     p.drogue_mps = 25.0f; p.main_mps = 7.0f; p.seed = 9; return p;
 }
 static Profile SmallFast() {   // 29 mm, ~120 N s, short burn
     Profile p; SetMotor(p, 120.0f, 0.8f, 0.12f, 0.06f);
-    p.dry_mass_kg = 0.45f; p.ref_diam_m = 0.029f; SetCd(p, 0.40f);
+    p.dry_mass_kg = 0.45f; p.ref_diam_m = 0.029f; SetCd(p, 0.40f); p.length_m = 0.7f;
     p.drogue_mps = 15.0f; p.main_mps = 4.0f; p.seed = 77; return p;
 }
 
@@ -287,20 +287,36 @@ static void A5_Accelerometer() {
     g.AdvanceTo(1000u);
     double ax = 0; for (int i = 0; i < 200; ++i) ax += g.AccelBody().x;
     CHECK_MSG(std::fabs(ax / 200 - SimFlight::kG) < 0.02, "pad %.3f", ax / 200);
-    // Coast: thrust off, drag along the body, so sideways is noise only.
-    float worst_side = 0.0f, axial = 0.0f;
-    for (uint32_t ms = 1000u; ms < 30000u; ms += 10u) {
-        g.AdvanceTo(ms);
-        if (g.phase() == SimFlight::Phase::Coast && g.t_s() > g.burnout_t_s() + 0.5f) {
-            double sy = 0, sz = 0, sx = 0;
-            for (int i = 0; i < 16; ++i) { const Vec3f f = g.AccelBody(); sx += f.x; sy += f.y; sz += f.z; }
-            const float side = std::sqrt(sy * sy + sz * sz) / 16;
-            if (side > worst_side) worst_side = side;
-            axial = sx / 16;
+    // Coast in calm air: thrust off, drag along the body, so sideways is noise
+    // only.  In wind the normal force pushes the body sideways while the nose
+    // swings into the relative wind, and the swing damps out: real force
+    // early, close to noise a few seconds on.  (Near apogee it rises again, as
+    // the slowing rocket's nose lags its gravity turn: real, and left alone.)
+    auto coast_side = [](const Profile& q, float from_s, float to_s, float& axial_out) {
+        Generator gg; gg.Start(q, 0u, kP0);
+        float worst = 0.0f;
+        for (uint32_t ms = 10u; ms < 30000u; ms += 10u) {
+            gg.AdvanceTo(ms);
+            if (gg.phase() == SimFlight::Phase::Coast && gg.t_s() > gg.burnout_t_s() + from_s &&
+                gg.t_s() < gg.burnout_t_s() + to_s) {
+                double sy = 0, sz = 0, sx = 0;
+                for (int i = 0; i < 16; ++i) { const Vec3f f = gg.AccelBody(); sx += f.x; sy += f.y; sz += f.z; }
+                const float side = std::sqrt(sy * sy + sz * sz) / 16;
+                if (side > worst) worst = side;
+                axial_out = sx / 16;
+            }
         }
-    }
-    printf("  worst sideways %.3f m/s^2 in the coast; last axial %.2f m/s^2\n", worst_side, axial);
+        return worst;
+    };
+    Profile calm = p; calm.wind_mps = 0.0f;
+    float axial = 0.0f, ignore = 0.0f;
+    const float worst_side = coast_side(calm, 0.5f, 1e9f, axial);
+    const float windy_early = coast_side(p, 0.0f, 1.0f, ignore), windy_late = coast_side(p, 3.0f, 6.0f, ignore);
+    printf("  calm: worst sideways %.3f m/s^2 in the coast; last axial %.2f m/s^2.  5 m/s wind: %.2f in the first second of coast, %.3f 3 to 6 s in\n",
+           worst_side, axial, windy_early, windy_late);
     CHECK_MSG(worst_side < 0.3f, "sideways %.3f", worst_side);
+    CHECK_MSG(windy_early > 0.3f, "the normal force shows sideways in wind: %.3f", windy_early);
+    CHECK_MSG(windy_late < 0.3f, "and damps out: %.3f", windy_late);
     CHECK_MSG(axial < 0.0f && axial > -15.0f, "coast axial is the drag deceleration: %.2f", axial);
 }
 
@@ -485,6 +501,7 @@ static Profile TronProfile() {
     for (uint8_t i = 0; i < p.n_points; ++i) { p.t_s[i] = kCurve[i][0]; p.f_n[i] = kCurve[i][1]; }
     p.motor_loaded_kg = 0.190f; p.motor_prop_kg = 0.084f;
     p.dry_mass_kg = 0.501f; p.ref_diam_m = 0.0674f;
+    p.stability_cal = 2.5f; p.length_m = 1.075f;   // the .ork: 2.49 cal loaded, 230 + 668 + 177 mm
     const float cd[SimFlight::kMachPoints] = { 0.661f, 0.665f, 0.691f, 0.705f, 0.774f, 1.071f, 1.002f, 0.898f };
     for (uint8_t i = 0; i < SimFlight::kMachPoints; ++i) p.cd[i] = cd[i];
     p.rail_len_m = 1.0f; p.temp_c = 15.0f; p.wind_mps = 2.0f; p.wind_from_deg = 270.0f;
@@ -497,9 +514,9 @@ static Profile TronProfile() {
 // (DefaultRocket.kt).  The curve is the app's 32-point thinning of the .ork
 // simulation's thrust column; Cd is OpenRocket's over the ascent.  OpenRocket's
 // saved run: 641.0 m at 9.84 s (sea level, 15 C, 2 m/s wind, 1 m rail).
-// OpenRocket models what this does not (fin and body lift, angle of attack,
-// damping).  Calm, it lands within 0.5 percent; OpenRocket's own run had
-// 2 m/s of wind, which costs this model about 1 percent, so that band is 2.
+// Calm, it lands within 0.5 percent.  OpenRocket's own run had 2 m/s of
+// wind: the instant turn this model used before the stability margin came in
+// gave 634.5 m there (1 percent low); the restoring moment gives 639.9 m.
 static void A9_TronAgainstOpenRocket() {
     printf("\n--- A9: Tron Short 2.6 (H90) against OpenRocket ---\n");
     Profile p = TronProfile();
@@ -523,10 +540,21 @@ static void A9_TronAgainstOpenRocket() {
     // Calm, the model is the point mass OpenRocket's run nearly is: 0.5 percent.
     CHECK_MSG(std::fabs(still - 641.0f) <= 0.005f * 641.0f, "calm apogee %.1f", still);
     CHECK_MSG(std::fabs(t_calm - 9.84f) <= 0.15f, "calm t_apogee %.2f", t_calm);
-    // In wind, zero-angle-of-attack weathercocking turns harder than
-    // OpenRocket's damped restoring moment: 1 percent low on this rocket.
-    CHECK_MSG(std::fabs(windy - 641.0f) <= 0.02f * 641.0f, "windy apogee %.1f", windy);
+    // In wind, against OpenRocket's own run: 0.5 percent.
+    CHECK_MSG(std::fabs(windy - 641.0f) <= 0.005f * 641.0f, "windy apogee %.1f", windy);
     CHECK_MSG(windy < still, "wind should cost height");
+    // Frank's first simulated flight (2026-11-03): an AeroTech H128W in the
+    // app, here the H90 he designed for, 10 m/s from the west, 7.5 deg rail
+    // leaning north.  No OpenRocket run to hold it to; printed so the change
+    // from the instant turn (which leaned the H128W flight 335 m) is visible.
+    Profile hard = p; hard.wind_mps = 10.0f; hard.rail_angle_deg = 7.5f;
+    float t_hard = 0.0f;
+    Generator gh; gh.Start(hard, 1000u, 101325.0f);
+    for (uint32_t ms = 1000u; ms < 61000u && gh.apogee_t_s() < 0.0f; ms += 10u) gh.AdvanceTo(ms);
+    t_hard = gh.apogee_t_s() - gh.launch_t_s();
+    printf("  10 m/s wind, 7.5 deg rail: apogee %.1f m  t %.2f s, %.0f m east and %.0f m north at apogee\n",
+           gh.peak_m(), t_hard, gh.east_m(), gh.north_m());
+    CHECK_MSG(gh.peak_m() < windy && gh.east_m() < 0.0f, "10 m/s turns it upwind and costs height");
 }
 
 int main() {

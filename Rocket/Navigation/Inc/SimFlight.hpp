@@ -12,10 +12,15 @@
 //
 //   Pad      the pad hold, so the pre-launch ring and the baro reference settle.
 //   Rail     constrained along the rail until the rocket has traveled its length.
-//   Boost /  a point mass in 3-D, thrust along the body, drag 1/2 rho v^2 Cd(M) A
-//   Coast    against the velocity relative to the air.  Off the rail a stable
-//            rocket points along that relative velocity (zero angle of attack),
-//            so weathercocking into the wind comes out of the physics.
+//   Boost /  a rigid body in 3-D: thrust along the body, drag 1/2 rho v^2 Cd(M) A
+//   Coast    against the velocity relative to the air, and a normal force
+//            q A CNa sin(alpha) at the center of pressure, stability-margin
+//            calibers aft of the CG.  Its moment turns the nose into the
+//            relative wind against the rocket's pitch inertia (a rod of the
+//            rocket's length), with aerodynamic and jet damping, so the turn
+//            at rail exit takes the time a real one does (amended 2026-11-03:
+//            it used to be instant, which leaned a slow rocket far too much in
+//            strong wind).
 //   Descent  body drag, or the canopy the locator's OWN charges would have opened
 //            (SetCanopy, CanopyFromCharges), against the relative velocity.
 //   Landed   still, at zero height.
@@ -61,6 +66,11 @@ struct Profile {
     float   dry_mass_kg  = 0.0f;   // without the motor
     float   ref_diam_m   = 0.0f;   // reference area = pi d^2 / 4
     float   cd[kMachPoints] = {};  // on kMachGrid
+    // Static stability margin, calibers, as OpenRocket shows it with the motor
+    // loaded, and overall length.  Together with kCnAlpha they set how hard and
+    // how fast the rocket weathercocks.
+    float   stability_cal = 2.0f;
+    float   length_m      = 1.0f;
     // Launch and day.
     float   rail_len_m     = 1.8f;
     float   rail_angle_deg = 0.0f;   // from vertical
@@ -92,6 +102,8 @@ inline bool Valid(const Profile& p) {
     if (!(p.motor_prop_kg > 0.0f) || !(p.motor_loaded_kg > p.motor_prop_kg) || p.motor_loaded_kg > 100.0f) return false;
     if (!(p.dry_mass_kg >= 0.01f) || p.dry_mass_kg > 200.0f) return false;
     if (!(p.ref_diam_m >= 0.005f) || p.ref_diam_m > 0.5f) return false;
+    if (!(p.stability_cal >= 0.5f) || p.stability_cal > 10.0f) return false;
+    if (!(p.length_m >= 0.1f) || p.length_m > 5.0f) return false;
     for (uint8_t i = 0; i < kMachPoints; ++i)
         if (!(p.cd[i] >= 0.05f) || p.cd[i] > 3.0f) return false;
     if (!(p.rail_len_m >= 0.0f) || p.rail_len_m > 20.0f) return false;
@@ -144,6 +156,16 @@ public:
     // Descent with no canopy: a tumbling body, a = k v^2, terminal about 80 m/s.
     static constexpr float    kDragTumble  = 0.0015f;   // 1/m
     static constexpr float    kMaxCanopyDecel = 5.0f * kG;
+    // Normal-force slope, per radian.  Not an input: OpenRocket's run of the
+    // Tron Short 2.6 (three fins) gives 14.4 to 17 through the boost, and
+    // typical three- and four-fin rockets sit near it.  The restoring moment
+    // is proportional to it and to the margin, so the margin carries the
+    // rocket-to-rocket difference.
+    static constexpr float    kCnAlpha     = 15.0f;
+    // Pitch inertia is a uniform rod's, m L^2 / 12 (the Tron: 0.060 against
+    // OpenRocket's 0.071 kg m^2), and the nozzle sits kNozzleArm x L behind
+    // the CG for jet damping (the Tron: 0.36 to 0.40).
+    static constexpr float    kNozzleArm   = 0.4f;
     // Under a canopy the body swings over to hang, as the old model did.
     static constexpr float    kTiltRateRps = 20.0f * kPi / 180.0f;
     static constexpr float    kTiltMaxRad  = 60.0f * kPi / 180.0f;
@@ -164,7 +186,7 @@ public:
         t_ = 0.0f;
         pos_ = V3{}; vel_ = V3{}; acc_ = V3{};
         rail_s_ = rail_x_ = 0.0f;
-        omega_ = V3{};
+        omega_ = V3{}; spin_ = V3{};
         gyro_sum_ = Vec3f{}; gyro_t_ = 0.0f;
         canopy_ = Canopy::None;
         phase_ = Phase::Pad;
@@ -345,18 +367,55 @@ private:
         }
     }
 
-    // Free-flight acceleration with the body along the air-relative velocity.
-    V3 FreeAccel(float tm, V3 v, float h, V3& nose) {
+    // Free-flight acceleration with the body pointing along nose: thrust along
+    // it, drag against the air-relative velocity, and the normal force against
+    // the crossflow, q A CNa sin(alpha), which is q A CNa |rel_perp| / |rel|.
+    V3 FreeAccel(float tm, V3 v, float h, V3 nose) {
         const V3 rel = v - wind_;
         const float s = Norm(rel);
-        if (s > 0.5f) nose = (1.0f / s) * rel;   // zero angle of attack
         const float m = MassAt(tm);
         const float T = ThrustAt(tm);
         const float D = DragN(s, h);
         V3 a = (T / m) * nose;
-        if (s > 1e-3f) a = a - (D / (m * s)) * rel;
+        if (s > 1e-3f) {
+            const V3 cross = rel - Dot(rel, nose) * nose;
+            const float qa = 0.5f * DensityAt(h) * s * area_ * kCnAlpha;   // q A CNa / s
+            a = a - (D / (m * s)) * rel - (qa / m) * cross;
+        }
         a.u -= kG;
         return a;
+    }
+
+    // The pitch and yaw of the body over one step, after the translation: the
+    // normal force's moment about the CG, l q A CNa (x cross rel) / |rel| with
+    // l the margin, against I = m L^2 / 12, damped by the air (the same force
+    // at l, from the rate) and the exhaust (mdot (kNozzleArm L)^2).  Integrated
+    // semi-implicitly, in substeps when the rocket is fast and stiff enough
+    // for one 10 ms step to be too coarse; roll is not modeled.
+    void Rotate(float tm, float dt) {
+        const V3 rel = vel_ - wind_;
+        const float s = Norm(rel);
+        const float m = MassAt(tm);
+        const float L = p_.length_m;
+        const float inertia = m * L * L * (1.0f / 12.0f);
+        const float arm = p_.stability_cal * p_.ref_diam_m;
+        const float rho = DensityAt(pos_.u);
+        const float qa = 0.5f * rho * s * area_ * kCnAlpha;          // q A CNa / s
+        const float mdot = p_.motor_prop_kg * ThrustAt(tm) / impulse_total_;
+        const float nozzle = kNozzleArm * L;
+        const float damp = (qa * arm * arm + mdot * nozzle * nozzle) / inertia;   // 1/s
+        const float wn2 = qa * s * arm / inertia;                    // rad^2/s^2
+        uint8_t n = 1u;
+        const float stiff = dt * std::sqrt(wn2);
+        if (stiff > 0.5f) n = stiff > 4.0f ? 8u : static_cast<uint8_t>(stiff * 2.0f) + 1u;
+        const float h = dt / n;
+        for (uint8_t i = 0; i < n; ++i) {
+            const V3 tq = (qa * arm / inertia) * Cross(bx_, rel);      // angular accel
+            V3 w = (1.0f / (1.0f + h * damp)) * (spin_ + h * tq);
+            w = w - Dot(w, bx_) * bx_;                                   // no roll
+            spin_ = w;
+            TurnBy(w, h);
+        }
     }
 
     // Along-rail acceleration at rail speed s (never pulled back below rest).
@@ -372,14 +431,25 @@ private:
         const float c = Dot(bx_, new_x);
         V3 k = Cross(bx_, new_x);
         const float sn = Norm(k);
-        if (sn < 1e-7f) { omega_ = V3{}; return; }
+        if (sn < 1e-7f) return;
         const float ang = std::atan2(sn, c);
         k = (1.0f / sn) * k;
-        omega_ = (ang / dt) * k;
+        Rotation(k, ang, dt, &new_x);
+    }
+    // Rotate the triad at rate w (world frame, rad/s) for dt.
+    void TurnBy(V3 w, float dt) {
+        const float r = Norm(w);
+        if (r * dt < 1e-7f) return;
+        Rotation((1.0f / r) * w, r * dt, dt, nullptr);
+    }
+    // By ang about the unit axis k.  new_x, when given, is where X must land.
+    void Rotation(V3 k, float ang, float dt, const V3* new_x) {
+        omega_ = omega_ + (ang / dt) * k;
         auto rot = [&](V3 v) {   // Rodrigues
             return (std::cos(ang)) * v + std::sin(ang) * Cross(k, v) + ((1.0f - std::cos(ang)) * Dot(k, v)) * k;
         };
-        bx_ = new_x;
+        bx_ = new_x ? *new_x : rot(bx_);
+        bx_ = (1.0f / Norm(bx_)) * bx_;
         bz_ = rot(bz_);
         // Re-orthonormalize: Z off X, then Y = Z x X.
         bz_ = bz_ - Dot(bz_, bx_) * bx_;
@@ -430,20 +500,15 @@ private:
         }
         case Phase::Boost:
         case Phase::Coast: {
-            V3 nose = bx_;
-            const V3 a0 = FreeAccel(tm0, vel_, pos_.u, nose);
+            const V3 a0 = FreeAccel(tm0, vel_, pos_.u, bx_);
             const V3 v1 = vel_ + dt * a0;
-            V3 nose1 = nose;
-            const V3 a1 = FreeAccel(tm1, v1, pos_.u + vel_.u * dt, nose1);
+            const V3 a1 = FreeAccel(tm1, v1, pos_.u + vel_.u * dt, bx_);
             const V3 a = 0.5f * (a0 + a1);
             const V3 v = vel_ + dt * a;
             pos_ = pos_ + (0.5f * dt) * (vel_ + v);
             vel_ = v;
             acc_ = a;
-            V3 heading = bx_;
-            const V3 rel = vel_ - wind_;
-            if (Norm(rel) > 0.5f) heading = (1.0f / Norm(rel)) * rel;
-            Turn(heading, dt);
+            Rotate(tm1, dt);
             if (phase_ == Phase::Boost && tm1 >= burnout_s_) phase_ = Phase::Coast;
             Track();
             if (phase_ == Phase::Coast && vel_.u <= 0.0f) { phase_ = Phase::Descent; apogee_t_ = t_; }
@@ -509,6 +574,7 @@ private:
     uint32_t n_ = 0u;
     float    t_ = 0.0f;
     V3       pos_{}, vel_{}, acc_{}, wind_{}, rail_{}, omega_{};
+    V3       spin_{};           // pitch/yaw rate in free flight, world frame, rad/s
     Vec3f    gyro_sum_{};       // body-frame rotation since the last GyroBody, rad
     float    gyro_t_ = 0.0f;    // and the time it covers, s
     V3       bx_{ 0.0f, 0.0f, 1.0f }, by_{ 1.0f, 0.0f, 0.0f }, bz_{ 0.0f, 1.0f, 0.0f };
