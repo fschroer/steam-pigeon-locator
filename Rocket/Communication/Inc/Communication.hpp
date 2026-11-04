@@ -378,7 +378,8 @@ private:
 	double           last_good_lat_deg_ = 0.0;
 	double           last_good_lon_deg_ = 0.0;
 	bool             have_good_fix_ = false;
-	void SendablePosition(const GpsSample& gps, double& lat_deg, double& lon_deg);
+	struct Position { double lat_deg; double lon_deg; };
+	Position SendablePosition(const GpsSample& gps);
 
 	// -----------------------------------------------------------------------
 	// Background full-record transfer (ADR "The radio download becomes the

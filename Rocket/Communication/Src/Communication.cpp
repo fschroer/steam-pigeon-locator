@@ -36,14 +36,19 @@ Communication::Communication(DeviceUID &deviceUID, FlightManager &flight, Rocket
 // raw sample was sent as received, valid or not, and once that was -132.87,
 // 195.19 from a receiver sitting on the pad, which crashed the app's map
 // (2026-11-02 21:11:03).  gps_status still tells the app the fix is not current.
-void Communication::SendablePosition(const GpsSample& gps, double& lat_deg, double& lon_deg) {
+//
+// Returned by value, never written through a double&: the wire structs are
+// #pragma pack(1), so their doubles sit at odd addresses, and a reference to one
+// let -Og store it with STRD, which faults on any unaligned address on this
+// core.  The Debug build hard-faulted on it every boot (2026-11-04, CFSR
+// UNALIGNED, the pad's lat/lon in R0-R3); -O2 inlined the call and hid it.
+Communication::Position Communication::SendablePosition(const GpsSample& gps) {
 	if (gps.position_valid) {
 		last_good_lat_deg_ = gps.lat_rad * RAD2DEG;
 		last_good_lon_deg_ = gps.lon_rad * RAD2DEG;
 		have_good_fix_ = true;
 	}
-	lat_deg = have_good_fix_ ? last_good_lat_deg_ : 0.0;
-	lon_deg = have_good_fix_ ? last_good_lon_deg_ : 0.0;
+	return have_good_fix_ ? Position{ last_good_lat_deg_, last_good_lon_deg_ } : Position{ 0.0, 0.0 };
 }
 
 void Communication::Init(IRadio &radio) {
@@ -107,7 +112,11 @@ void Communication::SendPreLaunchDataNow(bool armed, uint8_t pad_alert, bool rad
 	msg.packet_header.msg_count = 0;
 	msg.packet_header.crc = 0;
 
-	SendablePosition(gps_sample, msg.latitude, msg.longitude);
+	{
+		const Position pos = SendablePosition(gps_sample);
+		msg.latitude  = pos.lat_deg;
+		msg.longitude = pos.lon_deg;
+	}
 	msg.raw_latitude = msg.latitude;
 	msg.raw_longitude = msg.longitude;
 	msg.satellites = gps_sample.num_sv;
@@ -172,7 +181,11 @@ void Communication::SendTelemetryDataNow(bool armed, bool radio) {
 	msg.packet_header.msg_count = 0;
 	msg.packet_header.crc = 0;
 
-	SendablePosition(gps_sample, msg.latitude, msg.longitude);
+	{
+		const Position pos = SendablePosition(gps_sample);
+		msg.latitude  = pos.lat_deg;
+		msg.longitude = pos.lon_deg;
+	}
 	msg.satellites = gps_sample.num_sv;
 	msg.hacc = gps_sample.h_acc_m;
 	msg.imu_status = nav_.imuStatus().health;
