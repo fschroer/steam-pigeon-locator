@@ -1,6 +1,6 @@
 # ADR-0042: Flyers read their flights in a browser, from a static web app over the same Firebase store
 
-- **Status:** Accepted. Decided by Frank Schroer 2026-11-04, who took the plan as proposed (new repo, static site on Firebase Hosting, storage rules move into that repo). Not yet built: the repo `fschroer/steam-pigeon-web` has to be created first.
+- **Status:** Accepted. Decided by Frank Schroer 2026-11-04, who took the plan as proposed (new repo, static site on Firebase Hosting, storage rules move into that repo). v1 built 2026-11-04: `steam-pigeon-web` `4678440`, rules moved out of the Android repo in `rocket-flight-manager` `80a3f5f`. Checked by type-check, unit tests and a browser render of a synthetic flight. **Not yet deployed or run against the real Firebase project.**
 - **Date:** 2026-11-04
 - **Deciders:** Frank Schroer
 - **Related ADRs:** "The radio download becomes the primary data path" (0040), whose decisions 8 (the Firebase web store) and 9 (sharing by link token) this builds on; "iOS port" (0016), for the parity rule this does **not** extend to the web.
@@ -67,5 +67,6 @@ The rules themselves do not change: a signed-in user reads and writes only `user
 - **Known gaps, not blockers for v1:**
   - **The stored metadata carries no flight name, rocket or apogee**, so the list shows only the locator id, the flight time and the sample count. Adding those is an app-side metadata change.
   - **Simulated records (ADR-0041) are not flagged** in the CSV or the metadata, so the web cannot mark them. The app knows (FlightEvents `flags` bit 0) and could add a `simulated` metadata key.
+- **One more hand-copied name table:** the web labels flight states from its own copy of `FlightStates` (`src/channels.ts`). It is a display table, not wire layout, but it changes with the enum like every other copy.
 - **Cost.** Hosting and Storage reads stay inside the Blaze no-cost quota at this scale.
 - **A deploy now publishes the rules too,** so a rules mistake reaches production with the site. The rules are short; review them like code.
