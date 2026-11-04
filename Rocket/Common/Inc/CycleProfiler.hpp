@@ -32,6 +32,7 @@ enum class Seg : uint8_t {
     FifoDrain,     //     just the FIFO drain loop (SPI reads + propagate) — subset of Strapdown
     FlightState,   // FlightManager::UpdateFlightState() (incl. flash ring drain)
     Telemetry,     // Send{PreLaunch,Telemetry}Data() (service tick only)
+    PadCal,        // CalibrateOnPadAndZeroAglUntilLaunch() (telemetry slot, on the pad)
     ProcTotal,     // whole ProcessRocketEvents()
     Count
 };
@@ -53,6 +54,10 @@ void        resetMax();                  // clear all running maxima (timers AND
 // clear done there lets that cycle (~14 ms of UART) and the next (catching up
 // the gyro FIFO) land in the new maxima as the "worst case" (2026-11-04).
 void        resetMaxAfter(uint8_t cycles);
+// Cycles whose ProcTotal exceeded the loop period, and cycles counted, since
+// the last resetMax().  A max says how bad; these say how often.
+uint32_t    overruns();
+uint32_t    cycles();
 uint16_t    lastUs(Seg s);
 uint16_t    maxUs(Seg s);
 uint16_t    lastCount(Cnt c);

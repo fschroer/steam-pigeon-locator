@@ -85,6 +85,9 @@ public:
     bool PowerDownAll();
 
     bool Update();
+    // The main loop's cycle index within the second (0..SAMPLES_PER_SECOND-1),
+    // set before each Update() so the GPS read lands on fixed cycles.
+    void SetServiceCount(uint8_t count) { m_service_count_ = count; }
     void CalibrateOnPadAndZeroAglUntilLaunch(FlightStates flight_state);
 
     // Trigger cardinal-axis mounting detection.  Call once on each arm event.
@@ -499,8 +502,14 @@ private:
     uint32_t m_last_increase_time_ms     = 0;
 
     // GPS rate-limiting: poll every GPS_POLL_DIVISOR cycles.
-    // GPS_RATE=10 Hz, SAMPLES_PER_SECOND=20 → divisor=2 (poll every 100 ms).
-    uint8_t  m_gps_poll_counter_         = 0;
+    // GPS_RATE=10 Hz, SAMPLES_PER_SECOND=50 → divisor=5 (poll every 100 ms).
+    uint8_t  m_service_count_            = 0;
+    // The GPS is read on cycles where count % GPS_POLL_DIVISOR equals this,
+    // and fused on the next.  Factory's telemetry slot (and the pad
+    // calibration that shares it) is SamplesForMs(100) = 5, phase 0: phases
+    // 2 and 3 keep the three heaviest jobs on three different cycles.  At
+    // 50 Hz, 50 % 5 == 0, so the phase holds across the second boundary.
+    static constexpr uint8_t kGpsReadPhase = 2;
     // A fix read this cycle, fused into the EKF on the next (see Update()).
     GpsSample m_gps_pending_{};
     bool      m_gps_fuse_pending_        = false;

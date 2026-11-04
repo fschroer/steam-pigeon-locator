@@ -411,6 +411,7 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 		}
 #endif
 		Diag::begin(Diag::Seg::NavUpdate);
+		navigation_.SetServiceCount(rocket_service_count);
 		navigation_.Update();
 		Diag::end(Diag::Seg::NavUpdate);
 
@@ -645,7 +646,9 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			break;
 		case kSlotTelemetry: {
 			if (flight_state == FlightStates::WaitingLaunch) {
+				Diag::begin(Diag::Seg::PadCal);
 				navigation_.CalibrateOnPadAndZeroAglUntilLaunch(flight_state);
+				Diag::end(Diag::Seg::PadCal);
 			}
 			// PreLaunchData is the ON-PAD message; TelemetryData is the in-flight
 			// one.  Arm state no longer decides this (#35 put it on the wire as its

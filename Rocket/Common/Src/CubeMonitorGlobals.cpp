@@ -10,6 +10,7 @@ volatile uint32_t cm_elapsed_update = 0;
 // Implementation kept here (an already-built translation unit) so no new source
 // file has to be added to the CubeIDE build.  See CycleProfiler.hpp.
 #include "CycleProfiler.hpp"
+#include "Constants.h"   // SAMPLES_PER_SECOND
 
 namespace Diag {
 
@@ -21,6 +22,12 @@ static volatile uint16_t s_cnt_max [static_cast<uint8_t>(Cnt::Count)] = {};
 
 // Cycles left before a deferred resetMax() (see resetMaxAfter).
 static volatile uint8_t s_reset_after = 0;
+static volatile uint32_t s_overruns = 0;
+static volatile uint32_t s_cycles = 0;
+static constexpr uint16_t kPeriodUs = static_cast<uint16_t>(1000000u / SAMPLES_PER_SECOND);
+
+uint32_t overruns() { return s_overruns; }
+uint32_t cycles()   { return s_cycles; }
 
 void resetMaxAfter(uint8_t cycles) { s_reset_after = cycles; }
 
@@ -32,7 +39,11 @@ void mark(Seg s, uint16_t t0) {
     const uint16_t d = static_cast<uint16_t>(Now() - t0);
     s_last[i] = d;
     if (d > s_max[i]) s_max[i] = d;
-    if (s == Seg::ProcTotal && s_reset_after != 0u && --s_reset_after == 0u) resetMax();
+    if (s == Seg::ProcTotal) {
+        ++s_cycles;
+        if (d > kPeriodUs) ++s_overruns;
+        if (s_reset_after != 0u && --s_reset_after == 0u) resetMax();
+    }
 }
 
 void begin(Seg s) {
@@ -52,6 +63,8 @@ void recordCount(Cnt c, uint16_t value) {
 void resetMax() {
     for (uint8_t i = 0; i < static_cast<uint8_t>(Seg::Count); ++i) s_max[i] = 0;
     for (uint8_t i = 0; i < static_cast<uint8_t>(Cnt::Count); ++i) s_cnt_max[i] = 0;
+    s_overruns = 0;
+    s_cycles = 0;
 }
 
 uint16_t lastUs(Seg s) { return s_last[static_cast<uint8_t>(s)]; }
@@ -62,7 +75,7 @@ uint16_t maxCount (Cnt c) { return s_cnt_max [static_cast<uint8_t>(c)]; }
 const char* SegName(Seg s) {
     static const char* const kNames[] = {
         "Console",   "Comm",       "NavUpdate",   "  SensorRead",  "  GpsRead",
-        "  MagRead", "  Ekf",     "  Strapdown", "    FifoDrain", "FlightState",  "Telemetry", "ProcTotal",
+        "  MagRead", "  Ekf",     "  Strapdown", "    FifoDrain", "FlightState",  "Telemetry", "PadCal", "ProcTotal",
     };
     static_assert(sizeof(kNames) / sizeof(kNames[0]) == static_cast<size_t>(Seg::Count),
                   "SegName table out of step with Diag::Seg");

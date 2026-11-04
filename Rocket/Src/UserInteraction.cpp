@@ -776,6 +776,8 @@ void UserInteraction::DisplayCycleProfile() {
 				static_cast<uint32_t>(Diag::lastCount(c)), " / ",
 				static_cast<uint32_t>(Diag::maxCount(c)), crlf_);
 	}
+	line.WriteMany("overruns (cycle > ", static_cast<uint32_t>(1000u / SAMPLES_PER_SECOND), " ms): ",
+			Diag::overruns(), " of ", Diag::cycles(), " cycles", crlf_);
 	line.WriteMany("(max cleared from 3 cycles on, so this printout is not in it; re-read for a clean worst case)", crlf_);
 	// Not resetMax(): this cycle and the next would be the worst case.
 	Diag::resetMaxAfter(3);

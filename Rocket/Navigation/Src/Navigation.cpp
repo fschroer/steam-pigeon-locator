@@ -601,8 +601,11 @@ bool Navigation::Update() {
         }
 
         if (m_cfg.use_gps) {
-            if (++m_gps_poll_counter_ >= GPS_POLL_DIVISOR) {
-                m_gps_poll_counter_ = 0;
+            // Phase-locked to the loop's cycle index (2026-11-04).  The old
+            // free-running counter took whatever phase boot gave it, so on
+            // some boots every GPS read shared a cycle with telemetry and the
+            // pad calibration: 23.6 ms worst case on the bench.
+            if ((m_service_count_ % GPS_POLL_DIVISOR) == kGpsReadPhase) {
                 const uint16_t t_gps = Diag::Now();
                 gps_new = m_gps.readSample(gps);
                 Diag::mark(Diag::Seg::GpsRead, t_gps);   // every 2nd cycle
