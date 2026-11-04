@@ -349,5 +349,12 @@ void SUBGHZ_Radio_IRQHandler(void)
 }
 
 /* USER CODE BEGIN 1 */
+/* I2C2: the GPS's interrupt-driven poll (SAMM10Q::startRead, 2026-11-04).
+   Hand-added in a USER CODE block so CubeMX regeneration keeps it; the
+   driver enables the NVIC lines itself. */
+void RocketGps_I2cEvIrq(void);
+void RocketGps_I2cErIrq(void);
+void I2C2_EV_IRQHandler(void) { RocketGps_I2cEvIrq(); }
+void I2C2_ER_IRQHandler(void) { RocketGps_I2cErIrq(); }
 
 /* USER CODE END 1 */

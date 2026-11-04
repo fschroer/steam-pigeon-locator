@@ -49,7 +49,18 @@ public:
     bool powerDown();
     bool init(float sample_rate_hz);
 
-    bool readSample(GpsSample& out);
+    bool readSample(GpsSample& out);   // blocking poll (boot)
+
+    // Interrupt-driven poll: startRead() queues the 128 byte read and returns;
+    // finishRead() on a later cycle parses it (false while it is still
+    // running, or if nothing was started).  See SAMM10Q.cpp.
+    bool startRead();
+    bool finishRead(GpsSample& out);
+    bool asyncBusy() const {
+        return m_async_state == AsyncState::Pointer || m_async_state == AsyncState::Read;
+    }
+    void onI2cEvent();   // I2C2 interrupts only
+    void onI2cError();
 
     SensorStatus getStatus() const { return m_status; }
     const GpsSample& raw() const { return m_last; }
@@ -156,6 +167,7 @@ private:
     bool parseAckFromBuffer(uint8_t& ackCls, uint8_t& ackId, bool& nak);
 
     bool readFifo(uint8_t *buf, uint16_t &len);
+    bool processChunk(const uint8_t* tmp, uint16_t chunk, GpsSample& out);
 
     bool parseNavPvtFromBuffer(GpsSample& out);
 
@@ -258,6 +270,15 @@ private:
     StreamClass m_stream_class      = StreamClass::Unknown;
     Counters    m_ctr{};
     BootReport  m_boot{};
+
+    enum class AsyncState : uint8_t { Idle, Pointer, Read, Done, Failed };
+    void asyncEnd(AsyncState result);
+    static constexpr uint16_t kAsyncLen       = 128;
+    static constexpr uint32_t kAsyncTimeoutMs = 25;
+    volatile AsyncState m_async_state = AsyncState::Idle;
+    volatile uint16_t   m_async_len   = 0;
+    uint8_t             m_async_buf[kAsyncLen]{};
+    uint32_t            m_async_start = 0;
     // Sticky across an outage: a single 128 byte read can land entirely in FIFO
     // filler even while the receiver is talking, so the per-read classification
     // is too noisy to archive directly.  Cleared on every successful parse.

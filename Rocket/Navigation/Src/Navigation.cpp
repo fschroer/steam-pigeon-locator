@@ -593,10 +593,13 @@ bool Navigation::Update() {
         {
             MagSample mag{};
             const uint16_t t_mag = Diag::Now();
-            if (!m_mag.readSample(mag))
-                m_mag_valid_ = false;
-            else
-                m_mag_valid_ = true;
+            // Not while the GPS's interrupt-driven read holds I2C2.
+            if (!m_gps.asyncBusy()) {
+                if (!m_mag.readSample(mag))
+                    m_mag_valid_ = false;
+                else
+                    m_mag_valid_ = true;
+            }
             Diag::mark(Diag::Seg::MagRead, t_mag);
         }
 
@@ -605,10 +608,17 @@ bool Navigation::Update() {
             // free-running counter took whatever phase boot gave it, so on
             // some boots every GPS read shared a cycle with telemetry and the
             // pad calibration: 23.6 ms worst case on the bench.
-            if ((m_service_count_ % GPS_POLL_DIVISOR) == kGpsReadPhase) {
+            // Interrupt-driven (2026-11-04): queued on the read phase, parsed
+            // one cycle later, fused one after that (see the EKF block).
+            const uint8_t phase = m_service_count_ % GPS_POLL_DIVISOR;
+            if (phase == kGpsReadPhase) {
                 const uint16_t t_gps = Diag::Now();
-                gps_new = m_gps.readSample(gps);
-                Diag::mark(Diag::Seg::GpsRead, t_gps);   // every 2nd cycle
+                m_gps.startRead();
+                Diag::mark(Diag::Seg::GpsRead, t_gps);
+            } else if (phase == (kGpsReadPhase + 1u) % GPS_POLL_DIVISOR) {
+                const uint16_t t_gps = Diag::Now();
+                gps_new = m_gps.finishRead(gps);
+                Diag::mark(Diag::Seg::GpsRead, t_gps);
                 // The receiver is still read, so its stream stays drained; the
                 // simulation's fix replaces whatever it produced (ADR-0041).
                 if (sim) {

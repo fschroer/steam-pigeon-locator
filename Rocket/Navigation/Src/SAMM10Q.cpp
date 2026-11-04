@@ -107,6 +107,14 @@ bool SAMM10Q::init(float sample_rate_hz) {
     m_status.initialized = true;
     m_status.health = cfg_ok ? SensorHealth::Ok : SensorHealth::Warning;
 
+    // For startRead(): the interrupt enables inside the peripheral stay off
+    // except while a transfer is in flight, so the blocking paths never see
+    // them.  Below USART2 and DMA (2) and the 0-priority timing interrupts.
+    HAL_NVIC_SetPriority(I2C2_EV_IRQn, 3, 0);
+    HAL_NVIC_SetPriority(I2C2_ER_IRQn, 3, 0);
+    HAL_NVIC_EnableIRQ(I2C2_EV_IRQn);
+    HAL_NVIC_EnableIRQ(I2C2_ER_IRQn);
+
     return cfg_ok;
 }
 
@@ -124,12 +132,129 @@ bool SAMM10Q::readSample(GpsSample& out) {
 			serviceStaleRecovery(HAL_GetTick());
 			return false;
 	}
+	return processChunk(tmp, chunk, out);
+}
 
+// ----------------------------------------------------------------------------
+// Interrupt-driven poll (2026-11-04).  readSample() above busy-waits the whole
+// 128 byte transaction: 4-6.5 ms of the cycle on the bench, which with the
+// EKF put the GPS cycle at ~18 ms of the 20 ms budget.  startRead() only
+// queues the transaction; the I2C2 event/error interrupts run it, and
+// finishRead() on a later cycle takes the bytes.  Same bytes, same pointer
+// write to 0xFF, same 128 byte read: only who waits for them has changed.
+//
+// Nothing else may use I2C2 while a transfer is in flight.  Every blocking
+// path (init, waitForAck, sendUbx, the magnetometer) runs only with the
+// transfer idle: finishRead() completes or aborts it before it services the
+// dynamic-model and recovery writes, and Navigation skips the magnetometer
+// while asyncBusy().
+// ----------------------------------------------------------------------------
+namespace { SAMM10Q* g_isr_gps = nullptr; }
+
+bool SAMM10Q::startRead() {
+	if (!m_status.initialized || m_async_state != AsyncState::Idle) return false;
+	g_isr_gps     = this;
+	m_async_len   = 0;
+	m_async_start = HAL_GetTick();
+	i2cReset();
+	m_async_state = AsyncState::Pointer;
+	I2C_TypeDef* i2c = m_hi2c->Instance;
+	LL_I2C_EnableIT_TX(i2c);
+	LL_I2C_EnableIT_RX(i2c);
+	LL_I2C_EnableIT_STOP(i2c);
+	LL_I2C_EnableIT_NACK(i2c);
+	LL_I2C_EnableIT_ERR(i2c);
+	LL_I2C_HandleTransfer(i2c, (0x42 << 1), LL_I2C_ADDRSLAVE_7BIT,
+	                      1, LL_I2C_MODE_AUTOEND, LL_I2C_GENERATE_START_WRITE);
+	return true;
+}
+
+void SAMM10Q::asyncEnd(AsyncState result) {
+	I2C_TypeDef* i2c = m_hi2c->Instance;
+	LL_I2C_DisableIT_TX(i2c);
+	LL_I2C_DisableIT_RX(i2c);
+	LL_I2C_DisableIT_STOP(i2c);
+	LL_I2C_DisableIT_NACK(i2c);
+	LL_I2C_DisableIT_ERR(i2c);
+	m_async_state = result;
+}
+
+void SAMM10Q::onI2cEvent() {
+	I2C_TypeDef* i2c = m_hi2c->Instance;
+	if (LL_I2C_IsActiveFlag_NACK(i2c)) {
+		LL_I2C_ClearFlag_NACK(i2c);
+		asyncEnd(AsyncState::Failed);      // AUTOEND sends the STOP itself
+		return;
+	}
+	if (LL_I2C_IsActiveFlag_TXIS(i2c)) {
+		if (m_async_state == AsyncState::Pointer) LL_I2C_TransmitData8(i2c, 0xFF);
+		else { asyncEnd(AsyncState::Failed); return; }
+	}
+	if (LL_I2C_IsActiveFlag_RXNE(i2c)) {
+		const uint8_t b = LL_I2C_ReceiveData8(i2c);
+		if (m_async_state == AsyncState::Read && m_async_len < kAsyncLen)
+			m_async_buf[m_async_len++] = b;
+	}
+	if (LL_I2C_IsActiveFlag_STOP(i2c)) {
+		LL_I2C_ClearFlag_STOP(i2c);
+		if (m_async_state == AsyncState::Pointer) {
+			m_async_state = AsyncState::Read;
+			LL_I2C_HandleTransfer(i2c, (0x42 << 1), LL_I2C_ADDRSLAVE_7BIT,
+			                      kAsyncLen, LL_I2C_MODE_AUTOEND, LL_I2C_GENERATE_START_READ);
+		} else if (m_async_state == AsyncState::Read) {
+			asyncEnd(m_async_len == kAsyncLen ? AsyncState::Done : AsyncState::Failed);
+		}
+	}
+}
+
+void SAMM10Q::onI2cError() {
+	I2C_TypeDef* i2c = m_hi2c->Instance;
+	LL_I2C_ClearFlag_BERR(i2c);
+	LL_I2C_ClearFlag_ARLO(i2c);
+	LL_I2C_ClearFlag_OVR(i2c);
+	asyncEnd(AsyncState::Failed);
+}
+
+bool SAMM10Q::finishRead(GpsSample& out) {
+	if (!m_status.initialized || m_async_state == AsyncState::Idle) return false;
+
+	if (m_async_state == AsyncState::Pointer || m_async_state == AsyncState::Read) {
+		// The receiver may stretch the clock up to 20 ms (integration manual
+		// 3.2.2); a transfer still running a full cycle later is stuck.
+		if ((HAL_GetTick() - m_async_start) < kAsyncTimeoutMs) return false;
+		asyncEnd(AsyncState::Failed);
+	}
+
+	const bool ok = (m_async_state == AsyncState::Done);
+	m_async_state = AsyncState::Idle;
+	++m_ctr.polls;
+	if (!ok) {
+		i2cReset();
+		++m_ctr.i2c_fail;
+		m_status.health = SensorHealth::Warning;
+		serviceStaleRecovery(HAL_GetTick());
+		return false;
+	}
+
+	// Same accounting readFifo does for the blocking read.
+	uint16_t data = kAsyncLen;
+	while (data > 0 && m_async_buf[data - 1] == 0xFFu) --data;
+	m_ctr.last_available = data;
+
+	// The interrupt wrote the buffer before it set Done; keep the compiler
+	// from reading it any earlier than the state check above.
+	__asm volatile("" ::: "memory");
+	uint8_t tmp[kAsyncLen];
+	std::memcpy(tmp, m_async_buf, kAsyncLen);
+	return processChunk(tmp, kAsyncLen, out);
+}
+
+bool SAMM10Q::processChunk(const uint8_t* tmp, uint16_t chunk, GpsSample& out) {
 	// A full 128 byte read every poll; an empty FIFO reads as 0xFF filler,
 	// which classifyStream calls Idle.
 	m_stream_class = classifyStream(tmp, chunk);
 	m_ctr.bytes += m_ctr.last_available;   // data, not filler
-	if (m_ctr.last_available >= sizeof(tmp)) ++m_ctr.chunks_full;
+	if (m_ctr.last_available >= chunk) ++m_ctr.chunks_full;
 	switch (m_stream_class) {
 	case StreamClass::Idle: ++m_ctr.idle; break;
 	case StreamClass::Ubx:  ++m_ctr.ubx;  break;
@@ -984,3 +1109,10 @@ uint32_t SAMM10Q::UtcToUnixTimestamp(uint16_t year, uint8_t month, uint8_t day,
 }
 
 } // namespace RocketNav
+
+extern "C" void RocketGps_I2cEvIrq(void) {
+	if (RocketNav::g_isr_gps) RocketNav::g_isr_gps->onI2cEvent();
+}
+extern "C" void RocketGps_I2cErIrq(void) {
+	if (RocketNav::g_isr_gps) RocketNav::g_isr_gps->onI2cError();
+}
