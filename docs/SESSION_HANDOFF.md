@@ -2,6 +2,13 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-11-04 (download) — the full-record download stall: the ACK collided with the locator's VersionInfo. Receiver syntax-checked, Android NOT compiled, NOT on hardware
+
+- Logging (app c8b8d07) showed the app receiving the same window every cycle (`new 0 dup 10`) and sending an ACK each time, while the locator never advanced. Requests got through (they resumed it after a suspend); ACKs didn't.
+- Likely cause: during a transfer the periodic frame comes every ~5.4 s, so the app's version poll (link "up" = a frame within 5 s) saw a drop and return almost every cycle and sent a VersionRequest. The receiver sent it, then the ACK 100 ms after its TxDone, which is on top of the locator's 64-byte VersionInfo reply (~130 ms at SF7). The lost reply kept the version stale, so it repeated.
+- Fixes: receiver 97c3f42 (the transfer frame waits 300 ms after a forwarded command); app f973ffe (full-record packets count as link activity for the poll). ADR-0040 amended.
+- To confirm: flash the receiver, install the app, and run a download. It should no longer stall with `new 0 dup 10 … sent ack`.
+
 ## 2026-11-04 (GPS) — corrupted NAV-PVT after ed1467d; back to the fixed 128-byte read. Linked at -O2, NOT on hardware
 
 - **Symptom:** rocket green/gray. Over 338 s: 65 good NAV-PVT, 1,357 bad checksums, 840 B/s read; the one-byte stream read after a count of 0 returned non-filler 784 of ~860 times.
