@@ -36,3 +36,7 @@ The locator sets two "physical deployment" bits that the app speaks aloud during
 - **Accelerometer spike plus slowdown.** No false positive in the corpus, Nike included. Declined: it misses openings that produce no spike, and the goal is catching most real drogues.
 - **Remove the detectors.** Leaves the flyer with no in-flight signal at all.
 - **A single-sample reference with a larger margin.** Still sits on whatever phase of the oscillation the event lands on.
+
+## Amendment 2026-11-04: the drogue detector stops when the main fires
+
+A drogue that opens at apogee leaves no slowdown of its own (the silent case above), and the drogue detector stayed armed through main primary. The main's slowdown then satisfied it, so "Drogue opening detected" was spoken about 2 s after the main charge and 1 s before "Main opening detected" (Frank, a simulated flight with the drogue at apogee; the same would happen on a real one). The drogue detector now runs only from drogue primary until main primary. The apogee drogue stays silent, as this ADR accepted. Detecting it as "descent levelled off well below free fall" is a separate change, needing tuning against the archive. `FlightManager.cpp`.

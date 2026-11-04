@@ -662,7 +662,12 @@ void FlightManager::UpdateFlightState() {
         // Physical drogue / main inference (#54, DescentSlowdown.hpp): the 1 s mean
         // descent rate slower than its reference by a margin, held for 1.5 s while
         // still descending.  Observational only -- nothing is gated on these bits.
-        if (flight_state_ >= FlightStates::DroguePrimaryEvent && drogue_slowdown_.Update(descent_mean_)) {
+        // The drogue detector stops when the main fires (2026-11-04): left running,
+        // a drogue that opened at apogee (no slowdown of its own) latched onto the
+        // main's slowdown, and "Drogue opening detected" was spoken just after the
+        // main charge.
+        if (flight_state_ >= FlightStates::DroguePrimaryEvent && !m_main_primary_fired_
+                && drogue_slowdown_.Update(descent_mean_)) {
             physical_deployment_stats_ = (physical_deployment_stats_ | (1 << bit_shift_drogue_deployed));
             archive_.WriteEvent(FlightArchive::Statistic::DrogueVelocityThresholdTimestampMs, flight_time_ms);
         }
