@@ -686,6 +686,13 @@ bool Navigation::Update() {
     applyVacuumSimBoost(imu, baro);
 #endif
 
+    // Held for the EKF, which fuses it on a later cycle (see below).  A newer
+    // fix replaces one that has not been fused yet.
+    if (gps_new) {
+        m_gps_pending_      = gps;
+        m_gps_fuse_pending_ = true;
+    }
+
     if (imu_new) {
         const uint16_t t_ekf = Diag::Now();
         // Health flags are per-cycle (#38): clear before driving the filter so what
@@ -703,11 +710,18 @@ bool Navigation::Update() {
         if (m_cfg.use_baro && baro_new && baro.valid)
             m_ekf.updateBaro(baro);
 
-        if (m_cfg.use_gps && gps_new) {
-            if (gps.position_valid) m_ekf.updateGpsPosition(gps);
+        // GPS is fused one cycle after it is read, never in the read cycle
+        // (2026-11-04).  The read busy-waits ~4 ms and the EKF's GPS update
+        // is its costliest; together, on the bench, they made the worst
+        // non-console cycle 18.7 ms of the 20 ms budget.  20 ms of added age
+        // is small against the receiver's own latency.
+        if (m_cfg.use_gps && m_gps_fuse_pending_ && !gps_new) {
+            const GpsSample& g = m_gps_pending_;
+            if (g.position_valid) m_ekf.updateGpsPosition(g);
             // GPS velocity only fused during flight — see setPhase() for rationale.
-            if (gps.velocity_valid && m_gps_velocity_enabled_)
-                m_ekf.updateGpsVelocity(gps);
+            if (g.velocity_valid && m_gps_velocity_enabled_)
+                m_ekf.updateGpsVelocity(g);
+            m_gps_fuse_pending_ = false;
         }
 
         // ZUPT — apply every Update() cycle when on the pad or after landing.

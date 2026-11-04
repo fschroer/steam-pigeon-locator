@@ -501,6 +501,9 @@ private:
     // GPS rate-limiting: poll every GPS_POLL_DIVISOR cycles.
     // GPS_RATE=10 Hz, SAMPLES_PER_SECOND=20 → divisor=2 (poll every 100 ms).
     uint8_t  m_gps_poll_counter_         = 0;
+    // A fix read this cycle, fused into the EKF on the next (see Update()).
+    GpsSample m_gps_pending_{};
+    bool      m_gps_fuse_pending_        = false;
 
     // GPS velocity updates are only applied during flight.
     // On the pad, ZUPT is a better zero-velocity reference than GPS velocity

@@ -8,6 +8,7 @@ Orientation note for resuming work. Detail lives in the linked artifacts; this i
 - **Likely cause:** after the 0xFD/0xFE count read the receiver's pointer stays on 0xFE, so each stream read began with a count byte and every message split across two reads failed. Not proven; the fix doesn't depend on it.
 - **Fix:** readFifo is the pre-#22 read again (point at 0xFF, read 128 every poll). The parser now steps one byte after a bad checksum or an impossible length, instead of skipping the claimed length or stalling.
 - **Confirmed on the bench 2026-11-04:** nav-pvt ~10/s, bad ck 0, boot ACK on the first init; `t` GpsRead 4.2 ms. Open: `dropped 36007` once early in that boot, not growing; worst-case `t` maxima still to read.
+- **Loop timing (`t`, clean window, pad, 2026-11-04):** NavUpdate max 18.7-19.6 ms of 20; the GPS read (4.4 ms) and the EKF GPS update (EKF max 10.7 ms) shared every 5th cycle. The EKF now fuses each fix one cycle after the read (+20 ms age, ~3.6 m at 180 m/s). The profiler print no longer lands in its own maxima (4af75b0); Console still showed a 14.6 ms max from typing. Re-measure, including a sim through boost. NOT on hardware.
 - **Follow-up:** each poll now takes every complete NAV-PVT and keeps the newest. Taking one per poll let a backlog build (poll 9.77 Hz vs 10 Hz output; nav-pvt equaled polls exactly), so a fix could be ~0.7 s old but stamped as new. NOT on hardware.
 
 ## 2026-11-03 (GPS) — the receiver going silent after boot. Host-tested and linked at -O2, NOT on hardware
