@@ -261,4 +261,5 @@ The overdue branch assumed the locator transmits only its periodic frame, so a l
 
 - **A FullRecordData or FullRecordParity frame heard within the overdue limit (1.5 s) cancels "overdue".** The locator is on the air and audible, so a late periodic frame is the transfer's schedule, not a collision. Safe-window samples still count: the locator's 900 ms listen gap covers the whole 50–700 ms window.
 - **No sample for 300 ms after the receiver forwards an app command,** because the locator may be answering it inside the safe window (a VersionInfo is ~130 ms on air). This is the same guard ADR-0040's transfer frame now waits out.
-- Receiver commit f91a02f. Syntax-checked; not on hardware.
+- Receiver commit f91a02f. On the bench it cut the false alarm to a few bursts but not to zero: 7 samples at −16 dBm, the locator's own RSSI, at the start of a transfer and near page boundaries, where the locator pauses longer than 1.5 s before its next burst.
+- **Corrected the same day (receiver 6a8b1e9):** the exemption lasts 10 s after the last transfer packet, and also starts when the receiver forwards a transfer request or ACK. Overdue samples are skipped while a download runs; the safe-window samples after each periodic frame still measure the channel. Syntax-checked; not on hardware.
