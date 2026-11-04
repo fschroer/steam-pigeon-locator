@@ -227,3 +227,7 @@ A request with any field out of range, or whose peak thrust cannot lift the load
 ### A5. Cost
 
 From a full link at -Og: +7.0 KB flash and +0.8 KB static RAM over the quick mode (a 196 B pending command, now 199 B, and the profile and atmosphere in the generator). RAM in use is 40.0 KiB of 64 KiB. The per-step cost in software float is not measured; it is two thrust, mass and drag evaluations, one atan2 and a few trigonometric calls per 10 ms step.
+
+## Amendment, 2026-11-04: a simulated flight's trace recording ends at landing
+
+At Frank's request, the app turns flight-path recording off (the map's record button goes to "start") when a telemetry frame reports `Landed` with the simulated bit set. The landing fix itself is still drawn first. A real flight is unchanged. The next launch turns recording back on, as every launch does. Android: `endsSimulatedTrace` in `RocketViewModel.kt`, `SimulatedTraceEndTest`. iOS owes it (UI_PARITY row 7).
