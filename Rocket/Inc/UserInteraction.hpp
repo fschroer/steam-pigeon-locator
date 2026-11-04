@@ -77,6 +77,9 @@ public:
   // select config items and flight records, so intercepting them unconditionally
   // silently breaks both menus.
   bool IsConsoleIdle() const { return user_interaction_state_ == WaitingForCommand; }
+  // Per-segment super-loop timing breakdown.  Public so Factory's root 'l'
+  // key can print it without opening the data menu, which stops navigation.
+  void DisplayCycleProfile();
 private:
   FlightManager& flight_;
   Communication::Communication& comm_;
@@ -286,7 +289,6 @@ private:
   void DisplayDataMenu();
   void ExportData(uint16_t archive_position);
   void ExportFlightStats(uint16_t archive_position);
-  void DisplayCycleProfile();   // per-segment super-loop timing breakdown
   void MakeDateTime(char *target, int date, int time, int sample_index, bool time_zone_adjust, bool fractional);
   void FloatToCharArray(char *target, float source, uint8_t size, uint8_t fraction_digits);
   void DisplayDfuMenu();

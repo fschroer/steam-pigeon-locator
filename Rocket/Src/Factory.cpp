@@ -1091,6 +1091,14 @@ void Factory::HandleConsoleChar(uint8_t uart_char) {
     else if (config_.IsConsoleIdle() && (uart_char == 's' || uart_char == 'S')) {
         PrintSensorStatus();
     }
+    // Loop timing (2026-11-04): the data menu's 't' report, from the root.
+    // Opening the data menu puts the locator in Config, where navigation,
+    // telemetry and flight logic stop, so a window measured through the menu
+    // measured nothing, and the menu's own printing landed in Console and
+    // ProcTotal.  'l' is in none of the command words; 't' is in "data".
+    else if (config_.IsConsoleIdle() && (uart_char == 'l' || uart_char == 'L')) {
+        config_.DisplayCycleProfile();
+    }
     else if (config_.IsConsoleIdle() && (uart_char == 'p' || uart_char == 'P')) {
         deploy_trace_ = !deploy_trace_;
         if (deploy_trace_) {
@@ -1403,7 +1411,7 @@ void Factory::PrintConsoleHelp() {
 			 "  data     flight data menu\r\n");
 	UartSend("  dfu      firmware update mode\r\n");
 
-	// '?', 'p' and 's' are the root keys that answer while armed, and they are
+	// '?', 'p', 's' and 'l' are the root keys that answer while armed, and they are
 	// grouped under their own heading rather than footnoted: an operator who has
 	// just been refused by one of the four below needs to know the refusal was
 	// the arm state and not a dead console.  Keeping them out of the block below
@@ -1411,7 +1419,8 @@ void Factory::PrintConsoleHelp() {
 	UartSend("\r\nKeys (no menu open, armed or disarmed):\r\n"
 			 "  ?        this list\r\n"
 			 "  p        deployment pin trace (DARM + channels, on change)\r\n"
-			 "  s        sensor status (what a failed sensor disables)\r\n");
+			 "  s        sensor status (what a failed sensor disables)\r\n"
+			 "  l        loop timing per segment (last / max since the last 'l')\r\n");
 
 	// The diagnostics carry one shared rule instead of four per-line carve-outs.
 	// Naming the requirement in the heading is what makes a refusal legible: the
