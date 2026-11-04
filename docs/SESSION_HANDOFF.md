@@ -7,7 +7,8 @@ Orientation note for resuming work. Detail lives in the linked artifacts; this i
 - **Symptom:** rocket green/gray. Over 338 s: 65 good NAV-PVT, 1,357 bad checksums, 840 B/s read; the one-byte stream read after a count of 0 returned non-filler 784 of ~860 times.
 - **Likely cause:** after the 0xFD/0xFE count read the receiver's pointer stays on 0xFE, so each stream read began with a count byte and every message split across two reads failed. Not proven; the fix doesn't depend on it.
 - **Fix:** readFifo is the pre-#22 read again (point at 0xFF, read 128 every poll). The parser now steps one byte after a bad checksum or an impossible length, instead of skipping the claimed length or stalling.
-- **Check on hardware:** `s` twice ~10 s apart: nav-pvt +~10/s, bad ck ~0. Then `t` for the GpsRead cost (expected ~5 ms on every 5th cycle).
+- **Confirmed on the bench 2026-11-04:** nav-pvt ~10/s, bad ck 0, boot ACK on the first init; `t` GpsRead 4.2 ms. Open: `dropped 36007` once early in that boot, not growing; worst-case `t` maxima still to read.
+- **Follow-up:** each poll now takes every complete NAV-PVT and keeps the newest. Taking one per poll let a backlog build (poll 9.77 Hz vs 10 Hz output; nav-pvt equaled polls exactly), so a fix could be ~0.7 s old but stamped as new. NOT on hardware.
 
 ## 2026-11-03 (GPS) — the receiver going silent after boot. Host-tested and linked at -O2, NOT on hardware
 

@@ -144,7 +144,18 @@ bool SAMM10Q::readSample(GpsSample& out) {
   	return false;
   }
 
-	if (parseNavPvtFromBuffer(out)) {
+	// Take every complete NAV-PVT in the buffer and keep the newest.  Taking
+	// one per poll, as this did, let a backlog build whenever the receiver
+	// got ahead (it emits at 10 Hz; the poll measured 9.77 Hz on the bench,
+	// 2026-11-04, where nav-pvt equaled polls exactly): each fix was then up
+	// to the buffer's depth old (~0.7 s, over 100 m at 180 m/s) but stamped
+	// with the time it was parsed.
+	bool got = false;
+	{
+		GpsSample s;
+		while (parseNavPvtFromBuffer(s)) { out = s; got = true; }
+	}
+	if (got) {
 		m_last = out;
 		m_last_pvt_ms = HAL_GetTick();
 		m_stale_nmea_seen = false;
