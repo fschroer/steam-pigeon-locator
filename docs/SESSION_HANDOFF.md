@@ -2,6 +2,13 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-11-04 (GPS) — corrupted NAV-PVT after ed1467d; back to the fixed 128-byte read. Linked at -O2, NOT on hardware
+
+- **Symptom:** rocket green/gray. Over 338 s: 65 good NAV-PVT, 1,357 bad checksums, 840 B/s read; the one-byte stream read after a count of 0 returned non-filler 784 of ~860 times.
+- **Likely cause:** after the 0xFD/0xFE count read the receiver's pointer stays on 0xFE, so each stream read began with a count byte and every message split across two reads failed. Not proven; the fix doesn't depend on it.
+- **Fix:** readFifo is the pre-#22 read again (point at 0xFF, read 128 every poll). The parser now steps one byte after a bad checksum or an impossible length, instead of skipping the claimed length or stalling.
+- **Check on hardware:** `s` twice ~10 s apart: nav-pvt +~10/s, bad ck ~0. Then `t` for the GpsRead cost (expected ~5 ms on every 5th cycle).
+
 ## 2026-11-03 (GPS) — the receiver going silent after boot. Host-tested and linked at -O2, NOT on hardware
 
 - **Symptom:** PPS blinking, app at 0 satellites, console `GPS no fresh fix`. `DIAG|GPS` showed 499 polls, 0 I2C failures, 0 bytes, FIFO count 0 on every poll. Intermittent across power cycles; a simulated flight brought it back.

@@ -1538,11 +1538,9 @@ void Factory::PrintSensorStatus() {
 		const auto& r = navigation_.gpsBootReport();
 		const unsigned ri = static_cast<unsigned>(r.result);
 		snprintf(g, sizeof(g),
-				"DIAG|GPS: boot config %s after %u init(s), %u bytes and %u bus errors while waiting, "
-				"stream probe data %lu\r\n",
+				"DIAG|GPS: boot config %s after %u init(s), %u bytes and %u bus errors while waiting\r\n",
 				ri < sizeof(kBootText) / sizeof(kBootText[0]) ? kBootText[ri] : "?",
-				(unsigned)r.inits, (unsigned)r.ack_wait_bytes, (unsigned)r.ack_wait_bus_errors,
-				(unsigned long)c.probe_data);
+				(unsigned)r.inits, (unsigned)r.ack_wait_bytes, (unsigned)r.ack_wait_bus_errors);
 		UartSend(g);
 	}
 	const uint8_t failed = navigation_.failedSensors();

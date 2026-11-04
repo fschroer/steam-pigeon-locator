@@ -89,15 +89,14 @@ public:
         uint32_t polls = 0;          // readSample calls after init
         uint32_t i2c_fail = 0;       // readFifo returned false (NACK or timeout)
         uint32_t bytes = 0;          // bytes read from the FIFO
-        uint32_t chunks_full = 0;    // polls that read the 128 B cap: a backlog
+        uint32_t chunks_full = 0;    // polls whose 128 B were all data: a backlog
         uint32_t idle = 0, ubx = 0, nmea = 0, unknown = 0;   // stream class per poll
         uint32_t nav_pvt = 0;        // NAV-PVTs parsed
         uint32_t other_ubx = 0;      // good-checksum UBX that is not NAV-PVT
         uint32_t bad_checksum = 0;   // a sync whose checksum failed
         uint32_t dropped = 0;        // bytes pushed out of the full rx buffer
         uint32_t oversize = 0;       // a sync whose length cannot fit the buffer
-        uint16_t last_available = 0; // FIFO count at the last poll
-        uint32_t probe_data = 0;     // count said 0, yet the stream byte was data
+        uint16_t last_available = 0; // data bytes (before filler) in the last read
     };
 
     // How the boot configuration went (2026-11-03), for the console.  inits

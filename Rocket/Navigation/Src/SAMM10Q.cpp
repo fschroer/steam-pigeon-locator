@@ -125,11 +125,11 @@ bool SAMM10Q::readSample(GpsSample& out) {
 			return false;
 	}
 
-	// An empty FIFO is now a zero-length read (#22); it used to be 128 bytes of
-	// 0xFF filler, which classifyStream calls Idle.  Keep calling it that.
-	m_stream_class = (chunk == 0) ? StreamClass::Idle : classifyStream(tmp, chunk);
-	m_ctr.bytes += chunk;
-	if (chunk >= sizeof(tmp)) ++m_ctr.chunks_full;
+	// A full 128 byte read every poll; an empty FIFO reads as 0xFF filler,
+	// which classifyStream calls Idle.
+	m_stream_class = classifyStream(tmp, chunk);
+	m_ctr.bytes += m_ctr.last_available;   // data, not filler
+	if (m_ctr.last_available >= sizeof(tmp)) ++m_ctr.chunks_full;
 	switch (m_stream_class) {
 	case StreamClass::Idle: ++m_ctr.idle; break;
 	case StreamClass::Ubx:  ++m_ctr.ubx;  break;
@@ -551,10 +551,24 @@ bool SAMM10Q::waitForAck(uint8_t cls, uint8_t id, uint32_t timeout_ms) {
 }
 
 bool SAMM10Q::readFifo(uint8_t *buf, uint16_t &len) {
-  // At most this many bytes per call: the callers' buffers are 128 B.  NAV-PVT is
-  // 100 B per 100 ms, so a poll every 100 ms keeps up; anything left over is read
-  // on the next poll.
-  constexpr uint16_t kMaxChunk = 128;
+  // Always 128 bytes, read straight from the stream register (0xFF): the read
+  // the locator flew with until 2026-11-01, restored 2026-11-04.  Whatever the
+  // receiver has queued comes first, then 0xFF filler; the parser skips filler.
+  //
+  // Why not the length-aware read (#22) that replaced it.  That read set the
+  // pointer to 0xFD, read the two count bytes, then read the stream assuming
+  // the pointer had moved on to 0xFF.  On the bench (2026-11-04, 338 s on the
+  // pad, fix held) it gave 1,357 UBX frames with a bad checksum against 65
+  // good NAV-PVTs, where a 10 Hz receiver sends ~3,380, and the one-byte
+  // stream read after a count of 0 returned something other than 0xFF filler
+  // 784 times in ~860.  The likely reading: the pointer was still on 0xFE, so
+  // every read began with the count's low byte instead of data, and every
+  // message split across two reads failed.  This read points at 0xFF itself
+  // on every poll and never touches the count, so it holds whichever way that
+  // turns out.  Before ed1467d the count-only poll could also leave the
+  // receiver's stream stopped.  The cost is the busy-wait #22 was meant to
+  // remove (~5 ms on every 5th 50 Hz cycle); check it with the console's 't'.
+  constexpr uint16_t chunk = 128;
 
   // Per-byte and per-transaction timeout (ms).
   // The SAM-M10Q before lock is doing heavy autonomous-aiding work and
@@ -568,82 +582,50 @@ bool SAMM10Q::readFifo(uint8_t *buf, uint16_t &len) {
   len = 0;
   i2cReset();
 
-  // Length-aware read (#22).  This used to read a FIXED 128 bytes from the 0xFF
-  // stream register every poll, byte by byte against a clock-stretching
-  // receiver: 4-8 ms of busy-wait every poll, most of it reading 0xFF filler
-  // when nothing was waiting.  Now: point at 0xFD, read the two-byte count
-  // (0xFD = MSB, 0xFE = LSB), and read only that many from the stream.  The
-  // address pointer auto-increments to 0xFF and stays there, so the data read
-  // needs no second address write.  An empty FIFO costs two bytes.  The I2C2 bus
-  // is now shared with the MMC5983MA (hardware 4ed58aa), so every millisecond
-  // held here is one the magnetometer waits.
-  auto wait_flag = [&](auto flag_fn, uint32_t timeout_ms, bool check_nack) -> bool {
-      const uint32_t t0 = HAL_GetTick();
-      while (!flag_fn(m_hi2c->Instance)) {
-          if (check_nack && LL_I2C_IsActiveFlag_NACK(m_hi2c->Instance)) return false;
-          if ((HAL_GetTick() - t0) >= timeout_ms) { i2cReset(); return false; }
-      }
-      return true;
-  };
-
-  // Phase 1: select the byte-count register (0xFD).
+  // Phase 1: point at the stream register (0xFF).
   LL_I2C_HandleTransfer(m_hi2c->Instance, (0x42 << 1), LL_I2C_ADDRSLAVE_7BIT,
                         1, LL_I2C_MODE_AUTOEND, LL_I2C_GENERATE_START_WRITE);
-  if (!wait_flag(LL_I2C_IsActiveFlag_TXIS, kByteTimeoutMs, true)) return false;
-  LL_I2C_TransmitData8(m_hi2c->Instance, 0xFD);
-  if (!wait_flag(LL_I2C_IsActiveFlag_STOP, kStopTimeoutMs, false)) return false;
-  LL_I2C_ClearFlag_STOP(m_hi2c->Instance);
-
-  // Phase 2: read the count.
-  uint8_t cnt[2] = { 0, 0 };
-  LL_I2C_HandleTransfer(m_hi2c->Instance, (0x42 << 1), LL_I2C_ADDRSLAVE_7BIT,
-                        2, LL_I2C_MODE_AUTOEND, LL_I2C_GENERATE_START_READ);
-  for (uint16_t i = 0; i < 2; i++) {
-      if (!wait_flag(LL_I2C_IsActiveFlag_RXNE, kByteTimeoutMs, true)) return false;
-      cnt[i] = LL_I2C_ReceiveData8(m_hi2c->Instance);
-  }
-  if (!wait_flag(LL_I2C_IsActiveFlag_STOP, kStopTimeoutMs, false)) return false;
-  LL_I2C_ClearFlag_STOP(m_hi2c->Instance);
-
-  uint16_t available = static_cast<uint16_t>((cnt[0] << 8) | cnt[1]);
-  if (available == 0xFFFFu) available = 0;   // bus idle-high: not a count
-  m_ctr.last_available = available;
-  if (available == 0) {
-      // Nothing waiting, but read one byte from the stream register anyway.
-      // The receiver stops its I2C data stream when the host has not read it
-      // for 1.5 s (integration manual 3.2.2.2; CFG-I2C-EXTENDEDTIMEOUT is off),
-      // and only addressing the stream starts it again.  The fixed 128 byte
-      // read that this replaced did that on every poll.  Reading only the
-      // count does not appear to: from 2026-11-01, when the count read went
-      // in, the receiver could go silent after boot (count 0 on every poll,
-      // PPS still blinking) until something wrote to it, and the in-flight
-      // recovery write and the dynamic-model writes are the only things that
-      // do.  One byte costs ~25 us.  It is filler (0xFF) unless a byte
-      // arrived since the count was read, in which case it is data and kept.
-      LL_I2C_HandleTransfer(m_hi2c->Instance, (0x42 << 1), LL_I2C_ADDRSLAVE_7BIT,
-                            1, LL_I2C_MODE_AUTOEND, LL_I2C_GENERATE_START_READ);
-      if (!wait_flag(LL_I2C_IsActiveFlag_RXNE, kByteTimeoutMs, true)) return false;
-      const uint8_t b = LL_I2C_ReceiveData8(m_hi2c->Instance);
-      if (!wait_flag(LL_I2C_IsActiveFlag_STOP, kStopTimeoutMs, false)) return false;
-      LL_I2C_ClearFlag_STOP(m_hi2c->Instance);
-      if (b != 0xFFu) {
-          ++m_ctr.probe_data;
-          buf[0] = b;
-          len = 1;
+  {
+      const uint32_t t0 = HAL_GetTick();
+      while (!LL_I2C_IsActiveFlag_TXIS(m_hi2c->Instance)) {
+          if (LL_I2C_IsActiveFlag_NACK(m_hi2c->Instance)) return false;
+          if ((HAL_GetTick() - t0) >= kByteTimeoutMs) { i2cReset(); return false; }
       }
-      return true;
   }
-  const uint16_t chunk = (available < kMaxChunk) ? available : kMaxChunk;
+  LL_I2C_TransmitData8(m_hi2c->Instance, 0xFF);
+  {
+      const uint32_t t0 = HAL_GetTick();
+      while (!LL_I2C_IsActiveFlag_STOP(m_hi2c->Instance)) {
+          if ((HAL_GetTick() - t0) >= kStopTimeoutMs) { i2cReset(); return false; }
+      }
+  }
+  LL_I2C_ClearFlag_STOP(m_hi2c->Instance);
 
-  // Phase 3: read exactly that many from the stream register (0xFF).
+  // Phase 2: read the stream.
   LL_I2C_HandleTransfer(m_hi2c->Instance, (0x42 << 1), LL_I2C_ADDRSLAVE_7BIT,
                         chunk, LL_I2C_MODE_AUTOEND, LL_I2C_GENERATE_START_READ);
   for (uint16_t i = 0; i < chunk; i++) {
-      if (!wait_flag(LL_I2C_IsActiveFlag_RXNE, kByteTimeoutMs, true)) return false;
+      const uint32_t t0 = HAL_GetTick();
+      while (!LL_I2C_IsActiveFlag_RXNE(m_hi2c->Instance)) {
+          if (LL_I2C_IsActiveFlag_NACK(m_hi2c->Instance)) return false;
+          if ((HAL_GetTick() - t0) >= kByteTimeoutMs) { i2cReset(); return false; }
+      }
       buf[i] = LL_I2C_ReceiveData8(m_hi2c->Instance);
   }
-  if (!wait_flag(LL_I2C_IsActiveFlag_STOP, kStopTimeoutMs, false)) return false;
+  {
+      const uint32_t t0 = HAL_GetTick();
+      while (!LL_I2C_IsActiveFlag_STOP(m_hi2c->Instance)) {
+          if ((HAL_GetTick() - t0) >= kStopTimeoutMs) { i2cReset(); return false; }
+      }
+  }
   LL_I2C_ClearFlag_STOP(m_hi2c->Instance);
+
+  // For the console only: bytes up to the last non-filler one.  A 0xFF that
+  // is real data at the very end is miscounted here, never lost: all 128
+  // bytes go to the parser.
+  uint16_t data = chunk;
+  while (data > 0 && buf[data - 1] == 0xFFu) --data;
+  m_ctr.last_available = data;
 
   len = chunk;
   return true;
@@ -689,12 +671,11 @@ bool SAMM10Q::parseNavPvtFromBuffer(GpsSample& out) {
         const uint16_t len = static_cast<uint16_t>(m_rxbuf[i + 4] | (m_rxbuf[i + 5] << 8));
         const uint16_t total = static_cast<uint16_t>(6 + len + 2);
 
-        if ((i + total) > m_rxlen) {
-            // A false sync claiming more than the buffer holds waits here
-            // until appendToRxBuffer pushes it out; counted, not changed.
-            if (total > kRxBufSize || total < 8u) ++m_ctr.oversize;
-            break;
-        }
+        // A sync whose length can't fit the buffer is not a frame: step past
+        // it.  It used to stall the parse here until appendToRxBuffer pushed
+        // it out, which with 128 bytes a poll is most of a second.
+        if (total > kRxBufSize || total < 8u) { ++m_ctr.oversize; ++i; continue; }
+        if ((i + total) > m_rxlen) break;   // a frame still arriving
 
         uint8_t ckA = 0, ckB = 0;
         ubxChecksum(&m_rxbuf[i + 2], static_cast<uint16_t>(4 + len), ckA, ckB);
@@ -776,11 +757,14 @@ bool SAMM10Q::parseNavPvtFromBuffer(GpsSample& out) {
                 return true;
             }
             ++m_ctr.other_ubx;
+            i = static_cast<uint16_t>(i + total);
         } else {
+            // A bad checksum means the length can't be trusted either: step
+            // one byte and look for the next sync, rather than jumping the
+            // claimed length and taking a good message with it.
             ++m_ctr.bad_checksum;
+            ++i;
         }
-
-        i = static_cast<uint16_t>(i + total);
     }
 
     if (i > 0) {
