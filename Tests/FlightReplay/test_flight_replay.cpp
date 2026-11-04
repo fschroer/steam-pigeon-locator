@@ -398,8 +398,13 @@ static std::vector<Cycle> makeNominalFlight() {
 
 // Drive a full flight through the real state machine; return the archive so the
 // caller can inspect recorded event timestamps.  g_bench holds the firings.
+// When each drogue rule first latched, for the CSV report (2026-11-04: the
+// level-off rule is tuned on the archive against the slowdown rule).
+static double g_slowdown_ms = -1, g_level_off_ms = -1;
+
 static Archive runFlight(const std::vector<Cycle>& flight) {
     g_bench.Reset();
+    g_slowdown_ms = g_level_off_ms = -1;
     RocketNav::Navigation nav; Archive ar; PowerManagement pw(nullptr);
     FlightManager fm(nav, ar, pw);
     fm.Init();
@@ -410,6 +415,8 @@ static Archive runFlight(const std::vector<Cycle>& flight) {
         g_bench.hal_ms = c.t_ms;         // HAL_GetTick() tracks the sample clock
         fm.SetFlightClockMs(c.t_ms);
         fm.UpdateFlightState();
+        if (g_slowdown_ms < 0 && fm.drogue_slowdown_.Detected())   g_slowdown_ms = c.t_ms;
+        if (g_level_off_ms < 0 && fm.drogue_level_off_.Detected()) g_level_off_ms = c.t_ms;
     }
     return ar;
 }
@@ -1067,6 +1074,8 @@ static int replayCsv(int argc, char** argv) {
     // to it can be checked against real flights rather than argued about.
     rep("Drogue opening inferred", Stat::DrogueVelocityThresholdTimestampMs);
     rep("Main opening inferred",   Stat::MainVelocityThresholdTimestampMs);
+    if (g_slowdown_ms >= 0)  printf("    by slowdown              t=%.0f ms (sample clock)\n", g_slowdown_ms);
+    if (g_level_off_ms >= 0) printf("    by level-off             t=%.0f ms (sample clock)\n", g_level_off_ms);
     printf("  Max altitude               %.1f m\n", ar.Event(Stat::MaxAltitudeM));
     printf("  Channels fired:");
     for (uint8_t ch = 1; ch <= 4; ++ch) if (g_bench.FiredOn(ch)) printf(" ch%u@%.0fms", ch, (double)g_bench.FirstOnMs(ch));

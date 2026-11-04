@@ -177,6 +177,7 @@ private:
     // #54: physical drogue / main inference from the descent rate.
     DescentSlowdown::TrailingMean descent_mean_;
     DescentSlowdown::Detector     drogue_slowdown_ = DescentSlowdown::Drogue();
+    DescentSlowdown::LevelOff     drogue_level_off_;   // a drogue opened at apogee (2026-11-04)
     DescentSlowdown::Detector     main_slowdown_   = DescentSlowdown::Main();
     bool         deployment_queued_[4]  = { false };
 

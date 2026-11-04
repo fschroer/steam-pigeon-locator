@@ -666,8 +666,21 @@ void FlightManager::UpdateFlightState() {
         // a drogue that opened at apogee (no slowdown of its own) latched onto the
         // main's slowdown, and "Drogue opening detected" was spoken just after the
         // main charge.
-        if (flight_state_ >= FlightStates::DroguePrimaryEvent && !m_main_primary_fired_
-                && drogue_slowdown_.Update(descent_mean_)) {
+        //
+        // Either evidence counts: a slowdown (the drogue opened on a rocket that
+        // had built speed) or a level-off well below free fall (it opened at
+        // apogee, so there was no speed to lose; Frank, 2026-11-04).  Both are
+        // updated every cycle so each sees the whole descent.
+        bool drogue_seen = false;
+        if (flight_state_ >= FlightStates::DroguePrimaryEvent && !m_main_primary_fired_) {
+            const bool slowed = drogue_slowdown_.Update(descent_mean_);
+            const bool level  = drogue_level_off_.Update(descent_mean_,
+                    static_cast<float>(noseover_time_) / static_cast<float>(SAMPLES_PER_SECOND));
+            // The first of the two reports it; the other may still latch later.
+            drogue_seen = (slowed || level)
+                    && !(physical_deployment_stats_ & (1 << bit_shift_drogue_deployed));
+        }
+        if (drogue_seen) {
             physical_deployment_stats_ = (physical_deployment_stats_ | (1 << bit_shift_drogue_deployed));
             archive_.WriteEvent(FlightArchive::Statistic::DrogueVelocityThresholdTimestampMs, flight_time_ms);
         }
@@ -929,6 +942,7 @@ void FlightManager::ResetFlight() {
     deploy_ch4_reset_       = false;
     descent_mean_.Reset();
     drogue_slowdown_.Reset();
+    drogue_level_off_.Reset();
     main_slowdown_.Reset();
     flight_time_ms          = 0;
     m_launch_candidate_ms_  = 0;
