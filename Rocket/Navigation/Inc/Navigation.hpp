@@ -3,8 +3,12 @@
 #include "ISM6HG256X.hpp"
 #include "MS5611.hpp"
 #include "SAMM10Q.hpp"
+#include "MMC5983MA.hpp"
 #include "InsEkf15.hpp"
 #include "AttitudeEstimator.hpp"
+#include "Constants.hpp"
+#include "SimFlight.hpp"
+#include "SensorFaults.hpp"
 
 // ---------------------------------------------------------------------------
 // Bench replay (#35 / #36) — DISABLED by default.
@@ -81,6 +85,9 @@ public:
     bool PowerDownAll();
 
     bool Update();
+    // The main loop's cycle index within the second (0..SAMPLES_PER_SECOND-1),
+    // set before each Update() so the GPS read lands on fixed cycles.
+    void SetServiceCount(uint8_t count) { m_service_count_ = count; }
     void CalibrateOnPadAndZeroAglUntilLaunch(FlightStates flight_state);
 
     // Trigger cardinal-axis mounting detection.  Call once on each arm event.
@@ -166,9 +173,37 @@ public:
     // bits and saw ~0.
     float getMaxAltitude()         const { return m_max_altitude_agl_m; }
 
+    // ── App-started simulated flight (ADR-0041) ─────────────────────────────
+    // While active, every sensor but the magnetometer is replaced at the driver
+    // boundary by SimFlight::Generator, so the whole chain downstream runs on
+    // it.  Factory owns the gates (disarmed, on the pad, not busy); this checks
+    // only what it alone can see, the sensors.  origin_*_1e7 is the phone's
+    // position, used when the receiver has no fix (both 0 = none).
+    bool startSimFlight(const SimFlight::Profile& p, int32_t origin_lat_1e7, int32_t origin_lon_1e7);
+    void stopSimFlight();
+    bool simFlightActive() const { return m_sim_.active(); }
+    void setSimCanopy(SimFlight::Canopy c) { m_sim_.SetCanopy(c); }
+    const SimFlight::Generator& simFlight() const { return m_sim_; }
+
     SensorStatus imuStatus()  const { return m_imu.getStatus(); }
     SensorStatus baroStatus() const { return m_baro.getStatus(); }
     SensorStatus gpsStatus()  const { return m_gps.getStatus(); }
+    const SAMM10Q::Counters& gpsCounters() const { return m_gps.counters(); }
+    uint32_t gpsLastPvtAgeMs() const { return m_gps.lastPvtAgeMs(); }
+    const SAMM10Q::BootReport& gpsBootReport() const { return m_gps.bootReport(); }
+    uint32_t gpsRecoveryAttempts() const { return m_gps.recoveryAttempts(); }
+    uint8_t  gpsDynModel() const { return static_cast<uint8_t>(m_gps.dynamicModel()); }
+
+    // ADR-0038 — the sensors that failed their power-on check (SensorFaults bits),
+    // and whether what survived is enough to arm.  The rule lives in
+    // SensorFaults.hpp; these only feed it the live health.
+    uint8_t failedSensors() const {
+        return SensorFaults::FailedMask(m_imu.getStatus().health, m_baro.getStatus().health,
+                                        m_gps.getStatus().health);
+    }
+    bool armingAllowed() const {
+        return SensorFaults::ArmingAllowed(m_imu.getStatus().health, m_baro.getStatus().health);
+    }
 
     // True once the raw baro on-pad AGL reference has been zeroed (#11).
     bool baroAglReferenceReady() const { return m_baro.aglReferenceReady(); }
@@ -213,6 +248,15 @@ public:
         return m_baro.raw();
     }
 
+    // Newest magnetometer reading, valid only if THIS cycle's read succeeded
+    // (ADR-0039).  Sensor frame.
+    MagSample getMag() const {
+        MagSample m = m_mag.last();
+        m.valid = m_mag_valid_;
+        return m;
+    }
+    SensorStatus magStatus() const { return m_mag.getStatus(); }
+    bool magPresent() const { return m_mag.present(); }
     const GpsSample& getRawGps() const {
 #if SP_BENCH_REPLAY
         if (m_test_active_) return m_test_gps_sample_;
@@ -294,6 +338,17 @@ public:
 #endif
 
 private:
+    // ADR-0038: how long a sensor that failed its power-on check holds the status
+    // LED on red before boot carries on without it.  It used to be 3 s and then a
+    // restart; a second is enough to be seen, and three failures in a row must
+    // still fit inside the IWDG window between Init()'s kicks.
+    static constexpr uint32_t kSensorFailHoldMs = 1000u;
+    // Watchdog checkpoint tags for Init(), clear of the 0..19 service counts the
+    // main loop writes, so a hang during sensor bring-up names the sensor.
+    static constexpr uint32_t kInitCheckpointImu  = 101u;
+    static constexpr uint32_t kInitCheckpointBaro = 102u;
+    static constexpr uint32_t kInitCheckpointGps  = 103u;
+
     // IsStationary is private — used only by CalibrateOnPadAndZeroAglUntilLaunch.
     // Launch/burnout/apogee/landing detection is owned by FlightManager.
     bool IsStationary(const ImuSample& imu, const BaroSample& baro) const;
@@ -322,7 +377,19 @@ private:
     NoseAxis       m_nose_axis_           = NoseAxis::Auto;
     MountingFrame  m_mounting             = {{0,1,2},{1,1,1}}; // identity (standard)
     bool           m_mounting_cal_active  = false;
-    uint8_t        m_mounting_cal_count   = 0;
+
+    // ADR-0041 simulated flight.
+    SimFlight::Generator m_sim_ {};
+    float    m_sim_p0_pa_        = 0.0f;   // ground pressure at the start
+    double   m_sim_lat0_rad_     = 0.0;
+    double   m_sim_lon0_rad_     = 0.0;
+    double   m_sim_alt0_m_       = 0.0;
+    bool     m_sim_has_origin_   = false;
+    bool     m_sim_seed_pending_ = false;  // re-seed EKF + strapdown on the first sample
+    // Replace this cycle's IMU / GPS samples with the simulation's.
+    void simFillImu(ImuSample& imu, uint32_t now);
+    void simFillGps(GpsSample& gps, uint32_t now) const;
+    uint16_t       m_mounting_cal_count   = 0;
     Vec3f          m_mounting_accel_accum = {};
 
     // Once set, gyro-bias accumulation is suppressed until the next arm.
@@ -330,7 +397,7 @@ private:
     // indicating motor ignition or significant handling of the rocket.
     bool           m_bias_frozen          = false;
 
-    static constexpr uint8_t kMountingCalSamples = 64; // 3.2 s at 20 Hz
+    static constexpr uint16_t kMountingCalSamples = SamplesForMs(3200); // 3.2 s (64 @ 20 Hz)
     // Tilt within which the rocket counts as standing vertical (ADR-0021
     // Decision 5 names ~20° as a starting point, to be validated on the pad —
     // it is not a measured value).  Generous relative to typical 5–10° rail
@@ -361,22 +428,24 @@ private:
     // 20 samples = 1 s at 20 Hz.
     static constexpr float   kFusedFrozenRawMoveM = 1.0f;
     static constexpr float   kFusedFrozenTolM     = 0.05f;
-    static constexpr uint8_t kFusedFrozenSamples  = 20;
+    static constexpr uint16_t kFusedFrozenSamples  = SamplesForMs(1000);  // 1 s
     float   m_last_fused_agl_m_ = 0.0f;
     float   m_last_raw_agl_m_   = 0.0f;
-    uint8_t m_fused_static_count_ = 0;
+    uint16_t m_fused_static_count_ = 0;
 
     ISM6HG256X m_imu;
     MS5611     m_baro;
     SAMM10Q    m_gps;
+    MMC5983MA  m_mag;
+    bool       m_mag_valid_ = false;   // this cycle's read succeeded
     InsEkf15   m_ekf;
     AttitudeEstimator m_attitude;   // strapdown (ADR-0005 / NFR-9)
 
     // Complementary gain for quasi-static accel tilt correction of the strapdown
     // (pad / gentle descent only).  Small: trust the gyro, nudge toward gravity.
-    static constexpr float kStrapdownTiltGain = 0.02f;
+    static constexpr float kStrapdownTiltGain = PerCycleGainFrom20Hz(0.02f);  // tuned at 20 Hz (ADR-0039)
     // LPF gain for learning the strapdown gyro bias while stationary (≈1 s at 20 Hz).
-    static constexpr float kStrapdownBiasAlpha = 0.05f;
+    static constexpr float kStrapdownBiasAlpha = PerCycleGainFrom20Hz(0.05f);  // tuned at 20 Hz (ADR-0039)
 
     // ── High-rate strapdown propagation (NFR-9) ───────────────────────────────
     // The gyro FIFO is batched at this rate; each drained sample is integrated at
@@ -389,11 +458,21 @@ private:
     // Vec3f = 576 B) buffer overflows it.  Batch = 12 words = 144 B.  Update()
     // loops the drain until the FIFO empties, so total drain capacity per loop
     // (kStrapdownFifoBatch × kStrapdownFifoMaxBatches) stays well above the
-    // ~24 words/loop fill rate (480 Hz × 50 ms) with no large allocation.
+    // fill rate (480 Hz × loop period: 9.6 words at 50 Hz) with no large allocation.
     static constexpr uint16_t kStrapdownFifoBatch     = 12;
-    // Safety cap on drain iterations per loop, bounding worst-case loop time
-    // (NFR-3) if a backlog ever forms; 48 × 12 = 576 words ≫ steady-state fill.
-    static constexpr uint8_t  kStrapdownFifoMaxBatches = 48;
+    // Cap on words drained per loop (#24).  It was 48 batches = 576 words, which
+    // let one startup backlog (284 words) take ~60 ms in a single drain -- longer
+    // than the loop period, and a backlog that outruns the loop only grows.  Now
+    // 2.5x the steady-state fill (480 Hz / loop rate: 9.6 words at 50 Hz), rounded
+    // up to whole batches: 24 words at 50 Hz, 60 at 20 Hz.  A backlog then drains
+    // over a few cycles at ~1.5x the fill rate instead of in one overrun.  The
+    // integrator loses nothing -- words wait in the FIFO and keep their order --
+    // and the dt estimate below is only updated on a drain that emptied the FIFO.
+    static constexpr uint16_t kStrapdownFifoMaxWordsPerCycle =
+        static_cast<uint16_t>((480u * 5u + 2u * SAMPLES_PER_SECOND - 1u) / (2u * SAMPLES_PER_SECOND));
+    static constexpr uint8_t  kStrapdownFifoMaxBatches = static_cast<uint8_t>(
+        (kStrapdownFifoMaxWordsPerCycle + kStrapdownFifoBatch - 1u) / kStrapdownFifoBatch);
+    bool m_strapdown_prev_drain_emptied_ = false;
 
     // ── GPS-disciplined strapdown dt (NFR-9) ──────────────────────────────────
     // Per-sample integration dt is derived from the GPS-PPS-disciplined TIM2 tick
@@ -423,8 +502,17 @@ private:
     uint32_t m_last_increase_time_ms     = 0;
 
     // GPS rate-limiting: poll every GPS_POLL_DIVISOR cycles.
-    // GPS_RATE=10 Hz, SAMPLES_PER_SECOND=20 → divisor=2 (poll every 100 ms).
-    uint8_t  m_gps_poll_counter_         = 0;
+    // GPS_RATE=10 Hz, SAMPLES_PER_SECOND=50 → divisor=5 (poll every 100 ms).
+    uint8_t  m_service_count_            = 0;
+    // The GPS read is queued on cycles where count % GPS_POLL_DIVISOR equals
+    // this, parsed on the next and fused on the one after.  Factory's
+    // telemetry slot (and the pad calibration that shares it) is
+    // SamplesForMs(100) = 5, phase 0: phases 2, 3 and 4 keep it clear.  At
+    // 50 Hz, 50 % 5 == 0, so the phase holds across the second boundary.
+    static constexpr uint8_t kGpsReadPhase = 2;
+    // A fix read this cycle, fused into the EKF on the next (see Update()).
+    GpsSample m_gps_pending_{};
+    bool      m_gps_fuse_pending_        = false;
 
     // GPS velocity updates are only applied during flight.
     // On the pad, ZUPT is a better zero-velocity reference than GPS velocity

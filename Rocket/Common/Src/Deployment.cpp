@@ -110,14 +110,16 @@ void Deployment::ServiceTestDeployment() {
 		return;
 	}
 	test_deploy_count_--;
+	// 250 ms LED blink, whatever the loop rate (5 cycles at 20 Hz, ADR-0039).
+	constexpr int kBlinkTicks = static_cast<int>(SamplesForMs(250u));
 	if (test_deploy_count_ > samples_per_second * 3) {
-		if (test_deploy_count_ % samples_per_second >= (samples_per_second - 5))
+		if (test_deploy_count_ % samples_per_second >= (samples_per_second - kBlinkTicks))
 			RgbLed(RgbColor::Red);
 		else
 			RgbLed(RgbColor::Off);
 		test_deployment_state_ = TestDeploymentState::Countdown;
 	} else if (test_deploy_count_ > 0) {
-		if (test_deploy_count_ % (samples_per_second / 2) >= (samples_per_second / 2) - 5)
+		if (test_deploy_count_ % (samples_per_second / 2) >= (samples_per_second / 2) - kBlinkTicks)
 			RgbLed(RgbColor::Red);
 		else
 			RgbLed(RgbColor::Off);

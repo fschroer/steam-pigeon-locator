@@ -92,6 +92,8 @@ bool SAMM10Q::init(float sample_rate_hz) {
     m_stale_nmea_seen  = false;
     m_stream_class     = StreamClass::Unknown;
 
+    ++m_boot.inits;
+    m_boot.result = BootCfgResult::NoDevice;
     if (!waitForBoot(1000)) {
         m_status.error_count++;
         m_status.health = SensorHealth::Error;
@@ -105,6 +107,14 @@ bool SAMM10Q::init(float sample_rate_hz) {
     m_status.initialized = true;
     m_status.health = cfg_ok ? SensorHealth::Ok : SensorHealth::Warning;
 
+    // For startRead(): the interrupt enables inside the peripheral stay off
+    // except while a transfer is in flight, so the blocking paths never see
+    // them.  Below USART2 and DMA (2) and the 0-priority timing interrupts.
+    HAL_NVIC_SetPriority(I2C2_EV_IRQn, 3, 0);
+    HAL_NVIC_SetPriority(I2C2_ER_IRQn, 3, 0);
+    HAL_NVIC_EnableIRQ(I2C2_EV_IRQn);
+    HAL_NVIC_EnableIRQ(I2C2_ER_IRQn);
+
     return cfg_ok;
 }
 
@@ -115,13 +125,142 @@ bool SAMM10Q::readSample(GpsSample& out) {
 		return false;
 	}
 
+	++m_ctr.polls;
 	if (!readFifo(tmp, chunk)) {
+			++m_ctr.i2c_fail;
 			m_status.health = SensorHealth::Warning;
 			serviceStaleRecovery(HAL_GetTick());
 			return false;
 	}
+	return processChunk(tmp, chunk, out);
+}
 
+// ----------------------------------------------------------------------------
+// Interrupt-driven poll (2026-11-04).  readSample() above busy-waits the whole
+// 128 byte transaction: 4-6.5 ms of the cycle on the bench, which with the
+// EKF put the GPS cycle at ~18 ms of the 20 ms budget.  startRead() only
+// queues the transaction; the I2C2 event/error interrupts run it, and
+// finishRead() on a later cycle takes the bytes.  Same bytes, same pointer
+// write to 0xFF, same 128 byte read: only who waits for them has changed.
+//
+// Nothing else may use I2C2 while a transfer is in flight.  Every blocking
+// path (init, waitForAck, sendUbx, the magnetometer) runs only with the
+// transfer idle: finishRead() completes or aborts it before it services the
+// dynamic-model and recovery writes, and Navigation skips the magnetometer
+// while asyncBusy().
+// ----------------------------------------------------------------------------
+namespace { SAMM10Q* g_isr_gps = nullptr; }
+
+bool SAMM10Q::startRead() {
+	if (!m_status.initialized || m_async_state != AsyncState::Idle) return false;
+	g_isr_gps     = this;
+	m_async_len   = 0;
+	m_async_start = HAL_GetTick();
+	i2cReset();
+	m_async_state = AsyncState::Pointer;
+	I2C_TypeDef* i2c = m_hi2c->Instance;
+	LL_I2C_EnableIT_TX(i2c);
+	LL_I2C_EnableIT_RX(i2c);
+	LL_I2C_EnableIT_STOP(i2c);
+	LL_I2C_EnableIT_NACK(i2c);
+	LL_I2C_EnableIT_ERR(i2c);
+	LL_I2C_HandleTransfer(i2c, (0x42 << 1), LL_I2C_ADDRSLAVE_7BIT,
+	                      1, LL_I2C_MODE_AUTOEND, LL_I2C_GENERATE_START_WRITE);
+	return true;
+}
+
+void SAMM10Q::asyncEnd(AsyncState result) {
+	I2C_TypeDef* i2c = m_hi2c->Instance;
+	LL_I2C_DisableIT_TX(i2c);
+	LL_I2C_DisableIT_RX(i2c);
+	LL_I2C_DisableIT_STOP(i2c);
+	LL_I2C_DisableIT_NACK(i2c);
+	LL_I2C_DisableIT_ERR(i2c);
+	m_async_state = result;
+}
+
+void SAMM10Q::onI2cEvent() {
+	I2C_TypeDef* i2c = m_hi2c->Instance;
+	if (LL_I2C_IsActiveFlag_NACK(i2c)) {
+		LL_I2C_ClearFlag_NACK(i2c);
+		asyncEnd(AsyncState::Failed);      // AUTOEND sends the STOP itself
+		return;
+	}
+	if (LL_I2C_IsActiveFlag_TXIS(i2c)) {
+		if (m_async_state == AsyncState::Pointer) LL_I2C_TransmitData8(i2c, 0xFF);
+		else { asyncEnd(AsyncState::Failed); return; }
+	}
+	if (LL_I2C_IsActiveFlag_RXNE(i2c)) {
+		const uint8_t b = LL_I2C_ReceiveData8(i2c);
+		if (m_async_state == AsyncState::Read && m_async_len < kAsyncLen)
+			m_async_buf[m_async_len++] = b;
+	}
+	if (LL_I2C_IsActiveFlag_STOP(i2c)) {
+		LL_I2C_ClearFlag_STOP(i2c);
+		if (m_async_state == AsyncState::Pointer) {
+			m_async_state = AsyncState::Read;
+			LL_I2C_HandleTransfer(i2c, (0x42 << 1), LL_I2C_ADDRSLAVE_7BIT,
+			                      kAsyncLen, LL_I2C_MODE_AUTOEND, LL_I2C_GENERATE_START_READ);
+		} else if (m_async_state == AsyncState::Read) {
+			asyncEnd(m_async_len == kAsyncLen ? AsyncState::Done : AsyncState::Failed);
+		}
+	}
+}
+
+void SAMM10Q::onI2cError() {
+	I2C_TypeDef* i2c = m_hi2c->Instance;
+	LL_I2C_ClearFlag_BERR(i2c);
+	LL_I2C_ClearFlag_ARLO(i2c);
+	LL_I2C_ClearFlag_OVR(i2c);
+	asyncEnd(AsyncState::Failed);
+}
+
+bool SAMM10Q::finishRead(GpsSample& out) {
+	if (!m_status.initialized || m_async_state == AsyncState::Idle) return false;
+
+	if (m_async_state == AsyncState::Pointer || m_async_state == AsyncState::Read) {
+		// The receiver may stretch the clock up to 20 ms (integration manual
+		// 3.2.2); a transfer still running a full cycle later is stuck.
+		if ((HAL_GetTick() - m_async_start) < kAsyncTimeoutMs) return false;
+		asyncEnd(AsyncState::Failed);
+	}
+
+	const bool ok = (m_async_state == AsyncState::Done);
+	m_async_state = AsyncState::Idle;
+	++m_ctr.polls;
+	if (!ok) {
+		i2cReset();
+		++m_ctr.i2c_fail;
+		m_status.health = SensorHealth::Warning;
+		serviceStaleRecovery(HAL_GetTick());
+		return false;
+	}
+
+	// Same accounting readFifo does for the blocking read.
+	uint16_t data = kAsyncLen;
+	while (data > 0 && m_async_buf[data - 1] == 0xFFu) --data;
+	m_ctr.last_available = data;
+
+	// The interrupt wrote the buffer before it set Done; keep the compiler
+	// from reading it any earlier than the state check above.
+	__asm volatile("" ::: "memory");
+	uint8_t tmp[kAsyncLen];
+	std::memcpy(tmp, m_async_buf, kAsyncLen);
+	return processChunk(tmp, kAsyncLen, out);
+}
+
+bool SAMM10Q::processChunk(const uint8_t* tmp, uint16_t chunk, GpsSample& out) {
+	// A full 128 byte read every poll; an empty FIFO reads as 0xFF filler,
+	// which classifyStream calls Idle.
 	m_stream_class = classifyStream(tmp, chunk);
+	m_ctr.bytes += m_ctr.last_available;   // data, not filler
+	if (m_ctr.last_available >= chunk) ++m_ctr.chunks_full;
+	switch (m_stream_class) {
+	case StreamClass::Idle: ++m_ctr.idle; break;
+	case StreamClass::Ubx:  ++m_ctr.ubx;  break;
+	case StreamClass::Nmea: ++m_ctr.nmea; break;
+	default:                ++m_ctr.unknown; break;
+	}
 
 	// After the FIFO read transaction has completed, so the two never overlap.
 	servicePendingDynModel();
@@ -130,7 +269,18 @@ bool SAMM10Q::readSample(GpsSample& out) {
   	return false;
   }
 
-	if (parseNavPvtFromBuffer(out)) {
+	// Take every complete NAV-PVT in the buffer and keep the newest.  Taking
+	// one per poll, as this did, let a backlog build whenever the receiver
+	// got ahead (it emits at 10 Hz; the poll measured 9.77 Hz on the bench,
+	// 2026-11-04, where nav-pvt equaled polls exactly): each fix was then up
+	// to the buffer's depth old (~0.7 s, over 100 m at 180 m/s) but stamped
+	// with the time it was parsed.
+	bool got = false;
+	{
+		GpsSample s;
+		while (parseNavPvtFromBuffer(s)) { out = s; got = true; }
+	}
+	if (got) {
 		m_last = out;
 		m_last_pvt_ms = HAL_GetTick();
 		m_stale_nmea_seen = false;
@@ -207,6 +357,10 @@ void SAMM10Q::servicePendingDynModel() {
 	if (!buildValsetDynModel(msg, msg_len)) return;
 
 	sendUbx(msg, msg_len, kRecoveryBudgetMs);
+}
+
+uint32_t SAMM10Q::lastPvtAgeMs() const {
+	return m_seen_nav_pvt ? (HAL_GetTick() - m_last_pvt_ms) : 0xFFFFFFFFu;
 }
 
 bool SAMM10Q::isFixStale() const {
@@ -344,21 +498,21 @@ bool SAMM10Q::configureReceiverValset(float sample_rate_hz) {
     uint8_t msg[128];
     uint16_t msg_len = 0;
 
-    // NAV-PVT stays off for this first VALSET so nothing competes with the
-    // UBX-ACK-ACK being verified; the second VALSET below turns it on.
-    if (!buildValsetInitialConfig(msg, msg_len, sample_rate_hz, 0)) {
+    // One VALSET carries the whole configuration, NAV-PVT output included.
+    // This used to be two: the first with NAV-PVT off "so nothing competes with
+    // the ACK", the second turning it on only once the first was ACKed.  That
+    // left a state with no way out: NMEA off, NAV-PVT off, so a receiver that
+    // applied the first and had its ACK missed (or never got the second) said
+    // nothing at all on I2C, and nothing on the pad ever wrote to it again.  A
+    // VALSET is applied whole or rejected whole, so with one message the
+    // receiver is either fully configured or still at its NMEA defaults, both
+    // of which the stream counters show.  The ACK parser already skips any
+    // NAV-PVT that arrives ahead of the ACK.
+    if (!buildValsetInitialConfig(msg, msg_len, sample_rate_hz, 1)) {
+        m_boot.result = BootCfgResult::BuildFailed;
         return false;
     }
-
-    if (sendUbxAndWaitAck(msg, msg_len, 0x06, 0x8A, 1000)) {
-			if (!buildValsetUbxNavPvtConfig(msg, msg_len)) {
-					return false;
-			}
-
-			return sendUbxAndWaitAck(msg, msg_len, 0x06, 0x8A, 1000);
-			}
-    else
-    	return false;
+    return sendUbxAndWaitAck(msg, msg_len, 0x06, 0x8A, 1000);
 }
 
 bool SAMM10Q::buildValsetInitialConfig(uint8_t* out, uint16_t& out_len, float sample_rate_hz, uint8_t nav_pvt_rate) {
@@ -407,52 +561,10 @@ bool SAMM10Q::buildValsetInitialConfig(uint8_t* out, uint16_t& out_len, float sa
     ok &= appendCfgItem(payload, sizeof(payload), p, CfgItemU2{UbxCfgKey::CFG_RATE_NAV, 1});
     ok &= appendCfgItem(payload, sizeof(payload), p, CfgItemE1{UbxCfgKey::CFG_RATE_TIMEREF, 1});
 
-    // UBX-NAV-PVT output rate on I2C/DDC.  0 during init (see caller), 1 when the
-    // stale-fix watchdog re-asserts the whole configuration in one shot.
+    // UBX-NAV-PVT output rate on I2C/DDC.  Every caller now passes 1 (boot and
+    // the stale-fix watchdog alike); the parameter stays so a test build can
+    // send the block with output off.
     ok &= appendCfgItem(payload, sizeof(payload), p, CfgItemU1{UbxCfgKey::CFG_MSGOUT_UBX_NAV_PVT_I2C, nav_pvt_rate});
-
-    if (!ok) {
-        out_len = 0;
-        return false;
-    }
-
-    const uint16_t len = p;
-
-    out[0] = 0xB5;
-    out[1] = 0x62;
-    out[2] = 0x06;
-    out[3] = 0x8A;
-    out[4] = static_cast<uint8_t>(len & 0xFF);
-    out[5] = static_cast<uint8_t>((len >> 8) & 0xFF);
-
-    std::memcpy(&out[6], payload, len);
-
-    uint8_t ckA = 0;
-    uint8_t ckB = 0;
-    ubxChecksum(&out[2], static_cast<uint16_t>(4 + len), ckA, ckB);
-
-    out[6 + len] = ckA;
-    out[7 + len] = ckB;
-
-    out_len = static_cast<uint16_t>(8 + len);
-    return true;
-}
-
-bool SAMM10Q::buildValsetUbxNavPvtConfig(uint8_t* out, uint16_t& out_len) {
-    uint8_t payload[128];
-    uint16_t p = 0;
-
-    // UBX-CFG-VALSET header payload:
-    // version, layers, reserved[2]
-    payload[p++] = 0x00; // version
-    payload[p++] = 0x01; // RAM layer
-    payload[p++] = 0x00;
-    payload[p++] = 0x00;
-
-    bool ok = true;
-
-    // Enable UBX-NAV-PVT output on I2C/DDC once per nav solution.
-    ok &= appendCfgItem(payload, sizeof(payload), p, CfgItemU1{UbxCfgKey::CFG_MSGOUT_UBX_NAV_PVT_I2C, 1});
 
     if (!ok) {
         out_len = 0;
@@ -488,6 +600,7 @@ bool SAMM10Q::sendUbxAndWaitAck(const uint8_t* msg, uint16_t len, uint8_t cls, u
 	    readFifo(dump, dumpLen);   // discard anything currently in FIFO
 
 	if (!sendUbx(msg, len)) {
+        m_boot.result = BootCfgResult::SendFailed;
         return false;
     }
     HAL_Delay(25); // Wait for receiver to process and send UBX-ACK-ACK/NAK
@@ -536,18 +649,24 @@ bool SAMM10Q::sendUbx(const uint8_t* msg, uint16_t len, uint32_t budget_ms) {
 
 bool SAMM10Q::waitForAck(uint8_t cls, uint8_t id, uint32_t timeout_ms) {
 	const uint32_t start = HAL_GetTick();
+	m_boot.ack_wait_bytes = 0;
+	m_boot.ack_wait_bus_errors = 0;
 
 	while ((HAL_GetTick() - start) < timeout_ms) {
 		uint16_t chunk = 0;
 		uint8_t tmp[128];
 
+		// A failed read used to end the wait on the spot, so one clock stretch
+		// past the byte timeout (the receiver stretches up to 20 ms before its
+		// first fix) counted as a missing ACK.  Keep waiting out the timeout.
 		if (!readFifo(tmp, chunk)) {
-				m_status.health = SensorHealth::Warning;
-				return false;
+				++m_boot.ack_wait_bus_errors;
+				HAL_Delay(10);
+				continue;
 		}
+		m_boot.ack_wait_bytes += chunk;
 
-		if (!appendToRxBuffer(tmp, chunk))
-			return false;
+		appendToRxBuffer(tmp, chunk);
 
 		uint8_t ackCls = 0;
 		uint8_t ackId = 0;
@@ -555,6 +674,7 @@ bool SAMM10Q::waitForAck(uint8_t cls, uint8_t id, uint32_t timeout_ms) {
 
 		while (parseAckFromBuffer(ackCls, ackId, nak)) {
 				if (ackCls == cls && ackId == id) {
+						m_boot.result = nak ? BootCfgResult::Nak : BootCfgResult::Ack;
 						return !nak;
 				}
 		}
@@ -562,11 +682,29 @@ bool SAMM10Q::waitForAck(uint8_t cls, uint8_t id, uint32_t timeout_ms) {
 		HAL_Delay(10);
 	}
 
+	m_boot.result = BootCfgResult::Timeout;
 	return false;
 }
 
 bool SAMM10Q::readFifo(uint8_t *buf, uint16_t &len) {
-  const uint16_t chunk = 128;   // tune as desired
+  // Always 128 bytes, read straight from the stream register (0xFF): the read
+  // the locator flew with until 2026-11-01, restored 2026-11-04.  Whatever the
+  // receiver has queued comes first, then 0xFF filler; the parser skips filler.
+  //
+  // Why not the length-aware read (#22) that replaced it.  That read set the
+  // pointer to 0xFD, read the two count bytes, then read the stream assuming
+  // the pointer had moved on to 0xFF.  On the bench (2026-11-04, 338 s on the
+  // pad, fix held) it gave 1,357 UBX frames with a bad checksum against 65
+  // good NAV-PVTs, where a 10 Hz receiver sends ~3,380, and the one-byte
+  // stream read after a count of 0 returned something other than 0xFF filler
+  // 784 times in ~860.  The likely reading: the pointer was still on 0xFE, so
+  // every read began with the count's low byte instead of data, and every
+  // message split across two reads failed.  This read points at 0xFF itself
+  // on every poll and never touches the count, so it holds whichever way that
+  // turns out.  Before ed1467d the count-only poll could also leave the
+  // receiver's stream stopped.  The cost is the busy-wait #22 was meant to
+  // remove (~5 ms on every 5th 50 Hz cycle); check it with the console's 't'.
+  constexpr uint16_t chunk = 128;
 
   // Per-byte and per-transaction timeout (ms).
   // The SAM-M10Q before lock is doing heavy autonomous-aiding work and
@@ -577,16 +715,12 @@ bool SAMM10Q::readFifo(uint8_t *buf, uint16_t &len) {
   constexpr uint32_t kByteTimeoutMs = kSensorBusTimeoutMs;
   constexpr uint32_t kStopTimeoutMs = kSensorBusTimeoutMs;
 
+  len = 0;
   i2cReset();
 
-  // Phase 1: select FIFO pop window (0xFF)
-  LL_I2C_HandleTransfer(m_hi2c->Instance,
-                        (0x42 << 1),
-                        LL_I2C_ADDRSLAVE_7BIT,
-                        1,
-                        LL_I2C_MODE_AUTOEND,
-                        LL_I2C_GENERATE_START_WRITE);
-
+  // Phase 1: point at the stream register (0xFF).
+  LL_I2C_HandleTransfer(m_hi2c->Instance, (0x42 << 1), LL_I2C_ADDRSLAVE_7BIT,
+                        1, LL_I2C_MODE_AUTOEND, LL_I2C_GENERATE_START_WRITE);
   {
       const uint32_t t0 = HAL_GetTick();
       while (!LL_I2C_IsActiveFlag_TXIS(m_hi2c->Instance)) {
@@ -594,9 +728,7 @@ bool SAMM10Q::readFifo(uint8_t *buf, uint16_t &len) {
           if ((HAL_GetTick() - t0) >= kByteTimeoutMs) { i2cReset(); return false; }
       }
   }
-
   LL_I2C_TransmitData8(m_hi2c->Instance, 0xFF);
-
   {
       const uint32_t t0 = HAL_GetTick();
       while (!LL_I2C_IsActiveFlag_STOP(m_hi2c->Instance)) {
@@ -605,14 +737,9 @@ bool SAMM10Q::readFifo(uint8_t *buf, uint16_t &len) {
   }
   LL_I2C_ClearFlag_STOP(m_hi2c->Instance);
 
-  // Phase 2: read FIFO bytes
-  LL_I2C_HandleTransfer(m_hi2c->Instance,
-                        (0x42 << 1),
-                        LL_I2C_ADDRSLAVE_7BIT,
-                        chunk,
-                        LL_I2C_MODE_AUTOEND,
-                        LL_I2C_GENERATE_START_READ);
-
+  // Phase 2: read the stream.
+  LL_I2C_HandleTransfer(m_hi2c->Instance, (0x42 << 1), LL_I2C_ADDRSLAVE_7BIT,
+                        chunk, LL_I2C_MODE_AUTOEND, LL_I2C_GENERATE_START_READ);
   for (uint16_t i = 0; i < chunk; i++) {
       const uint32_t t0 = HAL_GetTick();
       while (!LL_I2C_IsActiveFlag_RXNE(m_hi2c->Instance)) {
@@ -621,7 +748,6 @@ bool SAMM10Q::readFifo(uint8_t *buf, uint16_t &len) {
       }
       buf[i] = LL_I2C_ReceiveData8(m_hi2c->Instance);
   }
-
   {
       const uint32_t t0 = HAL_GetTick();
       while (!LL_I2C_IsActiveFlag_STOP(m_hi2c->Instance)) {
@@ -629,6 +755,13 @@ bool SAMM10Q::readFifo(uint8_t *buf, uint16_t &len) {
       }
   }
   LL_I2C_ClearFlag_STOP(m_hi2c->Instance);
+
+  // For the console only: bytes up to the last non-filler one.  A 0xFF that
+  // is real data at the very end is miscounted here, never lost: all 128
+  // bytes go to the parser.
+  uint16_t data = chunk;
+  while (data > 0 && buf[data - 1] == 0xFFu) --data;
+  m_ctr.last_available = data;
 
   len = chunk;
   return true;
@@ -638,6 +771,7 @@ bool SAMM10Q::appendToRxBuffer(const uint8_t* src, uint16_t len) {
     if (len == 0) return true;
 
     if (len >= kRxBufSize) {
+        m_ctr.dropped += m_rxlen + (len - kRxBufSize);
         std::memcpy(m_rxbuf, &src[len - kRxBufSize], kRxBufSize);
         m_rxlen = kRxBufSize;
         return true;
@@ -645,6 +779,7 @@ bool SAMM10Q::appendToRxBuffer(const uint8_t* src, uint16_t len) {
 
     if ((m_rxlen + len) > kRxBufSize) {
         const uint16_t drop = static_cast<uint16_t>((m_rxlen + len) - kRxBufSize);
+        m_ctr.dropped += drop;
         if (drop < m_rxlen) {
             std::memmove(m_rxbuf, m_rxbuf + drop, m_rxlen - drop);
             m_rxlen = static_cast<uint16_t>(m_rxlen - drop);
@@ -672,9 +807,11 @@ bool SAMM10Q::parseNavPvtFromBuffer(GpsSample& out) {
         const uint16_t len = static_cast<uint16_t>(m_rxbuf[i + 4] | (m_rxbuf[i + 5] << 8));
         const uint16_t total = static_cast<uint16_t>(6 + len + 2);
 
-        if ((i + total) > m_rxlen) {
-            break;
-        }
+        // A sync whose length can't fit the buffer is not a frame: step past
+        // it.  It used to stall the parse here until appendToRxBuffer pushed
+        // it out, which with 128 bytes a poll is most of a second.
+        if (total > kRxBufSize || total < 8u) { ++m_ctr.oversize; ++i; continue; }
+        if ((i + total) > m_rxlen) break;   // a frame still arriving
 
         uint8_t ckA = 0, ckB = 0;
         ubxChecksum(&m_rxbuf[i + 2], static_cast<uint16_t>(4 + len), ckA, ckB);
@@ -724,6 +861,13 @@ bool SAMM10Q::parseNavPvtFromBuffer(GpsSample& out) {
                     (out.fix_type >= 3) &&
                     std::isfinite(out.lat_rad) &&
                     std::isfinite(out.lon_rad) &&
+                    // On the globe.  A NAV-PVT that passed its checksum once
+                    // carried -132.87, 195.19 with hAcc 85 km while the locator
+                    // sat on the pad (2026-11-02 21:11:03), and the app crashed
+                    // drawing it.  Whether the receiver said it or a misaligned
+                    // chunk passed the 16-bit checksum, it is not a position.
+                    lat_e7 >= -900000000 && lat_e7 <= 900000000 &&
+                    lon_e7 >= -1800000000 && lon_e7 <= 1800000000 &&
                     !(lat_e7 == 0 && lon_e7 == 0);
 
                 out.velocity_valid =
@@ -745,11 +889,18 @@ bool SAMM10Q::parseNavPvtFromBuffer(GpsSample& out) {
 
                 discardConsumedPrefix(static_cast<uint16_t>(i + total));
                 m_seen_nav_pvt = true;
+                ++m_ctr.nav_pvt;
                 return true;
             }
+            ++m_ctr.other_ubx;
+            i = static_cast<uint16_t>(i + total);
+        } else {
+            // A bad checksum means the length can't be trusted either: step
+            // one byte and look for the next sync, rather than jumping the
+            // claimed length and taking a good message with it.
+            ++m_ctr.bad_checksum;
+            ++i;
         }
-
-        i = static_cast<uint16_t>(i + total);
     }
 
     if (i > 0) {
@@ -958,3 +1109,10 @@ uint32_t SAMM10Q::UtcToUnixTimestamp(uint16_t year, uint8_t month, uint8_t day,
 }
 
 } // namespace RocketNav
+
+extern "C" void RocketGps_I2cEvIrq(void) {
+	if (RocketNav::g_isr_gps) RocketNav::g_isr_gps->onI2cEvent();
+}
+extern "C" void RocketGps_I2cErIrq(void) {
+	if (RocketNav::g_isr_gps) RocketNav::g_isr_gps->onI2cError();
+}

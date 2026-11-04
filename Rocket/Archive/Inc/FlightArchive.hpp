@@ -25,8 +25,16 @@ namespace FlightArchive
             uint32_t archiveBaseAddress;
             uint32_t archiveSizeBytes;
             uint16_t recordCount;
-            uint16_t minutesPerRecord;
+            uint32_t samplesPerRecord;   // capacity, not duration: the rate varies (v8)
             uint16_t statSlotCount;
+            // Once every slot holds a record, a new one overwrites the OLDEST
+            // record whose one-byte stat evictFirstStatId has a bit of
+            // evictFirstMask set, and only when there is none the oldest record
+            // of all (ADR "An app-started simulated flight computed on the
+            // locator": a simulated record goes before a real one).  Mask 0
+            // turns the rule off.
+            StatId   evictFirstStatId = StatId{};
+            uint8_t  evictFirstMask   = 0u;
         };
 
         struct Geometry
@@ -176,6 +184,8 @@ namespace FlightArchive
         bool CommitBufferedChunk(uint16_t recordId);
         uint32_t FindNextSequenceNumber() const;
         bool FindOldestRecord(uint16_t& recordIdOut, uint32_t& seqOut) const;
+        // FindOldestRecord over only the records Config::evictFirst* selects.
+        bool FindOldestEvictFirstRecord(uint16_t& recordIdOut) const;
         int32_t StatIdToIndex(StatId statId) const;
     };
 }

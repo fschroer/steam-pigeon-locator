@@ -10,6 +10,7 @@ uint32_t Pps_GetTim2TicksPerSec(void);   // GPS-PPS-disciplined TIM2 ticks/sec (
 #include "Units.hpp"
 #include "CubeMonitorGlobals.hpp"
 #include "CycleProfiler.hpp"
+#include "Faultlog.hpp"
 
 namespace RocketNav {
 
@@ -19,7 +20,8 @@ Navigation::Navigation(SPI_HandleTypeDef *hspi2, I2C_HandleTypeDef *hi2c2,
                        GPIO_TypeDef *baro_cs_port, uint16_t baro_cs_pin) :
     m_imu(hspi2, imu_cs_port, imu_cs_pin),
     m_baro(hspi2, htim17, baro_cs_port, baro_cs_pin),
-    m_gps(hi2c2, 0x42) {
+    m_gps(hi2c2, 0x42),
+    m_mag(hi2c2) {
 }
 
 bool Navigation::PowerUpAll() {
@@ -284,9 +286,12 @@ void Navigation::FinishMountingCommit() {
 }
 
 bool Navigation::Init(const uint16_t output_rate_hz) {
+    // The last branch used to hard-code 20.0f, so every in-range rate became
+    // 20 Hz: harmless while the loop ran at 20 Hz, a wrong IMU/baro init rate
+    // and a wrong fallback dt at 50 Hz (ADR-0039).
     if      (output_rate_hz < 20)  m_cfg.output_rate_hz = 20.0f;
     else if (output_rate_hz > 100) m_cfg.output_rate_hz = 100.0f;
-    else                           m_cfg.output_rate_hz = 20.0f;
+    else                           m_cfg.output_rate_hz = static_cast<float>(output_rate_hz);
 
     m_cfg.accel_source          = ImuAccelSource::Auto;
     m_cfg.launch_detect_accel_g = 5.0f;
@@ -298,6 +303,20 @@ bool Navigation::Init(const uint16_t output_rate_hz) {
     bool ok = PowerUpAll();
     uint8_t timeout;
 
+    // ADR-0038: a sensor that fails its power-on check is REPORTED, not fatal.
+    // Each branch below used to end in HAL_NVIC_SystemReset() after 3 s of red,
+    // so one damaged sensor put the locator in a restart loop that no console or
+    // app could get a word into — after a ballistic flight, that loop is what
+    // stood between the operator and the stored record.  Now the failure is held
+    // on red long enough to see, the driver is left reporting SensorHealth::Error,
+    // and boot carries on.  Every driver's readSample() returns false when it never
+    // initialized, so a dead sensor costs its own data and nothing else; what that
+    // removes from flight, and the arming refusal, are in SensorFaults.hpp.
+    //
+    // The watchdog is kicked after each sensor.  The IWDG is already running here
+    // (~12.5 s), and three sensors failing in a row — the GPS alone retries for
+    // about 6 s — would otherwise outlast it.  A restart loop by watchdog is still
+    // a restart loop.
     bool imu_init_ok = false;
     timeout = 5;
     while (!(imu_init_ok = m_imu.init(m_cfg.output_rate_hz, m_cfg.accel_source)) && timeout-- > 0) {
@@ -305,7 +324,8 @@ bool Navigation::Init(const uint16_t output_rate_hz) {
         HAL_Delay(100);
     }
     if (imu_init_ok) { RgbLed(RgbColor::Cyan);    HAL_Delay(500); }
-    else             { RgbLed(RgbColor::Red);      HAL_Delay(3000); HAL_NVIC_SystemReset(); }
+    else             { RgbLed(RgbColor::Red);      HAL_Delay(kSensorFailHoldMs); }
+    Diag::KickWatchdog(kInitCheckpointImu);
 
     bool baro_init_ok = false;
     timeout = 5;
@@ -314,16 +334,23 @@ bool Navigation::Init(const uint16_t output_rate_hz) {
         HAL_Delay(100);
     }
     if (baro_init_ok) { RgbLed(RgbColor::Magenta); HAL_Delay(500); }
-    else              { RgbLed(RgbColor::Red);      HAL_Delay(3000); HAL_NVIC_SystemReset(); }
+    else              { RgbLed(RgbColor::Red);      HAL_Delay(kSensorFailHoldMs); }
+    Diag::KickWatchdog(kInitCheckpointBaro);
 
     bool gps_init_ok = false;
     timeout = 5;
     while (!(gps_init_ok = m_gps.init(GPS_RATE)) && timeout-- > 0) {
         RgbLed(gps_init_ok ? RgbColor::Green : RgbColor::Red);
         HAL_Delay(100);
+        Diag::KickWatchdog(kInitCheckpointGps);   // each attempt can wait ~1 s for boot
     }
     if (gps_init_ok) { RgbLed(RgbColor::Green);   HAL_Delay(500); }
-    else             { RgbLed(RgbColor::Red);      HAL_Delay(3000); HAL_NVIC_SystemReset(); }
+    else             { RgbLed(RgbColor::Red);      HAL_Delay(kSensorFailHoldMs); }
+    Diag::KickWatchdog(kInitCheckpointGps);
+
+    // Magnetometer (ADR-0039): optional, so a failed probe is not a fault and
+    // costs no retry loop or LED.  Boards without U19 simply log no field.
+    m_mag.init(m_cfg.output_rate_hz);
 
     RgbLed(RgbColor::Off);
     HAL_Delay(500);
@@ -338,6 +365,11 @@ bool Navigation::Init(const uint16_t output_rate_hz) {
     m_imu.readSample(imu);
     m_baro.readSample(baro);
     m_gps.readSample(gps);
+    // With no IMU the sample above is all zeros, and the EKF seeds its attitude by
+    // normalizing that accel.  Nothing downstream uses the fused attitude without
+    // an IMU (telemetry is raw-primary, ADR-0005), but a NaN quaternion is not a
+    // thing to leave lying in a state other code reads.  Seed it nose-up at rest.
+    if (!imu_init_ok) imu.accel_selected_mps2 = { G0_F, 0.0f, 0.0f };
 
     m_ekf.initialize(imu, baro.valid ? &baro : nullptr, gps.position_valid ? &gps : nullptr);
     m_ekf.zeroPadReferenceAgl(m_ekf.getSolution().altitude_msl_m, 0.0f);
@@ -350,6 +382,108 @@ bool Navigation::Init(const uint16_t output_rate_hz) {
 
 // ---------------------------------------------------------------------------
 // setPhase — forward FlightState to EKF and update baro LPF alpha.
+// ---------------------------------------------------------------------------
+// App-started simulated flight (ADR "An app-started simulated flight computed
+// on the locator", 0041).  Factory gates the request; this refuses it only for
+// what it alone can see: sensors that are not healthy, a board that is moving,
+// or a mounting calibration in progress.
+// ---------------------------------------------------------------------------
+bool Navigation::startSimFlight(const SimFlight::Profile& p, int32_t origin_lat_1e7, int32_t origin_lon_1e7) {
+    if (!m_initialized || m_sim_.active() || m_mounting_cal_active) return false;
+    if (!SimFlight::Valid(p)) return false;
+    if (m_imu.getStatus().health != SensorHealth::Ok || m_baro.getStatus().health != SensorHealth::Ok) return false;
+    const ImuSample& imu = m_imu.raw();
+    const float g = Math::norm(imu.accel_selected_mps2) / G0_F;
+    if (std::fabs(g - 1.0f) > 0.2f) return false;
+    if (!m_baro.aglReferenceReady()) return false;   // p0 must be a real ground reference
+
+    m_sim_p0_pa_ = m_baro.getGroundPressurePa();
+    const GpsSample& fix = m_gps.raw();
+    if (fix.position_valid && !m_gps.isFixStale()) {
+        m_sim_lat0_rad_ = fix.lat_rad;
+        m_sim_lon0_rad_ = fix.lon_rad;
+        m_sim_alt0_m_   = fix.alt_m_msl;
+        m_sim_has_origin_ = true;
+    } else if (origin_lat_1e7 != 0 || origin_lon_1e7 != 0) {
+        constexpr double kDeg1e7ToRad = 3.14159265358979323846 / 180.0 * 1e-7;
+        m_sim_lat0_rad_ = origin_lat_1e7 * kDeg1e7ToRad;
+        m_sim_lon0_rad_ = origin_lon_1e7 * kDeg1e7ToRad;
+        m_sim_alt0_m_   = m_baro.getGroundAltitudeMsl();
+        m_sim_has_origin_ = true;
+    } else {
+        m_sim_has_origin_ = false;   // no track: GPS reports nothing new
+    }
+    // The barometer's own temperature when the app asked for it.  It reads the
+    // board, which a sun-warmed bay runs above the air; a 10 C error moves the
+    // density about 3.5%.  No temperature word yet (raw() not valid) keeps 15 C.
+    SimFlight::Profile q = p;
+    if (q.temp_from_baro && m_baro.raw().valid)
+        q.temp_c = std::fmin(50.0f, std::fmax(-40.0f, m_baro.raw().temperature_c));
+    m_sim_.Start(q, HAL_GetTick(), m_sim_p0_pa_);
+    m_sim_seed_pending_ = true;
+    return true;
+}
+
+void Navigation::stopSimFlight() {
+    if (!m_sim_.active()) return;
+    m_sim_.Stop();
+    m_sim_seed_pending_ = false;
+    m_baro.setPressureOverride(false);
+    // Discard the real rotation the FIFO buffered while the simulation ran.
+    m_imu.fifoFlush();
+}
+
+// Body frame -> sensor frame through the inverse of the mounting frame, so the
+// mounting transform downstream maps it back exactly (body[i] =
+// sign[i] * sensor[src[i]]).
+void Navigation::simFillImu(ImuSample& imu, uint32_t now) {
+    const Vec3f fb = m_sim_.AccelBody();
+    const Vec3f wb = m_sim_.GyroBody();
+    auto to_sensor = [this](const Vec3f& b) {
+        const float in[3] = { b.x, b.y, b.z };
+        float out[3] = { 0.0f, 0.0f, 0.0f };
+        for (int i = 0; i < 3; ++i)
+            out[m_mounting.src[i]] = static_cast<float>(m_mounting.sign[i]) * in[i];
+        return Vec3f{ out[0], out[1], out[2] };
+    };
+    const Vec3f f = to_sensor(fb);
+    imu.timestamp_ms = now;
+    imu.accel_low_g_mps2  = f;
+    imu.accel_high_g_mps2 = f;
+    imu.gyro_rps = to_sensor(wb);
+    const float kLowGFull = 16.0f * G0_F;
+    imu.saturated_low_g = std::fabs(f.x) > kLowGFull || std::fabs(f.y) > kLowGFull || std::fabs(f.z) > kLowGFull;
+    imu.saturated_high_g = false;
+    switch (m_imu.accelSource()) {
+        case ImuAccelSource::LowG:  imu.accel_selected_mps2 = imu.accel_low_g_mps2;  break;
+        case ImuAccelSource::HighG: imu.accel_selected_mps2 = imu.accel_high_g_mps2; break;
+        default: imu.accel_selected_mps2 = imu.saturated_low_g ? imu.accel_high_g_mps2 : imu.accel_low_g_mps2; break;
+    }
+    imu.low_g_valid = imu.high_g_valid = imu.gyro_valid = true;
+    m_imu.injectSample(imu);
+}
+
+void Navigation::simFillGps(GpsSample& gps, uint32_t now) const {
+    constexpr double kR = 6378137.0;
+    gps.timestamp_ms = now;
+    gps.lat_rad = m_sim_lat0_rad_ + m_sim_.north_m() / kR;
+    gps.lon_rad = m_sim_lon0_rad_ + m_sim_.east_m() / (kR * std::cos(m_sim_lat0_rad_));
+    gps.alt_m_msl = m_sim_alt0_m_ + m_sim_.height_m();
+    gps.vel_n_mps = m_sim_.vel_n();
+    gps.vel_e_mps = m_sim_.vel_e();
+    gps.vel_d_mps = m_sim_.vel_d();
+    gps.ground_speed_mps = std::sqrt(gps.vel_n_mps * gps.vel_n_mps + gps.vel_e_mps * gps.vel_e_mps);
+    gps.heading_rad = std::atan2(gps.vel_e_mps, gps.vel_n_mps);
+    gps.num_sv = 12u;
+    gps.fix_type = 3u;
+    gps.h_acc_m = 2.5f;
+    gps.v_acc_m = 4.0f;
+    gps.s_acc_mps = 0.3f;
+    gps.position_valid = true;
+    gps.velocity_valid = true;
+    // time_valid and timestamp_s stay the receiver's: the record's date is real.
+}
+
 // Called by FlightManager::UpdateFlightState() at each state transition.
 // ---------------------------------------------------------------------------
 void Navigation::setPhase(FlightStates state) {
@@ -436,17 +570,64 @@ bool Navigation::Update() {
 
     if (!m_test_active_) {
 #endif
+        // Simulated flight (ADR-0041): an arm stops it here too.  Arming starts
+        // the mounting calibration, which must average real gravity, and this
+        // runs before Factory sees the arm edge.
+        if (m_sim_.active() && m_mounting_cal_active)
+            stopSimFlight();
+        const bool sim = m_sim_.active();
+        if (sim) {
+            m_sim_.AdvanceTo(now);
+            m_baro.setPressureOverride(true, m_sim_.PressurePa(m_sim_p0_pa_));
+        }
+
         const uint16_t t_sr = Diag::Now();
         imu_new  = m_imu.readSample(imu);
         baro_new = m_baro.readSample(baro);
         Diag::mark(Diag::Seg::SensorRead, t_sr);
+        if (sim && imu_new)
+            simFillImu(imu, now);
+
+        // Magnetometer before the GPS: both are on I2C2, and a GPS that
+        // clock-stretches holds the bus only for its own transaction.
+        {
+            MagSample mag{};
+            const uint16_t t_mag = Diag::Now();
+            // Not while the GPS's interrupt-driven read holds I2C2.
+            if (!m_gps.asyncBusy()) {
+                if (!m_mag.readSample(mag))
+                    m_mag_valid_ = false;
+                else
+                    m_mag_valid_ = true;
+            }
+            Diag::mark(Diag::Seg::MagRead, t_mag);
+        }
 
         if (m_cfg.use_gps) {
-            if (++m_gps_poll_counter_ >= GPS_POLL_DIVISOR) {
-                m_gps_poll_counter_ = 0;
+            // Phase-locked to the loop's cycle index (2026-11-04).  The old
+            // free-running counter took whatever phase boot gave it, so on
+            // some boots every GPS read shared a cycle with telemetry and the
+            // pad calibration: 23.6 ms worst case on the bench.
+            // Interrupt-driven (2026-11-04): queued on the read phase, parsed
+            // one cycle later, fused one after that (see the EKF block).
+            const uint8_t phase = m_service_count_ % GPS_POLL_DIVISOR;
+            if (phase == kGpsReadPhase) {
                 const uint16_t t_gps = Diag::Now();
-                gps_new = m_gps.readSample(gps);
-                Diag::mark(Diag::Seg::GpsRead, t_gps);   // every 2nd cycle
+                m_gps.startRead();
+                Diag::mark(Diag::Seg::GpsRead, t_gps);
+            } else if (phase == (kGpsReadPhase + 1u) % GPS_POLL_DIVISOR) {
+                const uint16_t t_gps = Diag::Now();
+                gps_new = m_gps.finishRead(gps);
+                Diag::mark(Diag::Seg::GpsRead, t_gps);
+                // The receiver is still read, so its stream stays drained; the
+                // simulation's fix replaces whatever it produced (ADR-0041).
+                if (sim) {
+                    gps_new = m_sim_has_origin_;
+                    if (gps_new) {
+                        simFillGps(gps, now);
+                        m_gps.injectSample(gps, now);
+                    }
+                }
             }
         }
 #if SP_BENCH_REPLAY
@@ -497,6 +678,14 @@ bool Navigation::Update() {
     // Must happen after the raw-accumulation above and before EKF use below.
     if (imu_new) applyMountingFrame(imu);
 
+    // The simulation's first sample stands the rocket on a rail.  Re-seed the
+    // EKF and strapdown from it, as a mounting commit does, rather than leave
+    // them on the board's real attitude on the bench (ADR-0041).
+    if (m_sim_seed_pending_ && imu_new && m_sim_.active()) {
+        FinishMountingCommit();
+        m_sim_seed_pending_ = false;
+    }
+
 #if SP_VACUUM_SIM
     // Vacuum-chamber flight sim: overwrite the body-frame accel with the
     // synthetic boost while one is running.  Deliberately AFTER
@@ -509,6 +698,13 @@ bool Navigation::Update() {
     // but the pulse still has to be able to time out.
     applyVacuumSimBoost(imu, baro);
 #endif
+
+    // Held for the EKF, which fuses it on a later cycle (see below).  A newer
+    // fix replaces one that has not been fused yet.
+    if (gps_new) {
+        m_gps_pending_      = gps;
+        m_gps_fuse_pending_ = true;
+    }
 
     if (imu_new) {
         const uint16_t t_ekf = Diag::Now();
@@ -527,11 +723,18 @@ bool Navigation::Update() {
         if (m_cfg.use_baro && baro_new && baro.valid)
             m_ekf.updateBaro(baro);
 
-        if (m_cfg.use_gps && gps_new) {
-            if (gps.position_valid) m_ekf.updateGpsPosition(gps);
+        // GPS is fused one cycle after it is read, never in the read cycle
+        // (2026-11-04).  The read busy-waits ~4 ms and the EKF's GPS update
+        // is its costliest; together, on the bench, they made the worst
+        // non-console cycle 18.7 ms of the 20 ms budget.  20 ms of added age
+        // is small against the receiver's own latency.
+        if (m_cfg.use_gps && m_gps_fuse_pending_ && !gps_new) {
+            const GpsSample& g = m_gps_pending_;
+            if (g.position_valid) m_ekf.updateGpsPosition(g);
             // GPS velocity only fused during flight — see setPhase() for rationale.
-            if (gps.velocity_valid && m_gps_velocity_enabled_)
-                m_ekf.updateGpsVelocity(gps);
+            if (g.velocity_valid && m_gps_velocity_enabled_)
+                m_ekf.updateGpsVelocity(g);
+            m_gps_fuse_pending_ = false;
         }
 
         // ZUPT — apply every Update() cycle when on the pad or after landing.
@@ -617,6 +820,10 @@ bool Navigation::Update() {
             // loop-rate step when the FIFO is empty/unconfigured, or during
             // bench replay (one injected sample per loop, no hardware FIFO).
             bool propagated = false;
+            // A simulated flight has no FIFO behind it: one simulated rate per
+            // loop, like bench replay (ADR-0041).  The real FIFO is flushed
+            // when the simulation stops.
+            if (!m_sim_.active()) {
 #if SP_BENCH_REPLAY
             if (!m_test_active_) {
 #endif
@@ -629,6 +836,7 @@ bool Navigation::Update() {
                 const uint32_t t2_start = TIM2->CNT;
                 const float    dt_fifo  = m_strapdown_dt_per_word;   // from last loop
                 uint16_t       words_drained = 0;
+                bool           drain_emptied = false;
                 Vec3f batch[kStrapdownFifoBatch];
                 for (uint8_t b = 0; b < kStrapdownFifoMaxBatches; ++b) {
                     const uint16_t fn = m_imu.drainFifoGyro(batch, kStrapdownFifoBatch);
@@ -636,8 +844,10 @@ bool Navigation::Update() {
                         m_attitude.propagate(remapVec(batch[i]), dt_fifo, now);
                     words_drained += fn;
                     if (fn > 0) propagated = true;
-                    if (fn < kStrapdownFifoBatch)
+                    if (fn < kStrapdownFifoBatch) {
+                    	drain_emptied = true;
                     	break;   // FIFO emptied
+                    }
                 }
                 // Recompute dt_per_word for next loop: the GPS-PPS-disciplined
                 // TIM2 interval since the last drain, divided across the words
@@ -645,7 +855,12 @@ bool Navigation::Update() {
                 // (immune to MSI/IMU-oscillator/HAL_GetTick error); clamped so a
                 // post-halt interval can't inject garbage.  Holds 1/480 until PPS.
                 const uint32_t tps = Pps_GetTim2TicksPerSec();   // 0 until PPS lock
-                if (tps > 0 && words_drained > 0 && m_strapdown_last_tim2 != 0) {
+                // Only across two drains that each emptied the FIFO: then the
+                // words drained are exactly the words produced in the interval.
+                // A capped drain (#24) leaves a backlog, and dividing by its words
+                // would read a short dt for as long as the backlog lasts.
+                if (tps > 0 && words_drained > 0 && m_strapdown_last_tim2 != 0
+                        && drain_emptied && m_strapdown_prev_drain_emptied_) {
                     const uint32_t interval = t2_start - m_strapdown_last_tim2; // unsigned wrap OK
                     float dt = (static_cast<float>(interval) / static_cast<float>(tps))
                                / static_cast<float>(words_drained);
@@ -657,11 +872,13 @@ bool Navigation::Update() {
                         (1.0f - kStrapdownDtAlpha) * m_strapdown_dt_per_word + kStrapdownDtAlpha * dt;
                 }
                 m_strapdown_last_tim2 = t2_start;
+                m_strapdown_prev_drain_emptied_ = drain_emptied;
                 Diag::recordCount(Diag::Cnt::FifoWords, words_drained);  // per-cycle drain count
                 Diag::mark(Diag::Seg::FifoDrain, t_drain);              // reads + propagate only
 #if SP_BENCH_REPLAY
             }
 #endif
+            }   // !m_sim_.active()
             if (!propagated)
                 m_attitude.propagate(imu.gyro_rps, dt_s, now);
 
@@ -816,18 +1033,16 @@ void Navigation::injectTestSample(ImuSample&  imu,  BaroSample& baro,
                                   bool& imu_new, bool& baro_new, bool& gps_new) {
     const FlightArchive::FlightSample& s = m_test_buf_[m_test_buf_index_++];
 
-    imu.accel_selected_mps2 = { s.accel.x, s.accel.y, s.accel.z };
+    imu.accel_selected_mps2 = FlightArchive::AccelMps2(s);
     imu.accel_low_g_mps2    = imu.accel_selected_mps2;
-    imu.gyro_rps            = { s.gyro.x,  s.gyro.y,  s.gyro.z  };
+    imu.gyro_rps            = FlightArchive::GyroRps(s);
     imu.timestamp_ms        = s.timestamp_ms;
     imu.gyro_valid          = true;
     imu.low_g_valid         = true;
     imu_new                 = true;
 
-//    baro.altitude_m_agl  = s.fused_altitude_agl;
-//    baro.altitude_m_msl  = s.fused_altitude_agl + m_ekf.getPadAltitudeMsl();
-    baro.altitude_m_agl  = s.raw_baro_altitude_agl;
-    baro.altitude_m_msl  = s.raw_baro_altitude_agl + m_ekf.getPadAltitudeMsl();
+    baro.altitude_m_agl  = FlightArchive::RawBaroAglM(s);
+    baro.altitude_m_msl  = baro.altitude_m_agl + m_ekf.getPadAltitudeMsl();
     // Raw baro VELOCITY, not just altitude.  Omitting this stalled every replay
     // at Burnout: launch and burnout are accel-driven so they fired, but noseover
     // and everything downstream key on vertical velocity — and ADR-0018 made raw
@@ -835,7 +1050,7 @@ void Navigation::injectTestSample(ImuSample&  imu,  BaroSample& baro,
     // the live baro last measured (~0.2 m/s on a bench), so apogee never arrived
     // however high the replayed altitude climbed.  The archive carries this
     // column; it was just never copied across.
-    baro.velocity        = s.raw_baro_velocity;
+    baro.velocity        = FlightArchive::RawBaroVelMps(s);
     baro.timestamp_ms    = s.timestamp_ms;
     baro.valid           = true;
     baro_new             = true;

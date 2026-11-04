@@ -52,8 +52,8 @@ void Factory::Init(const Radio_s *radio) {
 	console_baud_.Begin();
 
 	// Play the PowerOn sequence synchronously before initialization tasks begin so the
-	// user hears immediate audio feedback on power-up.  Each duration unit is one
-	// main-loop tick (1000 / SAMPLES_PER_SECOND ms).  buzzer_phase_ is set to Idle
+	// user hears immediate audio feedback on power-up.  Each duration unit is
+	// kNoteUnitMs (50 ms, the old 20 Hz tick; see Buzzer.hpp).  buzzer_phase_ is set to Idle
 	// so ProcessRocketEvents does not replay the sequence after Init() returns.
 	BuzzerStop();
 	for (size_t i = 0; i < sizeof(PowerOn) / sizeof(PowerOn[0]); i++) {
@@ -61,7 +61,7 @@ void Factory::Init(const Radio_s *radio) {
 			BuzzerPlay(PowerOn[i].tone, PowerOn[i].volume);
 		else
 			BuzzerStop();
-		HAL_Delay(static_cast<uint32_t>(PowerOn[i].duration) * (1000u / SAMPLES_PER_SECOND));
+		HAL_Delay(static_cast<uint32_t>(PowerOn[i].duration) * kNoteUnitMs);
 	}
 	BuzzerStop();
 	buzzer_phase_ = BuzzerPhase::Idle;
@@ -96,6 +96,12 @@ void Factory::Init(const Radio_s *radio) {
 	// and power cycles reuse one slot indefinitely; the counter tracks flights
 	// actually recorded, not power-ons.
 	archive_.StartOpenNewFlight();
+
+	// Say what came up and what did not (ADR-0038).  A failed sensor no longer
+	// restarts the locator, so the console is reachable to read this — which is the
+	// point: a locator that boots with a dead sensor has to say so somewhere other
+	// than a one-second red LED, or it looks like a healthy one that will not arm.
+	PrintSensorStatus();
 
 	// A captured fault (HardFault / assert / watchdog hang) is deliberately left
 	// in the .noinit record so it can be read over the USB-C console with '/'
@@ -132,6 +138,19 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 
 	if (device_state_ != prev_device_state_) {
 		if (device_state_ == DeviceState::Armed) {
+			// Any arm ends a simulated flight BEFORE it takes effect (ADR-0041).
+			// A launched one is landed and its record closed here, so the
+			// StartOpenNewFlight below opens a fresh record instead of
+			// abandoning the simulated one half-written.
+			if (sim_stage_ != SimStage::Off) {
+				EndSimFlight();
+				if (archive_.IsActiveOpen() && flight_.GetFlightState() == FlightStates::Landed) {
+					flight_.WriteEkfDiagSnapshot(FlightArchive::Statistic::EkfDiagAtClose);
+					archive_.CloseCurrentFlight();
+				}
+				sim_stage_ = SimStage::Off;
+				comm_.SetSimSession(false);
+			}
 			// Arming shuts the detection window for the rest of the session.  The
 			// console rate is a bench concern; leaving it movable by whatever the
 			// RX pin picks up during a flight buys nothing and risks the link the
@@ -244,6 +263,7 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 	// regardless of device state, before the per-state switch below.
 	const uint16_t t_comm = Diag::Now();
 	comm_.Process(device_state_);
+	KickSerialTx();   // what the transfer queued this cycle goes out now, not next cycle
 #if SP_LOSS_INJECT
 	// Say so when a forced miss actually fires (#20).  Arming printed and firing
 	// did not, so a bench run could not tell a dropped config change from one that
@@ -275,7 +295,9 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 		// switch: DeviceState::Test fires charges for the remote deployment test
 		// (FR-A7) and Config/Metadata/Data leave the line as they found it, so a
 		// blanket disable here would break the deployment test outright.
-		if (device_state_ == DeviceState::Armed)
+		// A simulated flight never shares a cycle with a live pyro bus
+		// (ADR-0041): the arm edge above ends it, and this is the second lock.
+		if (device_state_ == DeviceState::Armed && !navigation_.simFlightActive())
 			EnableDeployment();
 		else
 			DisableDeployment();
@@ -389,6 +411,7 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 		}
 #endif
 		Diag::begin(Diag::Seg::NavUpdate);
+		navigation_.SetServiceCount(rocket_service_count);
 		navigation_.Update();
 		Diag::end(Diag::Seg::NavUpdate);
 
@@ -558,6 +581,7 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			flight_.SetPpsStatus(pps);
 		}
 		flight_.SetArmed(device_state_ == DeviceState::Armed);
+		ServiceSimFlight(flight_state);
 		Diag::begin(Diag::Seg::FlightState);
 		flight_.UpdateFlightState();
 		Diag::end(Diag::Seg::FlightState);
@@ -601,10 +625,10 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			pad_reset_pending_ = false;
 		}
 		switch (rocket_service_count) {
-		case 0:
+		case kSlotDividerOn:
 			// Allow time for the divider voltage to settle before the read at
-			// count 2.  Gated on WaitingLaunch because the battery only ever
-			// reaches the wire in PreLaunchData, and that message stops the
+			// the telemetry slot (kSlotTelemetry, 100 ms on).  Gated on
+			// WaitingLaunch because the battery only ever reaches the wire in PreLaunchData, and that message stops the
 			// moment the rocket leaves the pad — so past this point the switch
 			// was being re-enabled every second and read by nobody, burning
 			// ~120 uA through R9+R11 for the whole flight AND the whole
@@ -613,16 +637,18 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			//
 			// Deliberately NOT gated on arm state as well, even though only a
 			// disarmed locator sends PreLaunchData: disarming between count 0
-			// and count 2 would then read an unpowered divider and report a
+			// and the telemetry slot would then read an unpowered divider and report a
 			// flat battery for one second.  Arming is a pad-side transition, so
 			// the extra 150 ms/s of divider current while armed on the pad is
 			// bounded, and it buys a gauge that never blinks empty on disarm.
 			if (flight_state == FlightStates::WaitingLaunch)
 				power_.enableDivider();
 			break;
-		case 2: {
+		case kSlotTelemetry: {
 			if (flight_state == FlightStates::WaitingLaunch) {
+				Diag::begin(Diag::Seg::PadCal);
 				navigation_.CalibrateOnPadAndZeroAglUntilLaunch(flight_state);
+				Diag::end(Diag::Seg::PadCal);
 			}
 			// PreLaunchData is the ON-PAD message; TelemetryData is the in-flight
 			// one.  Arm state no longer decides this (#35 put it on the wire as its
@@ -657,9 +683,9 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			// device states, and left EN1/EN2 asserted).
 			break;
 		}
-		case 3:
+		case kSlotDividerOff:
 			// Unconditional teardown backstop.  readBatteryMillivolts() already
-			// drops BATTRD at count 2, but only on the path that actually reads
+			// drops BATTRD at the telemetry slot, but only on the path that actually reads
 			// it — and the count-0 gate above is evaluated two cycles earlier,
 			// so a launch detected in between leaves the switch on with nothing
 			// scheduled to turn it off.  Making the teardown independent of both
@@ -667,8 +693,15 @@ void Factory::ProcessRocketEvents(uint8_t rocket_service_count) {
 			// Suppressed while the 'h' bench hold is active (see disableDivider).
 			power_.disableDivider();
 			break;
-		case 5:
-			RgbLed(RgbColor::Off);
+		case kSlotLedOff:
+			// A brief yellow flash once a second while any sensor is down (ADR-0038),
+			// so a degraded locator can be told from a healthy one without a phone or
+			// a cable.  Yellow because red is the deployment test's countdown.
+			RgbLed(navigation_.failedSensors() != 0u ? RgbColor::Yellow : RgbColor::Off);
+			break;
+		case kSlotFaultLedOff:
+			if (navigation_.failedSensors() != 0u)
+				RgbLed(RgbColor::Off);
 			break;
 		}
 		break;
@@ -763,6 +796,14 @@ void Factory::ServiceConsole() {
     while (uart2_rx_tail_ != uart2_rx_head_) {
         const uint8_t c = uart2_rx_buf_[uart2_rx_tail_];
         uart2_rx_tail_ = (uart2_rx_tail_ + 1u) & (kUart2RxBufSize - 1u);
+        // The app's binary mode takes the byte ahead of the menu AND of the baud
+        // detector: frame bytes are not console input, and fed to the detector
+        // they would read as a mismatched link.  The hello is not ASCII, so no
+        // terminal produces it, and an open menu keeps the keyboard.
+        if (binary_mode_ || (c == SerialLink::kHello && config_.IsConsoleIdle())) {
+            HandleBinaryByte(c);
+            continue;
+        }
         HandleConsoleChar(c);
         // Checked INSIDE the loop, not after it.  When a measurement is adopted
         // mid-drain, every byte still queued was sampled at the old rate and is
@@ -775,6 +816,86 @@ void Factory::ServiceConsole() {
             break;
         }
     }
+    ServiceBinaryMode();
+}
+
+// ---- Binary mode: the full-record transfer over the USB cable ---------------
+
+namespace {
+// The UART TX DMA, driven directly rather than through HAL_UART_Transmit_DMA.
+// The USART2 handler's LL block clears TC ahead of HAL_UART_IRQHandler, so the
+// HAL's own DMA transmit would never see its end and would leave the handle
+// BUSY_TX for good, and the HAL's TxCplt callback belongs to the ST trace
+// utility.  So the DMA is started on its own, and the handle is marked BUSY_TX
+// while it runs: every blocking console write in the firmware then returns
+// HAL_BUSY instead of writing TDR in the middle of a frame.
+SerialLink::TxQueue* s_tx_queue = nullptr;
+UART_HandleTypeDef*  s_tx_uart = nullptr;
+
+void SerialTxDone(DMA_HandleTypeDef*) {
+    CLEAR_BIT(s_tx_uart->Instance->CR3, USART_CR3_DMAT);
+    s_tx_uart->gState = HAL_UART_STATE_READY;
+    s_tx_queue->OnTxDone();
+}
+}  // namespace
+
+void Factory::KickSerialTx() {
+    if (!binary_mode_ || serial_tx_.busy() || huart2_.gState != HAL_UART_STATE_READY)
+        return;
+    const uint8_t* p = nullptr;
+    uint16_t n = 0;
+    if (!serial_tx_.TakeNext(p, n))
+        return;
+    DMA_HandleTypeDef* dma = huart2_.hdmatx;
+    s_tx_queue = &serial_tx_;
+    s_tx_uart = &huart2_;
+    dma->XferCpltCallback = SerialTxDone;
+    dma->XferErrorCallback = SerialTxDone;   // a DMA error drops the buffer; the app repeats
+    dma->XferHalfCpltCallback = nullptr;
+    dma->XferAbortCallback = nullptr;
+    huart2_.gState = HAL_UART_STATE_BUSY_TX;
+    __HAL_UART_CLEAR_FLAG(&huart2_, UART_CLEAR_TCF);
+    SET_BIT(huart2_.Instance->CR3, USART_CR3_DMAT);
+    if (HAL_DMA_Start_IT(dma, reinterpret_cast<uint32_t>(p), reinterpret_cast<uint32_t>(&huart2_.Instance->TDR), n)
+            != HAL_OK) {
+        CLEAR_BIT(huart2_.Instance->CR3, USART_CR3_DMAT);
+        huart2_.gState = HAL_UART_STATE_READY;
+        serial_tx_.OnTxDone();
+    }
+}
+
+void Factory::HandleBinaryByte(uint8_t b) {
+    switch (serial_parser_.Feed(b)) {
+    case SerialLink::Parser::Event::Hello:
+        binary_last_ms_ = HAL_GetTick();
+        if (!binary_mode_) {
+            binary_mode_ = true;
+            comm_.SetSerialPort(&serial_tx_);
+        }
+        // Answered with the periodic frame, so the app finds the console rate in
+        // one hello per rate rather than waiting out a transfer cycle (which can
+        // hold the 1 Hz beacon for ~5 s), and has the locator's id at once.
+        comm_.SendPeriodicToSerial();
+        break;
+    case SerialLink::Parser::Event::Frame:
+        binary_last_ms_ = HAL_GetTick();
+        comm_.OnSerialFrame(serial_parser_.frame(), serial_parser_.length());
+        break;
+    default:
+        break;
+    }
+}
+
+// From ServiceConsole, every cycle.  The cable coming out is only ever a
+// silence, so the timeout is the whole of the exit path.
+void Factory::ServiceBinaryMode() {
+    if (binary_mode_ && HAL_GetTick() - binary_last_ms_ > SerialLink::kHoldMs) {
+        binary_mode_ = false;
+        comm_.SetSerialPort(nullptr);    // a running transfer waits for the app on the radio
+        serial_tx_.Clear();              // a buffer already on the wire finishes on its own
+        serial_parser_ = SerialLink::Parser();
+    }
+    KickSerialTx();
 }
 
 void Factory::ServiceConsoleBaud() {
@@ -967,6 +1088,20 @@ void Factory::HandleConsoleChar(uint8_t uart_char) {
     // ServiceDeployTrace for why the shared rule cannot apply to this one.
     // 'p' rather than 'd': root letters are matched ahead of the command-word
     // buffer, so 'd' would eat the 'd' in "data" and "dfu".
+    // Sensor status (ADR-0038).  Not disarm-gated: it is one short line, it
+    // touches no sensor, and the operator most likely to want it is the one whose
+    // arm was just refused.  's' is free of the command words' letters.
+    else if (config_.IsConsoleIdle() && (uart_char == 's' || uart_char == 'S')) {
+        PrintSensorStatus();
+    }
+    // Loop timing (2026-11-04): the data menu's 't' report, from the root.
+    // Opening the data menu puts the locator in Config, where navigation,
+    // telemetry and flight logic stop, so a window measured through the menu
+    // measured nothing, and the menu's own printing landed in Console and
+    // ProcTotal.  'l' is in none of the command words; 't' is in "data".
+    else if (config_.IsConsoleIdle() && (uart_char == 'l' || uart_char == 'L')) {
+        config_.DisplayCycleProfile();
+    }
     else if (config_.IsConsoleIdle() && (uart_char == 'p' || uart_char == 'P')) {
         deploy_trace_ = !deploy_trace_;
         if (deploy_trace_) {
@@ -1279,14 +1414,16 @@ void Factory::PrintConsoleHelp() {
 			 "  data     flight data menu\r\n");
 	UartSend("  dfu      firmware update mode\r\n");
 
-	// '?' and 'p' are the two root keys that answer while armed, and they are
+	// '?', 'p', 's' and 'l' are the root keys that answer while armed, and they are
 	// grouped under their own heading rather than footnoted: an operator who has
 	// just been refused by one of the four below needs to know the refusal was
 	// the arm state and not a dead console.  Keeping them out of the block below
 	// is also what lets its DISARMED heading stay true without exceptions.
 	UartSend("\r\nKeys (no menu open, armed or disarmed):\r\n"
 			 "  ?        this list\r\n"
-			 "  p        deployment pin trace (DARM + channels, on change)\r\n");
+			 "  p        deployment pin trace (DARM + channels, on change)\r\n"
+			 "  s        sensor status (what a failed sensor disables)\r\n"
+			 "  l        loop timing per segment (last / max since the last 'l')\r\n");
 
 	// The diagnostics carry one shared rule instead of four per-line carve-outs.
 	// Naming the requirement in the heading is what makes a refusal legible: the
@@ -1367,6 +1504,73 @@ const char* AxisName(NoseAxis a) {
 	}
 }
 }  // namespace
+
+static const char* SensorHealthText(SensorHealth h) {
+	if (SensorFaults::Failed(h)) return "FAILED";
+	switch (h) {
+	case SensorHealth::Ok:      return "ok";
+	case SensorHealth::Warning: return "warning";
+	case SensorHealth::Stale:   return "no fresh fix";
+	default:                    return "?";
+	}
+}
+
+void Factory::PrintSensorStatus() {
+	const SensorHealth imu  = navigation_.imuStatus().health;
+	const SensorHealth baro = navigation_.baroStatus().health;
+	const SensorHealth gps  = navigation_.gpsStatus().health;
+	char b[160];
+	snprintf(b, sizeof(b), "\r\nDIAG|SENSORS: IMU %s, barometer %s, GPS %s\r\n",
+			SensorHealthText(imu), SensorHealthText(baro), SensorHealthText(gps));
+	UartSend(b);
+	// What the GPS receiver has put on the bus since boot (2026-11-03): press
+	// 's' twice some seconds apart and the differences are rates.  At 10 Hz a
+	// healthy receiver adds ~10 NAV-PVT and ~1,000 bytes a second.
+	{
+		const auto& c = navigation_.gpsCounters();
+		const uint32_t age = navigation_.gpsLastPvtAgeMs();
+		char g[240];
+		snprintf(g, sizeof(g),
+				"DIAG|GPS: t %lu ms, polls %lu, i2c fail %lu, bytes %lu (full %lu, fifo %u), "
+				"idle/ubx/nmea/other %lu/%lu/%lu/%lu\r\n",
+				(unsigned long)HAL_GetTick(), (unsigned long)c.polls, (unsigned long)c.i2c_fail,
+				(unsigned long)c.bytes, (unsigned long)c.chunks_full, (unsigned)c.last_available,
+				(unsigned long)c.idle, (unsigned long)c.ubx, (unsigned long)c.nmea, (unsigned long)c.unknown);
+		UartSend(g);
+		snprintf(g, sizeof(g),
+				"DIAG|GPS: nav-pvt %lu, other ubx %lu, bad ck %lu, oversize %lu, dropped %lu, "
+				"last pvt %ld ms ago, recoveries %lu, dynmodel %u\r\n",
+				(unsigned long)c.nav_pvt, (unsigned long)c.other_ubx, (unsigned long)c.bad_checksum,
+				(unsigned long)c.oversize, (unsigned long)c.dropped,
+				age == 0xFFFFFFFFu ? -1L : (long)age,
+				(unsigned long)navigation_.gpsRecoveryAttempts(), (unsigned)navigation_.gpsDynModel());
+		UartSend(g);
+		static const char* const kBootText[] = {
+			"not run", "no device", "build failed", "send failed", "ACK", "NAK", "timeout" };
+		const auto& r = navigation_.gpsBootReport();
+		const unsigned ri = static_cast<unsigned>(r.result);
+		snprintf(g, sizeof(g),
+				"DIAG|GPS: boot config %s after %u init(s), %u bytes and %u bus errors while waiting\r\n",
+				ri < sizeof(kBootText) / sizeof(kBootText[0]) ? kBootText[ri] : "?",
+				(unsigned)r.inits, (unsigned)r.ack_wait_bytes, (unsigned)r.ack_wait_bus_errors);
+		UartSend(g);
+	}
+	const uint8_t failed = navigation_.failedSensors();
+	if (failed == 0u)
+		return;
+	// What each loss costs, in the order an operator asks about it.  The list is
+	// the ADR-0038 table; keep the two in step.
+	if (failed & SensorFaults::kImu)
+		UartSend("DIAG|SENSORS:   no IMU - no launch detection, so no flight is recorded\r\n");
+	if (failed & SensorFaults::kBaro)
+		UartSend("DIAG|SENSORS:   no barometer - no altitude, apogee or landing detection\r\n");
+	if (failed & SensorFaults::kGps)
+		UartSend("DIAG|SENSORS:   no GPS - no position for recovery\r\n");
+	UartSend(navigation_.armingAllowed()
+			? "DIAG|SENSORS:   arming still allowed\r\n"
+			: "DIAG|SENSORS:   ARMING DISABLED - needs the IMU and the barometer\r\n");
+	UartSend("DIAG|SENSORS:   stored flights, 'data' export and the app download still work\r\n");
+}
 
 void Factory::PrintMountingDiag() {
 	char line[160];
@@ -1518,7 +1722,7 @@ void Factory::PrintBatteryDiag() {
 	}
 
 	// The offset production actually gets between enableDivider() at service
-	// count 0 and the read at count 2, and the threshold the app's gauge uses.
+	// slot 0 and the read at kSlotTelemetry (100 ms), and the threshold the app's gauge uses.
 	// Both are stated so the operator can compare the last row against what the
 	// app will show without going and looking either of them up.
 	UartSend("DIAG|BATT: production samples at t=100000 us; app gauge is empty below 3750 mV\r\n");
@@ -1538,4 +1742,131 @@ void Factory::ServiceBus() {
 
 void Factory::UartSend(const char *msg) {
 	HAL_UART_Transmit(&huart2_, reinterpret_cast<const uint8_t*>(msg), static_cast<uint16_t>(strlen(msg)), 100);
+}
+
+// ============================================================================
+// App-started simulated flight (ADR "An app-started simulated flight computed
+// on the locator", 0041)
+// ============================================================================
+
+void Factory::EndSimFlight() {
+	navigation_.stopSimFlight();
+	if (flight_.GetFlightState() >= FlightStates::Launched)
+		flight_.ForceLand();
+}
+
+// The wire's fixed-point fields to the generator's units.  Range checks are
+// SimFlight::Valid's, in Navigation::startSimFlight, so a bad field anywhere
+// rejects the whole request (ADR-0034's rule for settings).
+static void ProfileFromWire(const Communication::SimFlightStart& w, SimFlight::Profile& p) {
+	p.n_points = w.n_points <= SimFlight::kMaxCurvePoints ? w.n_points : 0u;   // 0 fails Valid
+	for (uint8_t i = 0; i < p.n_points; ++i) {
+		p.t_s[i] = static_cast<float>(w.t_ms[i]) * 0.001f;
+		p.f_n[i] = w.peak_thrust_n * (static_cast<float>(w.thrust_frac[i]) * (1.0f / 65535.0f));
+	}
+	p.motor_loaded_kg = w.motor_loaded_kg;
+	p.motor_prop_kg   = w.motor_prop_kg;
+	p.dry_mass_kg     = w.dry_mass_kg;
+	p.ref_diam_m      = w.ref_diameter_m;
+	p.length_m        = static_cast<float>(w.length_mm) * 0.001f;
+	p.stability_cal   = static_cast<float>(w.stability_dcal) * 0.1f;
+	for (uint8_t i = 0; i < SimFlight::kMachPoints; ++i)
+		p.cd[i] = static_cast<float>(w.cd_milli[i]) * 0.001f;
+	p.rail_len_m      = static_cast<float>(w.rail_len_cm) * 0.01f;
+	p.rail_angle_deg  = static_cast<float>(w.rail_angle_ddeg) * 0.1f;
+	p.launch_az_deg   = static_cast<float>(w.launch_az_deg);
+	p.temp_from_baro  = (w.temp_c == Communication::kSimTempFromBaro);
+	p.temp_c          = p.temp_from_baro ? 15.0f : static_cast<float>(w.temp_c);
+	p.wind_mps        = static_cast<float>(w.wind_mps);
+	p.wind_from_deg   = static_cast<float>(w.wind_from_deg);
+	p.drogue_mps      = static_cast<float>(w.drogue_mps);
+	p.main_mps        = static_cast<float>(w.main_dmps) * 0.1f;
+	p.seed            = w.seed;
+}
+
+void Factory::ServiceSimFlight(FlightStates& flight_state) {
+	ServiceSimFlightStage(flight_state);
+	comm_.SetSimSession(sim_stage_ != SimStage::Off);
+}
+
+void Factory::ServiceSimFlightStage(FlightStates& flight_state) {
+	Communication::SimFlightRequest req {};
+	if (comm_.TakeSimFlightRequest(req)) {
+		if (req.action == Communication::kSimFlightCancel) {
+			// Never refused, like the deployment-test cancel.
+			if (sim_stage_ == SimStage::Flying) {
+				EndSimFlight();
+				sim_stage_ = flight_.GetFlightState() == FlightStates::Landed ? SimStage::Closing : SimStage::Off;
+			}
+		}
+		// action 1 was the retired quick-mode start: ignored (ADR-0041 amendment).
+	}
+	Communication::SimFlightStart start {};
+	if (comm_.TakeSimFlightStart(start)
+			&& sim_stage_ == SimStage::Off
+			&& device_state_ == DeviceState::Disarmed
+			&& flight_state == FlightStates::WaitingLaunch
+			&& !pad_reset_pending_
+			&& archive_.IsActiveOpen()) {
+		SimFlight::Profile p;
+		ProfileFromWire(start, p);
+		if (navigation_.startSimFlight(p, start.origin_lat_1e7, start.origin_lon_1e7)) {
+			sim_stage_  = SimStage::Flying;
+			sim_marked_ = false;
+			UartSend("\r\nSIM|started\r\n");
+		}
+	}
+
+	switch (sim_stage_) {
+	case SimStage::Off:
+		return;
+	case SimStage::Flying: {
+		// Navigation can stop it on its own (an arm's mounting calibration).
+		if (!navigation_.simFlightActive()) {
+			EndSimFlight();
+			sim_stage_ = flight_.GetFlightState() == FlightStates::Landed ? SimStage::Closing : SimStage::Off;
+			return;
+		}
+		// The canopies open when this locator's charges would have deployed
+		// them, by each channel's configured mode.
+		const RocketPersistentSettings& cfg = archive_.GetLocatorSettings();
+		const uint8_t stats[4] = { flight_.GetDeploymentStats(1), flight_.GetDeploymentStats(2),
+		                           flight_.GetDeploymentStats(3), flight_.GetDeploymentStats(4) };
+		const DeployMode modes[4] = { cfg.deployment_ch1_mode, cfg.deployment_ch2_mode,
+		                              cfg.deployment_ch3_mode, cfg.deployment_ch4_mode };
+		navigation_.setSimCanopy(SimFlight::CanopyFromCharges(stats, modes, bit_shift_fired));
+		// Mark the record once it has launched: only a simulated record writes
+		// this slot, and a full archive overwrites such a record first.
+		if (!sim_marked_ && flight_state >= FlightStates::Launched) {
+			archive_.WriteEvent(FlightArchive::Statistic::PhysicalDeploymentStats, FlightArchive::kRecordSimulatedBit);
+			sim_marked_ = true;
+		}
+		if (flight_state == FlightStates::Landed) {
+			// Landed: the real sensors take over, still and on the bench, and the
+			// Landed path in ProcessRocketEvents closes the record as usual.
+			navigation_.stopSimFlight();
+			sim_stage_ = SimStage::Closing;
+		}
+		return;
+	}
+	case SimStage::Closing:
+		if (!archive_.IsActiveOpen()) {
+			sim_stage_ = SimStage::LandedHold;
+			sim_landed_since_ms_ = HAL_GetTick();
+		}
+		return;
+	case SimStage::LandedHold:
+		if (HAL_GetTick() - sim_landed_since_ms_ >= kSimLandedHoldMs) {
+			// Back to the pad, with a fresh record open for the next flight,
+			// real or simulated.  Nothing was lost, so the recovery beacon stops.
+			flight_.PrepareForArm();
+			flight_state = flight_.GetFlightState();
+			landed_beacon_ = false;
+			datestamp_saved_ = false;
+			archive_.StartOpenNewFlight();
+			sim_stage_ = SimStage::Off;
+			UartSend("\r\nSIM|back on the pad\r\n");
+		}
+		return;
+	}
 }

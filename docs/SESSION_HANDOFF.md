@@ -2,6 +2,204 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-11-04 (download) — the full-record download stall: the ACK collided with the locator's VersionInfo. **Confirmed on the bench**
+
+- Logging (app c8b8d07) showed the app receiving the same window every cycle (`new 0 dup 10`) and sending an ACK each time, while the locator never advanced. Requests got through (they resumed it after a suspend); ACKs didn't.
+- Likely cause: during a transfer the periodic frame comes every ~5.4 s, so the app's version poll (link "up" = a frame within 5 s) saw a drop and return almost every cycle and sent a VersionRequest. The receiver sent it, then the ACK 100 ms after its TxDone, which is on top of the locator's 64-byte VersionInfo reply (~130 ms at SF7). The lost reply kept the version stale, so it repeated.
+- Fixes: receiver 97c3f42 (the transfer frame waits 300 ms after a forwarded command); app f973ffe (full-record packets count as link activity for the poll). ADR-0040 amended.
+- Confirmed on the bench 2026-11-04 (Frank): with receiver 97c3f42 and app f973ffe, a record downloads in under 3 minutes (was ~18 with multi-minute stalls).
+
+## 2026-11-04 (GPS) — corrupted NAV-PVT after ed1467d; back to the fixed 128-byte read. Linked at -O2, NOT on hardware
+
+- **Symptom:** rocket green/gray. Over 338 s: 65 good NAV-PVT, 1,357 bad checksums, 840 B/s read; the one-byte stream read after a count of 0 returned non-filler 784 of ~860 times.
+- **Likely cause:** after the 0xFD/0xFE count read the receiver's pointer stays on 0xFE, so each stream read began with a count byte and every message split across two reads failed. Not proven; the fix doesn't depend on it.
+- **Fix:** readFifo is the pre-#22 read again (point at 0xFF, read 128 every poll). The parser now steps one byte after a bad checksum or an impossible length, instead of skipping the claimed length or stalling.
+- **Confirmed on the bench 2026-11-04:** nav-pvt ~10/s, bad ck 0, boot ACK on the first init; `t` GpsRead 4.2 ms. Open: `dropped 36007` once early in that boot, not growing; worst-case `t` maxima still to read.
+- **Loop timing (`t`, clean window, pad, 2026-11-04):** NavUpdate max 18.7-19.6 ms of 20; the GPS read (4.4 ms) and the EKF GPS update (EKF max 10.7 ms) shared every 5th cycle. The EKF now fuses each fix one cycle after the read (+20 ms age, ~3.6 m at 180 m/s). The profiler print no longer lands in its own maxima (4af75b0); Console still showed a 14.6 ms max from typing. Re-measure, including a sim through boost. NOT on hardware.
+- **Loop bar (Frank, 2026-11-04): worst case under 20 ms before flight.** Clean `l` windows at 8440215: ProcTotal max 23.6 ms pad / 22.1 ms sim. d785e43 phase-locks the GPS read away from the telemetry slot and times PadCal + overruns. Then the GPS read became interrupt-driven: `startRead()` on phase 2 queues it (I2C2 EV/ER IRQs, priority 3, handlers in a USER CODE block of `stm32wlxx_it.c`), `finishRead()` parses on phase 3, the EKF fuses on phase 4. The magnetometer is skipped while the read holds I2C2. Boot still uses the blocking read. **Confirmed on the bench 2026-11-04 (b91328a):** nav-pvt ~10/s, i2c fail 0, bad ck 0, dropped 0; GpsRead 0.23-0.8 ms; ProcTotal max 16.9 ms pad / 16.7 ms sim, overruns 0 of 1,442 and 0 of 5,861 cycles. Meets the <20 ms bar. The rest of ADR-0035's -O2 bench list is still owed.
+- **Follow-up:** each poll now takes every complete NAV-PVT and keeps the newest. Taking one per poll let a backlog build (poll 9.77 Hz vs 10 Hz output; nav-pvt equaled polls exactly), so a fix could be ~0.7 s old but stamped as new. NOT on hardware.
+
+## 2026-11-03 (GPS) — the receiver going silent after boot. Host-tested and linked at -O2, NOT on hardware
+
+- **Symptom:** PPS blinking, app at 0 satellites, console `GPS no fresh fix`. `DIAG|GPS` showed 499 polls, 0 I2C failures, 0 bytes, FIFO count 0 on every poll. Intermittent across power cycles; a simulated flight brought it back.
+- **Leading cause:** the length-aware read (#22, 7f58202, 2026-11-01) reads only the 0xFD/0xFE count when nothing is waiting. The receiver stops its I2C stream after 1.5 s unread (integration manual 3.2.2.2) and only addressing the stream restarts it, so a boot gap over 1.5 s could leave it stopped for good. The in-flight recovery VALSET and the dynamic-model writes are the only writes, which is why a sim flight revived it. **Fix:** a 1-byte stream read when the count is 0, as the old fixed read did every poll.
+- **Also fixed:** the boot VALSET was two messages, the first with NMEA and NAV-PVT both off; a missed ACK on it left a receiver that says nothing. Now one VALSET (applied whole or not at all), and a failed read no longer ends the ACK wait.
+- **To confirm on hardware:** press `s` after several power cycles. The new third `DIAG|GPS` line gives the boot config result (ACK/NAK/timeout), init count, bytes seen while waiting, and `stream probe data` (bytes the 1-byte read caught that the count missed). Not tried: CFG-I2C-EXTENDEDTIMEOUT, which would let a 4 KB backlog build up behind a slow host.
+
+## 2026-11-03 (first simulated flight) — four fixes from Frank's first run. Host-tested, Android NOT compiled
+
+Frank flew the Tron in 10 m/s of wind (H128W, 7.5° rail). Everything below came out of that run.
+- **Gyro sampling (`e946c8f`).** `SimFlight::GyroBody()` returned only the last 10 ms step's rate, while the strapdown reads it once per 20 ms loop. The attitude drifted 28° on that flight; it now returns the average since the last read (0.04°). Test A4.
+- **Simulated bit through the landed hold (`0eef32a`).** The bit is now session-based, so the app does not start a full-record transfer for a simulated landing. The app also stops calling a radio transfer a lost locator, and serves cached Flight Profiles metadata during one (Android `fbf14fc`).
+- **Callouts (Android `ce5d1ce`; ADR-0041 amended).** "Drogue during ascent" was the voice running 4–5 s behind; the panel was right. "Simulated." is now said once and at landing, and stale altitude callouts are dropped on every flight.
+- **Still open:** GPS went stale after the simulated landing (no NAV-PVT for more than 5 s; suspect the dynamic-model change at Landed), needs a bench look. The map's 1 s marks after an unreset trace waits on Frank.
+- **Weathercocking (Frank chose "add stability margin and length").** The instant zero-AoA turn is replaced by a damped restoring moment: normal force q·A·CNα·sin α at the margin's arm, rod inertia m·L²/12, aerodynamic and jet damping, CNα fixed at 15. SimFlightStart grows to 199 B (`length_mm` at 196, `stability_dcal` at 198) in the locator, receiver and app in the same session. The Tron in 2 m/s gives 639.9 m against OpenRocket's 641.0 (it was 634.5). SimFlight 98/0. A rocket saved before this loads with 1,000 mm and 2.0 cal, so Frank's saved rockets need their real values typed in.
+
+## 2026-11-03 (build) — the flight build is Release at -O2; ADR-0035 amended. Not on hardware
+
+**Frank flashes Release.** ADR-0035 said Debug was the flight build, and it was wrong. Release at -O3 overflowed flash by 208 B after the physics simulated flight.
+- `77b6853`: `UserInteraction::ToStr` now formats numbers without `log10`/`pow`. It also fixes a leak: it used to `new[]` on every menu line and never free it. That alone leaves Release at -O3 with 1,104 B free, on Frank's GCC 14.3.1.
+- Frank then chose Release at **-O2** (the commit after this note): 192,192 B text in the cloud link, against 261,776 at -O3.
+- **Before the -O2 build flies:** rerun ADR-0035's bench list, and read the CycleProfiler worst case at 50 Hz.
+- **Still open, both optional now:** float-math cleanup in InsEkf15/WGS84 (about 3–5 KB). Trimming console features, which needs Frank's word on what he still uses.
+
+## 2026-11-03 (feature) — the simulated flight is computed from the rocket, ADR-0041 amendment. Host-tested, Android NOT compiled, nothing on hardware
+
+Frank replaced quick mode with physics. The app describes the rocket in one SimFlightStart (MsgType 31, 196 B): up to 32 thrust points, motor loaded and propellant mass, dry mass, diameter, Cd on the Mach grid {0, 0.3, 0.5, 0.7, 0.85, 1.0, 1.2, 1.5}, rail length and angle, launch direction, temperature, wind, drogue and main rates. SimFlightRequest (30) is cancel-only. The locator integrates at 10 ms (Heun), with the rail constraint and zero-angle-of-attack weathercocking in 3-D, and reports the attitude change through the gyro exactly.
+
+- **Commits:** locator `72a022f` (model, message, tests), `ddcea29` (`temp_c` = −128 means use the MS5611's temperature; Frank asked for the baro temperature, and no message carried it), `3f7e7dc` (A9 against OpenRocket). Receiver `2441f6f`: MsgType 31 and the app-message buffer raised from 64 to 249 B, which would otherwise drop the 196 B start. The receiver's RAM is unmeasured. Android `d291019`; iOS owed rows `840386e`.
+- **Cost on the locator:** 189,048 B text and 40,972 B static RAM, about +7 KB flash and +0.8 KB RAM. Soft float, since the M4 here has no FPU. The per-step cost on the MCU has not been measured.
+- **Verified on the host:** within 0.1% of an independent RK4 reference on three synthetic rockets. Against OpenRocket on Frank's *Scratch Built Tron Short 2.6* .ork (Cesaroni 164H90-12A): 641.8 m calm, against OpenRocket's 641.0 m in 2 m/s of wind. In that wind the generator gives 634.5 m, because zero-AoA turns harder than a damped restoring moment. SimFlight 85/0. The wire bytes are checked against a host build of the C++ struct.
+- **Android:** `data/simflight/` (motor files, thinning, Cd fit, canopy calculator, stores, the thrustcurve.org client, `DefaultRocket` from the Tron .ork) and the screen are rewritten. The pure Kotlin passes 15/15 under kotlinc. **The screen, store and API client have never been compiled.** The thrustcurve.org client was written from the published API and never run, because this container gets a 403 from the site. First on the Pixel: build, open the screen, search "H90", start.
+- **Traps:**
+  - OpenRocket's CSV rounds the reference area to 0.004 m², which puts apogee 6% low. The fitter uses only Mach and Cd, and the diameter comes from the rocket.
+  - The .ork's chute opens on motor ejection, but the simulation opens canopies only on locator charges. The default therefore sets both rates to that chute's 7 m/s.
+
+## 2026-11-02 (feature) — app-started simulated flight, ADR "An app-started simulated flight computed on the locator" (0041). Host-tested, Android NOT compiled, nothing on hardware
+
+✅ **What changed:**
+- **Locator** (`f7f8baf`): `SimFlight.hpp` is a pure generator (10 ms integer steps, thrust solved by bisection through the same `AscentStep` the flight uses, so the solved apogee is the flown one). The driver hooks are `MS5611::setPressureOverride`, `ISM6HG256X::injectSample` (mapped back through the inverse mounting frame) and `SAMM10Q::injectSample`. Canopies follow **fired charges by channel mode** (`CanopyFromCharges`), not flight state. `Factory` runs the lifecycle (Flying → Closing → 10 s LandedHold → pad), ends it on any arm edge **before** the arm, and adds the second pyro lock. The archive overwrites the oldest simulated record first. Cost from a full link: +192 B RAM, +4.5 KB flash.
+- **Receiver** (`1ba84cf`): MsgType 30 in the length table, the struct copy and the bits; `check-wire-format` 27/0.
+- **Android** (`c1d1333`, `--no-verify`, not compiled): `SimFlightWire`, the Simulated Flight screen (drawer, heard and disarmed), the banner, the "Simulated." callout prefix, the chart label.
+- **iOS** (`3ae6dd3`): rows 3 and 4 on the "iOS OWES THIS" list.
+- **Tests:** `Tests/SimFlight` 88/0 flies profiles through the real `FlightManager`; ArchiveRoundTrip Test 6 (evict-simulated-first); Android `SimFlightWireTest` 5/5 under kotlinc against a hex vector from the C++ struct.
+- **Not done:** an Android build; a bench run. Measure the bisection's start cost on the MCU (ADR budget under 20 ms, unmeasured).
+- **Traps:**
+  - The state machine reaches its drogue event even with no channel set to drogue, so **never drive canopies from flight state**; that is what `CanopyFromCharges` is for.
+  - The gyro FIFO is skipped while a simulation runs and flushed when it stops; the EKF and strapdown are re-seeded through `FinishMountingCommit()` on the first simulated sample.
+  - The USB export is deliberately unmarked: the app's full-record CSV must stay byte-identical to it. Only the console flight list says "simulated".
+
+## 2026-11-02 (RAM) — quick-look parity accumulators cut to a ring of 4, 14.1 KB back. Host-tested, nothing on hardware
+
+✅ **What changed:** `Communication::parity_acc_` was one 241-byte accumulator per possible parity group (64, 15.4 KB). The 8-packet window only ever touches 3 groups, so it is now `ParityRing` (new, header-only, 976 B): group g lives in slot g % 4, and a group whose slot is claimed is at least 4 groups behind, so it is wholly acknowledged and its parity is dropped. A `static_assert` ties that to `kWindowSize` and `kParityGroupSize`. Otherwise the behavior is the same: the same XOR, lowest pending group first, and a retransmit still clears its group.
+- **RAM, full link at -Og:** reserved 39.0 KiB of 64 (was 53.2), so 25.0 KiB is free; `Factory` is 31.6 KiB (was 45.7).
+- **Tests:** new `Tests/ParityRing` 3,974/0. It flies 200 lossy windowed transfers through the old 64-entry array and the ring side by side. Every group the window touches agrees at every step, each parity the ring does not send is for a wholly acknowledged group, and each transfer completes intact with parity recovery.
+- **One visible difference:** the old array also sent parity for groups already wholly acknowledged, when it had fallen behind the window. The ring skips those. They repaired nothing, so the radio simply has less to send.
+
+## 2026-11-02 (feature) — full-record transfer over the USB cable, step 3 of ADR "The radio download becomes the primary data path" (0040, decision 6c). Android NOT compiled, nothing on hardware
+
+✅ **What changed:**
+- **One transfer, two paths.** The cable carries the radio's own frames, byte for byte. `FullRecordSender` answers on the path the app last spoke on, so a record moves between radio and cable mid-page. On the cable a cycle sweeps the whole page with no parity, 4 packets per loop cycle, then the periodic frame and a 300 ms listen. The radio beacon is left alone meanwhile.
+- **Locator:**
+  - `SerialLink.hpp` (new, header-only): the frame parser for binary mode and the two 1 KB TX buffers.
+  - `Factory`: binary mode is entered by the hello byte 0xA5 at an idle console and left 3 s after the last hello or frame. Each hello is answered with the periodic frame. The UART TX DMA is driven directly (see Traps).
+  - `Communication`: the serial port, the cable's frames (checked like radio frames, address included), and the periodic frame copied to the cable.
+- **Android** (`rocket-flight-manager` `725e74f`; iOS `0d0be34` records it as Android-only for good):
+  - `UsbLocatorLink` opens the CH340 (`usb-serial-for-android`), asks for the USB permission, sends the hello once a second, and tries the console rates from 921,600 down until the locator answers.
+  - `FullRecordHub` routes requests and ACKs down the cable while it is up, and lets the cable's periodic frames pace the transfer.
+  - `SerialFrames.kt` is the cable's framer. Its frames lack the receiver's appended metadata, so the BLE framer cannot read them.
+  - Plugging in is a trigger (`Trigger.Cable`): no landing needed, still behind the disarmed gate.
+  - The Flight Profiles status says "over the USB cable".
+- **Tests:**
+  - `Tests/FullRecordSender` 61/0: over the cable, with frame loss, and radio → cable → radio;
+  - `Tests/SerialLink` 15/0;
+  - Android JVM 30/0. The cable's request and ACK are checked against bytes from a host build of the firmware structs.
+- **Not done:**
+  - bench everything;
+  - serve the flight list over the cable, so a cable works with no receiver;
+  - an Android build.
+- **Traps:**
+  - **Do not switch the console TX to `HAL_UART_Transmit_DMA`.** The USART2 handler's LL block clears TC first, so the HAL transfer never completes and the UART handle stays busy for good. That would silence every console write until reset.
+  - Binary mode adds 2.1 KB of RAM (`Factory` 46.8 KB of 64 KB). Check the CubeIDE link map.
+  - The model gives ~18 s for a 5,800-sample record, about half the ADR's estimate. Planning and CRC at 24 samples a cycle are most of it.
+
+## 2026-11-02 (feature) — background full-record transfer, Android side + Firebase upload — ADR "The radio download becomes the primary data path" (0040). Android NOT compiled, nothing on hardware
+
+✅ **What changed:**
+- **Android runs the transfer** (`rocket-flight-manager` `b3b3b4e`). The core is pure Kotlin in `data/fullrecord/`:
+  - codec port and CRC;
+  - assembler with parity recovery;
+  - store that resumes across app kills;
+  - CSV identical to the USB export;
+  - the controller.
+- **Android wiring:**
+  - `FullRecordHub` holds the transfer across Activity recreation.
+  - `BluetoothService` sends the request and ACK, and shows progress in its notification.
+  - Flight Profiles has the Transfer/Stop button and the partial view, and reads phone → cloud → locator.
+  - App Settings has the two trigger checkboxes and the cloud account.
+- **Firebase:** Auth (Google + email) and Storage upload. The Google Services plugin is applied only when `google-services.json` exists.
+- **Framing fix in all three:** `FullRecordParity` is a fixed 255 B. Its `payload_len` is an XOR, so both app framers would have cut every parity frame short.
+  - locator: `FullRecordSender.hpp` now sends the full payload buffer (this commit);
+  - Android `b3b3b4e`;
+  - iOS `b8c4c0d`.
+- **ADR rule corrected:** a window with *any* packet of the page, duplicates included, gets an ACK. "Nothing new → request" deadlocks after a lost ACK. The firmware's simulated app already did this; the ADR wording and the first Android draft did not.
+- `Tools/full-record-fixture` generates the app's `sender_fixture.bin` from the real sender, codec and `FormatFloat`.
+- **Tests:**
+  - `Tests/FullRecordSender` 40/0 (adds the frame-length check);
+  - Android JVM 24/0, compiled with kotlinc 2.0.0 + JUnit outside Gradle (see the cloud-build-limits memory).
+- **Trigger rules as built:** automatic starts need a landing seen from this locator, and are held behind the disarmed-on-the-ground gate. They stand down when the user presses Stop or when every record is on the phone. Details are in ADR decision 6.
+- **Not done:**
+  - an Android build;
+  - the foreground paged transfer for a record selected with no background run (the quick-look download is still used);
+  - store I/O off the main thread;
+  - USB serial (step 3, done the same day: see the entry above);
+  - iOS (step 4).
+- **Traps:**
+  - Nothing outside `data/fullrecord/` has been compiled. Expect a few compile fixes in the ViewModel, Compose and Firebase code.
+  - The Firebase BOM, credentials and googleid versions are unverified here (`dl.google.com` is blocked).
+  - The USB export's lat/lon used to pass through float (~0.4 m). Fixed later the same day: `FormatDeg1e7` prints them exactly, in the export and the app's CSV. Exports made before that carry the rounded values.
+
+## 2026-11-02 (feature) — background full-record transfer, firmware side — ADR "The radio download becomes the primary data path" (0040). NOT on hardware
+
+✅ **What changed:**
+- Four new message types (26–29: `FullRecordRequest` / `Data` / `Parity` / `Ack`), additive, no existing message changed size.
+- `FullRecordSender.hpp`: a HAL-free burst → periodic → 900 ms listen cycle, running only while Disarmed in WaitingLaunch/Landed. Record CRC and page planning take 24 samples per loop cycle. The sender suspends after 3 cycles with no ACK.
+- `PickupDetector.hpp` reports pickup as bit 7 of TelemetryData `physical_deployment_stats`.
+- The receiver relays the new types and holds the transfer's ACK/request in a second forward slot.
+- Android and iOS gain the `MsgType` values, framing of 27/28, constants and layout tests.
+- **Commits** (all on `claude/project-thread-308ix0`): locator `dc085c2`, receiver `fcbe968`, app `bec5261` (**not compiled**), iOS `b05f0b6` (**not compiled**).
+- **Tests:**
+  - `Tests/FullRecordSender` 38/0 (simulated half-duplex link and app, bit-exact at 10 % loss each way, no TX in a forward window).
+  - `Tests/FullRecordCodec` 869/0.
+  - Full ARM link at -Og: flash 174 KB, static RAM 52.3 KB of 64.
+  - Receiver wire check 26 asserts.
+  - **Android and iOS not compiled here.**
+- **Modeled:** 0.70 s per packet against 0.6 quiet, so about 12 min for a typical flight. The periodic frame comes every ~5.5 s during a cycle.
+- **Not done:**
+  - the app side (step 2: background transfer, persistence and resume, Firebase upload);
+  - USB serial;
+  - iOS port of the transfer.
+- **Traps:**
+  - Packets are self-contained but decode in sample order: the app keeps each one and decodes it once the two samples before it are in hand.
+  - The app must repeat its `FullRecordRequest` in any window where nothing at all arrived (duplicates count as arrived; see the entry above). That is what restarts a suspended or aborted sender.
+  - Periodic frames now set `radio_busy_` until TxDone. A lost TxDone is cleared by a 2 s watchdog, but only on the full-transfer path.
+
+## 2026-11-01 (feature) — full-record radio codec, step 1 of ADR "The radio download becomes the primary data path" (0040). Codec only, not wired in
+
+✅ **What changed:** new header-only `Rocket/Communication/Inc/FullRecordCodec.hpp`: lossless codec for whole v8 `FlightSample`s, fixed 512-sample pages, `PlanPage` packet planner, independent packets (each coded from the two flash samples before it), IEEE CRC-32. Nothing in the firmware calls it yet.
+- **Tests:** new `Tests/FullRecordCodec` 863/0 (bit-exact round trip, shuffled arrival, pure-noise worst case 910 bits so a page is never over 256 packets, deterministic plan). With `SP_CSV_DIR=<export folder>` it also measures real flights: **5.75 samples/packet** on the 11 Sept-2026 exports (885/0).
+- **Next:** the wire integration (page index in `FlightDataRequest`, page-0 header, pickup bit, interleaving, receiver relay). It changes the wire format, so it needs `steam-pigeon-ios` in the same session for `WireLayoutTests.swift`.
+
+## 2026-11-01 (feature) — 50 Hz loop, variable-rate archive (`ARCHIVE_VERSION` 8) and MMC5983MA magnetometer — ADR "50 Hz loop, variable-rate archive and magnetometer" (0039). NOT on hardware
+
+✅ **What changed:** loop 20 → 50 Hz; every cycle-count constant now written as time (`SamplesForMs`), identical at 20 Hz; SPI2 prescaler 8 (#21); length-aware GPS read (#22); FIFO drain cap (#24); MS5611 pipelined with D2 every 10th cycle (45 Hz baro, filter windows resized to the same time spans); MMC5983MA on I2C2 0x30, archived but not fused; archive 50 Hz through drogue + 10 s and around main and landing, 5 Hz between; `FlightSample` 94 B with `mag_q[3]`; download plan finds events by timestamp and thins windows that overflow a transfer; export adds `mag_x_ut,mag_y_ut,mag_z_ut`.
+- **Commits:** locator `7f58202`, receiver `8acb7ca` (comment only), app `412cd2c` (constant and comments, **not compiled**).
+- **Not done:** EKF decimation (every second cycle) is Frank's call after profiling. The EKF still runs every cycle.
+- **Tests:** every host suite green (TransferPlan 5,304/0, FlightReplay 119/0 with new B8, new `Tests/ArchiveRatePolicy` 19/0). Full `arm-none-eabi` link at -Og outside CubeIDE: flash 168 KB of 256, static RAM 50.6 KB of 64 (was 42.4), deepest stack frame 4.4 KB.
+- **Traps:** v8 orphans all stored records, so **export before flashing**. `Tests/FlightReplay` and `Tests/DescentSlowdown` are pinned to `-DSAMPLES_PER_SECOND=20` because the corpus is 20 Hz. PR #58 (degraded boot) also edits `Navigation::Init`: expect a merge conflict. CubeIDE must refresh `Debug/` to pick up `MMC5983MA.cpp`.
+
+🧪 **Bench, in order:**
+1. Console `t` breakdown at -Og: worst cycle under ~16 ms, with `MagRead` about 0.3 ms.
+2. `MagRead` health: product ID 0x30 found, field magnitude 25–65 µT at rest, and it rotates when the board turns.
+3. Baro: AGL noise on the pad comparable to the 20 Hz build; no stale-D2 temperature jumps.
+4. `SP_BENCH_REPLAY` a 20 Hz record and check events match the 20 Hz build.
+5. Vacuum-chamber flight (ADR-0031), then export: about 50 samples/s through drogue + 10 s, 5/s on descent, 50/s around main and landing; mag columns filled.
+6. Download that record to the app and check the main and landing markers sit on the trace.
+
+## 2026-10-25 (fix) — a failed sensor no longer restarts the locator; it boots degraded and says so — [ADR-0038](adr/0038-sensor-failure-degrades-not-restarts.md) (Proposed). Firmware + Android; NOT on hardware
+
+✅ **Why:** fschroer's ballistic flight damaged a sensor. After that, `Navigation::Init()` reset the locator after 3 s of red on every boot, so neither the console nor the app could reach the intact record on the flash.
+- **Firmware:** a sensor that fails init is held red for 1 s and left at `SensorHealth::Error`, and boot carries on. The IWDG is kicked between sensors (tags 101–103), because three failures in a row outlast its ~12.5 s. With no IMU, the EKF is seeded with a nose-up accel instead of zeros (otherwise its quaternion would be NaN).
+- **Arming** is refused unless the IMU **and** the barometer are up (`SensorFaults.hpp`, `Communication.cpp` ArmRequest). The GPS gates nothing. That is a judgment call, open to change in review.
+- **Reporting:** a `DIAG|SENSORS:` report at the end of boot and on the new `s` console key (any arm state), a 1 Hz yellow LED flash while degraded, and on Android a red status-panel note plus an Arm refusal that gives the reason (app `b630931`).
+- **No wire change.** The three health bytes were always broadcast. `WireLayoutTest.kt`, `WireLayoutTests.swift` and the receiver are untouched.
+- **Tests:** new `Tests/SensorFaults` 59/0; every host suite green. The four changed firmware files pass `arm-none-eabi-g++ -fsyntax-only -Og` with no new warnings. **Android was not compiled** (no SDK in that session), so run `:app:testDebugUnitTest` and an install-and-launch.
+- **Known limits (in the ADR):** a sensor failed at boot stays failed until a power cycle; with no IMU there is no launch detection, so no new record is made; the MS5611 PROM CRC-4 is not checked, so a barometer returning garbage still reads `Ok`.
+
+📋 **iOS** lacks the note and the arm-refusal message. It already colors the lines red, and the locator's own refusal covers both apps. Recorded in §4.4 of the summary. `UI_PARITY.md` lives in `steam-pigeon-ios`, which that session could not reach, so it still needs the entry.
+
+🧪 **Bench:** hold one sensor off (lift the IMU or baro CS, or the GPS I²C pull-up). Check that the locator boots, shows red for 1 s in that sensor's slot, then flashes yellow once a second. `s` should name the sensor, and the app note should appear. Arm should be refused with a toast (and with no app check, the armed byte stays 0). A `data` export and the app's record download should both work. Repeat with all three held off to confirm boot fits inside the watchdog.
+
 ## 2026-10-15 (fix) — record t = 0 is the start of the thrust run into launch detect; CSV export states `Launch onset time:` — ADR-0007 amendment. NOT on hardware
 
 ✅ **Why:** `AnchorRecordToLaunchOnset` took the first ring sample above 1.3 g. On Ken_6 that was a one-sample jolt 0.8 s before ignition, so every Ken_6 time is 0.8 s late. Onset is now the start of the unbroken ≥ 1.3 g run ending at launch detect, walked back from the newest sample (`LaunchOnset.hpp`). If the newest sample is in the pad band, the old first-crossing scan applies.

@@ -6,8 +6,11 @@ extern "C" {
 
 constexpr uint32_t TIMCLK = HSI48_VALUE;
 constexpr uint32_t PSC    = 11;
+#include "Constants.hpp"
+
 uint8_t note_index_ = 0;
-uint8_t duration_index_ = 0;
+// Loop ticks left on the current note (see NoteTicks below).
+uint16_t duration_index_ = 0;
 // True while the PWM is energized.  Tracked so the watchdog below can tell a
 // genuinely stuck note from the normal quiet between sequences, and so it costs
 // nothing on the ticks where nothing is playing.
@@ -68,9 +71,18 @@ constexpr uint32_t getARR(Tone n) {
 
 struct Note {
     Tone tone;
-    uint8_t duration;
+    uint8_t duration;   // in kNoteUnitMs units, NOT loop ticks (ADR-0039)
     uint8_t volume; // 1-3 valid
 };
+
+// Note durations are written in 50 ms units: the 20 Hz loop tick every sequence
+// below was composed against.  The sequence drivers convert to loop ticks, so
+// the tunes keep their tempo at any loop rate instead of playing 2.5x fast at
+// 50 Hz.  Rounded to the nearest tick, minimum one.
+constexpr uint32_t kNoteUnitMs = 50u;
+constexpr uint16_t NoteTicks(uint8_t units) {
+    return SamplesForMs(static_cast<uint32_t>(units) * kNoteUnitMs);
+}
 
 constexpr Note PowerOn[] = {
 		{ Tone::C8, 2, 3 },
@@ -330,7 +342,7 @@ void BuzzerSequence(const Note (&sequence)[N])
     if (duration_index_ == 0) {
         if (note_index_ >= N)
             note_index_ = 0;
-        duration_index_ = sequence[note_index_].duration;
+        duration_index_ = NoteTicks(sequence[note_index_].duration);
         if (sequence[note_index_].tone != Tone::Rest)
             BuzzerPlay(sequence[note_index_].tone, sequence[note_index_].volume);
         else
@@ -353,7 +365,7 @@ bool BuzzerSequenceOnce(const Note (&sequence)[N])
             BuzzerStop();
             return true;
         }
-        duration_index_ = sequence[note_index_].duration;
+        duration_index_ = NoteTicks(sequence[note_index_].duration);
         if (sequence[note_index_].tone != Tone::Rest)
             BuzzerPlay(sequence[note_index_].tone, sequence[note_index_].volume);
         else

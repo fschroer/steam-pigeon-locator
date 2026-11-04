@@ -15,7 +15,7 @@ namespace FlightArchive
     template<typename TSample, typename TStatTraits, size_t ChunkPayloadBytes>
     bool Archive<TSample, TStatTraits, ChunkPayloadBytes>::Init()
     {
-        if (m_cfg.recordCount == 0u || m_cfg.minutesPerRecord == 0u || m_cfg.statSlotCount == 0u)
+        if (m_cfg.recordCount == 0u || m_cfg.samplesPerRecord == 0u || m_cfg.statSlotCount == 0u)
         {
             return false;
         }
@@ -52,7 +52,7 @@ namespace FlightArchive
     Archive<TSample, TStatTraits, ChunkPayloadBytes>::GetGeometry() const
     {
         Geometry g{};
-        g.samplesPerRecord = static_cast<uint32_t>(m_cfg.minutesPerRecord) * 60u * SAMPLES_PER_SEC;
+        g.samplesPerRecord = m_cfg.samplesPerRecord;
 
         g.validMarkerOffset = AlignUp(sizeof(RecordHeader), 4u);
         g.validMarkerSize = AlignUp(sizeof(ValidMarker), 4u);
@@ -1130,6 +1130,11 @@ namespace FlightArchive
         }
 
         uint16_t oldestId = INVALID_RECORD_ID;
+        if (FindOldestEvictFirstRecord(oldestId))
+        {
+            return oldestId;
+        }
+
         uint32_t oldestSeq = 0u;
         if (FindOldestRecord(oldestId, oldestSeq))
         {
@@ -1137,6 +1142,45 @@ namespace FlightArchive
         }
 
         return INVALID_RECORD_ID;
+    }
+
+    template<typename TSample, typename TStatTraits, size_t ChunkPayloadBytes>
+    bool Archive<TSample, TStatTraits, ChunkPayloadBytes>::FindOldestEvictFirstRecord(uint16_t& recordIdOut) const
+    {
+        recordIdOut = INVALID_RECORD_ID;
+        if (m_cfg.evictFirstMask == 0u)
+        {
+            return false;
+        }
+
+        bool found = false;
+        uint32_t best = 0u;
+        for (uint16_t i = 0u; i < m_cfg.recordCount; ++i)
+        {
+            RecordHeader h{};
+            if (!ReadHeader(i, h) || h.magic != ARCHIVE_MAGIC || !ValidateHeaderForConfig(h, i))
+            {
+                continue;
+            }
+            if (m_rt.activeOpen && m_rt.activeRecordId == i)
+            {
+                continue;   // never the record being written
+            }
+            uint8_t value = 0u;
+            bool present = false;
+            if (!ReadStat(i, m_cfg.evictFirstStatId, value, present) || !present
+                    || (value & m_cfg.evictFirstMask) == 0u)
+            {
+                continue;
+            }
+            if (!found || h.sequenceNumber < best)
+            {
+                found = true;
+                best = h.sequenceNumber;
+                recordIdOut = i;
+            }
+        }
+        return found;
     }
 
     template<typename TSample, typename TStatTraits, size_t ChunkPayloadBytes>

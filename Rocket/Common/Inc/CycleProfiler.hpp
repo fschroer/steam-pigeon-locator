@@ -25,12 +25,14 @@ enum class Seg : uint8_t {
     Comm,          // Communication::Process()
     NavUpdate,     // Navigation::Update() — total
     SensorRead,    //   IMU + baro readSample()
-    GpsRead,       //   GPS readSample() (every 2nd cycle)
+    GpsRead,       //   GPS readSample() (every 5th cycle at 50 Hz)
+    MagRead,       //   MMC5983MA readSample() (every cycle; ~0 when absent)
     Ekf,           //   EKF predict + baro/GPS updates + ZUPT
     Strapdown,     //   480 Hz gyro FIFO drain + quaternion integrate + tilt (whole block)
     FifoDrain,     //     just the FIFO drain loop (SPI reads + propagate) — subset of Strapdown
     FlightState,   // FlightManager::UpdateFlightState() (incl. flash ring drain)
     Telemetry,     // Send{PreLaunch,Telemetry}Data() (service tick only)
+    PadCal,        // CalibrateOnPadAndZeroAglUntilLaunch() (telemetry slot, on the pad)
     ProcTotal,     // whole ProcessRocketEvents()
     Count
 };
@@ -47,6 +49,15 @@ void        begin(Seg s);                // stamp a segment's start (no local ne
 void        end(Seg s);                  // record duration since its begin()
 void        recordCount(Cnt c, uint16_t value);  // record a per-cycle count (last + max)
 void        resetMax();                  // clear all running maxima (timers AND counts)
+// Clear them at the end of the cycle `cycles` from now instead (counted at each
+// ProcTotal mark).  The console prints the profile from inside a cycle, so a
+// clear done there lets that cycle (~14 ms of UART) and the next (catching up
+// the gyro FIFO) land in the new maxima as the "worst case" (2026-11-04).
+void        resetMaxAfter(uint8_t cycles);
+// Cycles whose ProcTotal exceeded the loop period, and cycles counted, since
+// the last resetMax().  A max says how bad; these say how often.
+uint32_t    overruns();
+uint32_t    cycles();
 uint16_t    lastUs(Seg s);
 uint16_t    maxUs(Seg s);
 uint16_t    lastCount(Cnt c);

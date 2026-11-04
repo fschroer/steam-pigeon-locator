@@ -49,10 +49,31 @@ public:
     bool powerDown();
     bool init(float sample_rate_hz);
 
-    bool readSample(GpsSample& out);
+    bool readSample(GpsSample& out);   // blocking poll (boot)
+
+    // Interrupt-driven poll: startRead() queues the 128 byte read and returns;
+    // finishRead() on a later cycle parses it (false while it is still
+    // running, or if nothing was started).  See SAMM10Q.cpp.
+    bool startRead();
+    bool finishRead(GpsSample& out);
+    bool asyncBusy() const {
+        return m_async_state == AsyncState::Pointer || m_async_state == AsyncState::Read;
+    }
+    void onI2cEvent();   // I2C2 interrupts only
+    void onI2cError();
 
     SensorStatus getStatus() const { return m_status; }
     const GpsSample& raw() const { return m_last; }
+    // ADR-0041: the simulated flight's fix replaces the receiver's, and counts
+    // as a fresh solution, so the stale-fix watchdog and archiveFixType see it.
+    void injectSample(const GpsSample& s, uint32_t now_ms) {
+        m_last = s;
+        m_last_pvt_ms = now_ms;
+        m_status.last_update_ms = now_ms;
+        m_status.data_valid = s.position_valid;
+        m_status.data_fresh = true;
+        m_status.health = s.position_valid ? SensorHealth::Ok : SensorHealth::Warning;
+    }
 
     bool hasSeenAck() const { return m_seen_ack; }
     bool hasSeenNak() const { return m_seen_nak; }
@@ -70,6 +91,42 @@ public:
 
     StreamClass streamClass() const { return m_stream_class; }
     uint32_t recoveryAttempts() const { return m_recovery_attempts; }
+
+    // What the receiver has put on the bus since boot, for the console's
+    // DIAG|GPS line.  Added 2026-11-03 to find why a receiver with a fix (PPS
+    // blinking, 10 satellites when a fix got through) delivered a NAV-PVT only
+    // every 20 to 67 s on the pad.  Counters only: nothing reads them to decide.
+    struct Counters {
+        uint32_t polls = 0;          // readSample calls after init
+        uint32_t i2c_fail = 0;       // readFifo returned false (NACK or timeout)
+        uint32_t bytes = 0;          // bytes read from the FIFO
+        uint32_t chunks_full = 0;    // polls whose 128 B were all data: a backlog
+        uint32_t idle = 0, ubx = 0, nmea = 0, unknown = 0;   // stream class per poll
+        uint32_t nav_pvt = 0;        // NAV-PVTs parsed
+        uint32_t other_ubx = 0;      // good-checksum UBX that is not NAV-PVT
+        uint32_t bad_checksum = 0;   // a sync whose checksum failed
+        uint32_t dropped = 0;        // bytes pushed out of the full rx buffer
+        uint32_t oversize = 0;       // a sync whose length cannot fit the buffer
+        uint16_t last_available = 0; // data bytes (before filler) in the last read
+    };
+
+    // How the boot configuration went (2026-11-03), for the console.  inits
+    // counts init() calls since power-up (Navigation retries a failed one);
+    // the rest describe the last.  ack_wait_bytes is what the receiver put on
+    // the bus while the ACK was awaited: a VALSET always produces an ACK or a
+    // NAK, so a Timeout with 0 bytes means the read path saw nothing at all.
+    enum class BootCfgResult : uint8_t {
+        NotRun = 0, NoDevice, BuildFailed, SendFailed, Ack, Nak, Timeout
+    };
+    struct BootReport {
+        uint8_t       inits = 0;
+        BootCfgResult result = BootCfgResult::NotRun;
+        uint16_t      ack_wait_bytes = 0;
+        uint16_t      ack_wait_bus_errors = 0;
+    };
+    const BootReport& bootReport() const { return m_boot; }
+    const Counters& counters() const { return m_ctr; }
+    uint32_t lastPvtAgeMs() const;
 
     // Select the dynamic platform model for the current flight regime.  Queues
     // the write rather than issuing it here: this is called from a flight-state
@@ -96,11 +153,9 @@ private:
 
     bool configureReceiverValset(float sample_rate_hz);
     // nav_pvt_rate is the CFG_MSGOUT_UBX_NAV_PVT_I2C value written alongside the
-    // port/protocol/rate items.  init() passes 0 and enables NAV-PVT in a second
-    // VALSET so the ACK of the first is unambiguous; recovery passes 1 to
-    // re-assert everything in a single un-ACKed write.
+    // port/protocol/rate items.  Boot (ACKed) and recovery (un-ACKed) both pass
+    // 1: the whole configuration always travels in one VALSET.
     bool buildValsetInitialConfig(uint8_t* out, uint16_t& out_len, float sample_rate_hz, uint8_t nav_pvt_rate);
-    bool buildValsetUbxNavPvtConfig(uint8_t* out, uint16_t& out_len);
 
     static StreamClass classifyStream(const uint8_t* buf, uint16_t len);
     void serviceStaleRecovery(uint32_t now);
@@ -112,6 +167,7 @@ private:
     bool parseAckFromBuffer(uint8_t& ackCls, uint8_t& ackId, bool& nak);
 
     bool readFifo(uint8_t *buf, uint16_t &len);
+    bool processChunk(const uint8_t* tmp, uint16_t chunk, GpsSample& out);
 
     bool parseNavPvtFromBuffer(GpsSample& out);
 
@@ -212,6 +268,17 @@ private:
     uint32_t    m_last_recovery_ms  = 0;
     uint32_t    m_recovery_attempts = 0;
     StreamClass m_stream_class      = StreamClass::Unknown;
+    Counters    m_ctr{};
+    BootReport  m_boot{};
+
+    enum class AsyncState : uint8_t { Idle, Pointer, Read, Done, Failed };
+    void asyncEnd(AsyncState result);
+    static constexpr uint16_t kAsyncLen       = 128;
+    static constexpr uint32_t kAsyncTimeoutMs = 25;
+    volatile AsyncState m_async_state = AsyncState::Idle;
+    volatile uint16_t   m_async_len   = 0;
+    uint8_t             m_async_buf[kAsyncLen]{};
+    uint32_t            m_async_start = 0;
     // Sticky across an outage: a single 128 byte read can land entirely in FIFO
     // filler even while the receiver is talking, so the per-read classification
     // is too noisy to archive directly.  Cleared on every successful parse.

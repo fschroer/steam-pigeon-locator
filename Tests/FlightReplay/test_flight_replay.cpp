@@ -398,8 +398,13 @@ static std::vector<Cycle> makeNominalFlight() {
 
 // Drive a full flight through the real state machine; return the archive so the
 // caller can inspect recorded event timestamps.  g_bench holds the firings.
+// When each drogue rule first latched, for the CSV report (2026-11-04: the
+// level-off rule is tuned on the archive against the slowdown rule).
+static double g_slowdown_ms = -1, g_level_off_ms = -1;
+
 static Archive runFlight(const std::vector<Cycle>& flight) {
     g_bench.Reset();
+    g_slowdown_ms = g_level_off_ms = -1;
     RocketNav::Navigation nav; Archive ar; PowerManagement pw(nullptr);
     FlightManager fm(nav, ar, pw);
     fm.Init();
@@ -410,6 +415,8 @@ static Archive runFlight(const std::vector<Cycle>& flight) {
         g_bench.hal_ms = c.t_ms;         // HAL_GetTick() tracks the sample clock
         fm.SetFlightClockMs(c.t_ms);
         fm.UpdateFlightState();
+        if (g_slowdown_ms < 0 && fm.drogue_slowdown_.Detected())   g_slowdown_ms = c.t_ms;
+        if (g_level_off_ms < 0 && fm.drogue_level_off_.Detected()) g_level_off_ms = c.t_ms;
     }
     return ar;
 }
@@ -439,6 +446,73 @@ static void B1_NominalFlight() {
               "event ordering wrong: L=%.0f B=%.0f A=%.0f M=%.0f Ld=%.0f", launch, burn, apo, mainp, land);
     printf("       L=%.0f B=%.0f A=%.0f MainP=%.0f Land=%.0f ms; maxAlt=%.1f m\n",
            launch, burn, apo, mainp, land, ar.Event(Stat::MaxAltitudeM));
+}
+
+// ===========================================================================
+// B8: the variable-rate archive (ADR-0039) through the real FlightManager drain.
+// This suite runs at 20 Hz, so "full rate" is a 50 ms step and the descent
+// decimator keeps one sample per ~200 ms (every 4th).  The rule is rate-
+// independent; Tests/ArchiveRatePolicy covers it at 50 Hz.
+// ===========================================================================
+static void B8_VariableRateArchive() {
+    printf("\n--- B8: variable-rate archive keeps full rate at the events, 5 Hz between ---\n");
+    std::vector<Cycle> flight = makeNominalFlight();
+    // Several seconds more on the ground so the landed tail and the ring drain
+    // both complete inside the data.
+    {
+        Cycle last = flight.back();
+        for (int i = 0; i < 120; ++i) { last.t_ms += 50; flight.push_back(last); }
+    }
+    g_bench.Reset();
+    RocketNav::Navigation nav; Archive ar; PowerManagement pw(nullptr);
+    FlightManager fm(nav, ar, pw);
+    fm.Init();
+    fm.flight_state_ = FlightStates::WaitingLaunch;
+    bool complete = false;
+    for (const Cycle& c : flight) {
+        applyCycle(nav, c);
+        g_bench.hal_ms = c.t_ms;
+        fm.SetFlightClockMs(c.t_ms);
+        fm.UpdateFlightState();
+        if (fm.RecordComplete()) { complete = true; break; }
+    }
+    CHECK_MSG(complete, "record never became complete (ring not drained?)");
+    CHECK(fm.m_ring_count_ == 0);
+
+    const std::vector<uint32_t>& ts = ar.written_ts;
+    CHECK_MSG(ts.size() > 50, "too few samples written: %zu", ts.size());
+    bool increasing = true;
+    for (size_t i = 1; i < ts.size(); ++i) if (ts[i] <= ts[i - 1]) increasing = false;
+    CHECK_MSG(increasing, "archived timestamps not strictly increasing");
+
+    const uint32_t drogue  = static_cast<uint32_t>(ar.Event(Stat::DroguePrimaryDeployTimestampMs));
+    const uint32_t mainp   = static_cast<uint32_t>(ar.Event(Stat::MainPrimaryDeployTimestampMs));
+    const uint32_t landing = static_cast<uint32_t>(ar.Event(Stat::LandingTimestampMs));
+    const uint32_t ascent_end = drogue + ArchiveRate::kAfterDrogueMs;
+
+    // Classify every gap by where its LATER sample sits.
+    int full_ok = 0, full_bad = 0, dec_ok = 0, dec_bad = 0;
+    for (size_t i = 1; i < ts.size(); ++i) {
+        const uint32_t t = ts[i], gap = ts[i] - ts[i - 1];
+        const bool in_ascent  = t < ascent_end;
+        const bool in_main    = t >= mainp - ArchiveRate::kBeforeMainMs && t <= mainp + ArchiveRate::kAfterMainMs
+                             && ts[i - 1] >= mainp - ArchiveRate::kBeforeMainMs;
+        const bool in_landing = t >= landing - ArchiveRate::kBeforeLandingMs
+                             && ts[i - 1] >= landing - ArchiveRate::kBeforeLandingMs;
+        if (in_ascent || in_main || in_landing) {
+            (gap == 50u) ? ++full_ok : ++full_bad;
+        } else if (t > ascent_end + 300u && !(t >= mainp - ArchiveRate::kBeforeMainMs && t <= mainp + ArchiveRate::kAfterMainMs + 300u)
+                   && t < landing - ArchiveRate::kBeforeLandingMs) {
+            (gap >= 190u && gap <= 250u) ? ++dec_ok : ++dec_bad;
+        }
+    }
+    CHECK_MSG(full_bad == 0, "%d full-rate gaps were not 50 ms", full_bad);
+    CHECK_MSG(dec_bad == 0, "%d descent gaps were not ~200 ms", dec_bad);
+    CHECK_MSG(dec_ok > 20, "descent decimation barely exercised (%d gaps)", dec_ok);
+    CHECK_MSG(ts.front() == 0u || ts.front() < 100u, "record does not start at onset: %u", ts.front());
+    CHECK_MSG(ts.back() >= landing + 1900u, "landed tail missing: last %u, landing %u", ts.back(), landing);
+    printf("       %zu samples kept of %zu cycles; full-rate gaps %d, 5 Hz gaps %d; drogue %u main %u land %u\n",
+           ts.size(), flight.size(), full_ok, dec_ok, drogue, mainp, landing);
 }
 
 // ===========================================================================
@@ -1000,6 +1074,8 @@ static int replayCsv(int argc, char** argv) {
     // to it can be checked against real flights rather than argued about.
     rep("Drogue opening inferred", Stat::DrogueVelocityThresholdTimestampMs);
     rep("Main opening inferred",   Stat::MainVelocityThresholdTimestampMs);
+    if (g_slowdown_ms >= 0)  printf("    by slowdown              t=%.0f ms (sample clock)\n", g_slowdown_ms);
+    if (g_level_off_ms >= 0) printf("    by level-off             t=%.0f ms (sample clock)\n", g_level_off_ms);
     printf("  Max altitude               %.1f m\n", ar.Event(Stat::MaxAltitudeM));
     printf("  Channels fired:");
     for (uint8_t ch = 1; ch <= 4; ++ch) if (g_bench.FiredOn(ch)) printf(" ch%u@%.0fms", ch, (double)g_bench.FirstOnMs(ch));
@@ -1045,6 +1121,7 @@ int main(int argc, char** argv) {
     B5_AxialBurnoutIsMotorStop();
     B6_WrongFrameFallsBack();
     B7_PreIgnitionJoltDoesNotMoveTheEpoch();
+    B8_VariableRateArchive();
 
     C1_DropDoesNotLaunch();
     C2_KnockDoesNotLaunch();

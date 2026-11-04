@@ -370,26 +370,30 @@ int UserInteraction::MakeCSVExportLine(char *target, const char *source1, const 
 	return i;
 }
 
+// A uint16_t as text, optionally in tenths ("12.5", "0.5").  The result is in
+// a small static ring, valid until two later calls: every caller hands it
+// straight to MakeLine.  It used to be new[]'d and never freed, one leak per
+// menu line shown, and counted digits with log10() and pow(), which pulled
+// about 4.5 KB of double-precision libm into the image.
 const char* UserInteraction::ToStr(uint16_t source, bool tenths) {
-	uint16_t l_source = source;
-	int source_len = 0;
-	if (source > 0)
-		source_len = log10(source) + 1;
-	else
-		source_len = 1;
-	char *target = new char[source_len + (tenths ? 1 : 0) + (tenths && source < 10 ? 1 : 0) + 1];
+	static char ring[2][8];   // "6553.5" + NUL fits
+	static uint8_t next = 0;
+	char *target = ring[next];
+	next ^= 1u;
+	char digits[5];
+	int n = 0;
+	uint16_t v = source;
+	do { digits[n++] = static_cast<char>('0' + v % 10u); v /= 10u; } while (v != 0u);
+	if (tenths && n == 1)
+		digits[n++] = '0';   // 5 -> "0.5"
 	int j = 0;
-	if (tenths && source < 10)
-		target[j++] = '0';
-	for (int i = pow(10, source_len - 1); i > 0; i /= 10) {
-		if (tenths && i == 1)
+	while (n > 0) {
+		if (tenths && n == 1)
 			target[j++] = '.';
-		int digit = l_source / i;
-		l_source -= digit * i;
-		target[j++] = digit + '0';
+		target[j++] = digits[--n];
 	}
 	target[j] = 0;
-	return (const char*) target;
+	return target;
 }
 
 bool UserInteraction::StrCmp(char *string1, const char *string2, int length) {
@@ -460,8 +464,13 @@ void UserInteraction::DisplayDataMenu() {
 		archive_.ReadEvent(i, FlightArchive::Statistic::MaxAltitudeM, apogee, valid_record);
 		uint32_t apogee_timestamp = 0;
 		archive_.ReadEvent(i, FlightArchive::Statistic::ApogeeTimestampMs, apogee_timestamp, valid_record);
+		// ADR-0041: only a simulated record writes this slot.
+		uint8_t physical = 0u;
+		bool simulated = false;
+		archive_.ReadEvent(i, FlightArchive::Statistic::PhysicalDeploymentStats, physical, simulated);
+		simulated = simulated && (physical & FlightArchive::kRecordSimulatedBit) != 0u;
 		export_line.WriteMany(archive_position, flight_date_time, Fmt(apogee, 11, 1),
-				Fmt(apogee_timestamp / 1000.0f, 19, 1), crlf_);
+				Fmt(apogee_timestamp / 1000.0f, 19, 1), simulated ? "  simulated" : "", crlf_);
 //    }
 	}
 	export_line.WriteMany(data_guidance_text_, crlf_);
@@ -767,8 +776,11 @@ void UserInteraction::DisplayCycleProfile() {
 				static_cast<uint32_t>(Diag::lastCount(c)), " / ",
 				static_cast<uint32_t>(Diag::maxCount(c)), crlf_);
 	}
-	line.WriteMany("(max cleared; run again then re-read for a clean worst case)", crlf_);
-	Diag::resetMax();
+	line.WriteMany("overruns (cycle > ", static_cast<uint32_t>(1000u / SAMPLES_PER_SECOND), " ms): ",
+			Diag::overruns(), " of ", Diag::cycles(), " cycles", crlf_);
+	line.WriteMany("(max cleared from 3 cycles on, so this printout is not in it; re-read for a clean worst case)", crlf_);
+	// Not resetMax(): this cycle and the next would be the worst case.
+	Diag::resetMaxAfter(3);
 }
 
 void UserInteraction::ExportData(uint16_t archive_position) {
@@ -778,14 +790,18 @@ void UserInteraction::ExportData(uint16_t archive_position) {
 	uint32_t sample_count_out = 0;
 	bool success = archive_.GetFlightSampleCount(archive_position, sample_count_out);
 	if (success) {
-		FlightArchive::FlightSample sample_buffer[64];
-//		FlightArchive::FlightSample sample_buffer[sample_count_out] { };
+		// 32, not 64: the 94-byte v8 sample (ADR-0039) and the 50 Hz ring
+		// grew static RAM by 8 KB, and this buffer is the deepest stack frame
+		// on the locator.  The export is UART-bound, so the batch size costs
+		// nothing measurable.
+		constexpr uint32_t kExportBatch = 32u;
+		FlightArchive::FlightSample sample_buffer[kExportBatch];
 		uint32_t got = 0u;
 		uint32_t start = 0u;
 
 		while (true) {
 		    FaultLog_KickWatchdog(0);
-		    if (!archive_.ReadFlightDataRange(archive_position, start, sample_buffer, 64u, got)) {break;}
+		    if (!archive_.ReadFlightDataRange(archive_position, start, sample_buffer, kExportBatch, got)) {break;}
 		    if (got == 0u) {break;}
 		    for (uint32_t i = 0u; i < got; ++i) {
 				// WriteMany() clears and flushes in one call, so a field that is
@@ -818,6 +834,15 @@ void UserInteraction::ExportData(uint16_t archive_position) {
 				} else {
 					baro_raw_fields.Append(',');
 				}
+				// Magnetometer (ADR-0039), last-appended, sensor frame, uT.  Blank when
+				// unknown: the part is absent, the read failed, or the record predates it.
+				StaticString<40> mag_fields;
+				for (int axis = 0; axis < 3; ++axis) {
+					mag_fields.Append(',');
+					const int16_t q = sample_buffer[i].mag_q[axis];
+					if (q != FlightArchive::kMagUnknown)
+						mag_fields.Append(Fmt(q * (100.0f / 4096.0f), 0, 2));
+				}
 				// Same treatment for the non-selected accel channel: empty, not 0, when
 				// that channel had no valid reading — 0 g is a real value it can report.
 				StaticString<48> accel_alt_fields;
@@ -827,21 +852,29 @@ void UserInteraction::ExportData(uint16_t archive_position) {
 						accel_alt_fields.Append(Fmt(cg / 100.0f, 0, 2));
 					accel_alt_fields.Append(',');
 				}
+				// v8 stores these as fixed-point (ADR-0040); print every digit the
+				// archive holds, so the CSV carries the record's full precision.
+				char lat_text[16], lon_text[16];
+				FormatDeg1e7(lat_text, sample_buffer[i].lat_1e7);
+				FormatDeg1e7(lon_text, sample_buffer[i].lon_1e7);
+				const Vec3f ag = FlightArchive::AccelG(sample_buffer[i]);
+				const Vec3f gd = FlightArchive::GyroDps(sample_buffer[i]);
 				export_line.WriteMany(sample_buffer[i].timestamp_ms, ",",
-						Fmt(sample_buffer[i].raw_baro_altitude_agl, 0, 1), ",",
-						Fmt(sample_buffer[i].fused_altitude_agl, 0, 1), ",",
-						Fmt(sample_buffer[i].raw_baro_velocity, 0, 1), ",",
-						Fmt(sample_buffer[i].fused_vertical_speed_mps, 0, 1), ",",
-						Fmt(sample_buffer[i].accel.x / G0_F, 0, 2), ",",
-						Fmt(sample_buffer[i].accel.y / G0_F, 0, 2), ",",
-						Fmt(sample_buffer[i].accel.z / G0_F, 0, 2), ",",
-						Fmt(sample_buffer[i].gyro.x * RAD2DEG, 0, 1), ",",
-						Fmt(sample_buffer[i].gyro.y * RAD2DEG, 0, 1), ",",
-						Fmt(sample_buffer[i].gyro.z * RAD2DEG, 0, 1), ",",
-						// Stored as degrees x 1e-7 (the receiver's own units); 7 decimals is
-						// exactly that resolution, so this round-trips without loss.
-						Fmt(sample_buffer[i].lat_1e7 / 1.0e7, 0, 7), ",",
-						Fmt(sample_buffer[i].lon_1e7 / 1.0e7, 0, 7), ",",
+						Fmt(FlightArchive::RawBaroAglM(sample_buffer[i]), 0, 2), ",",
+						Fmt(FlightArchive::FusedAglM(sample_buffer[i]), 0, 2), ",",
+						Fmt(FlightArchive::RawBaroVelMps(sample_buffer[i]), 0, 2), ",",
+						Fmt(FlightArchive::FusedVspeedMps(sample_buffer[i]), 0, 2), ",",
+						Fmt(ag.x, 0, 3), ",",
+						Fmt(ag.y, 0, 3), ",",
+						Fmt(ag.z, 0, 3), ",",
+						Fmt(gd.x, 0, 2), ",",
+						Fmt(gd.y, 0, 2), ",",
+						Fmt(gd.z, 0, 2), ",",
+						// Stored as degrees x 1e-7 (the receiver's own units), printed
+						// from the integer so all 7 decimals are exact.  This went through
+						// Fmt(double), which converts to float and kept only ~0.4 m.
+						lat_text, ",",
+						lon_text, ",",
 						// One field per fact now — no unpacking (ARCHIVE_VERSION 6).
 						static_cast<uint32_t>(sample_buffer[i].flight_state), ",",
 						static_cast<uint32_t>(sample_buffer[i].armed), ",",
@@ -865,7 +898,7 @@ void UserInteraction::ExportData(uint16_t archive_position) {
 						static_cast<uint32_t>(sample_buffer[i].accel_source), ",",
 						static_cast<uint32_t>(sample_buffer[i].pps_status), ",",
 						// GPS speed accuracy (#55), pre-formatted above.
-						s_acc_field.CStr(), baro_raw_fields.CStr(), crlf_);
+						s_acc_field.CStr(), baro_raw_fields.CStr(), mag_fields.CStr(), crlf_);
 		    }
 		    start += got;
 		}
@@ -902,7 +935,7 @@ void UserInteraction::ExportFlightStats(uint16_t archive_position) { //Export fl
 		while (!done && archive_.ReadFlightDataRange(archive_position, start, batch, 16u, got) && got != 0u) {
 			for (uint32_t i = 0u; i < got; ++i) {
 				if (batch[i].timestamp_ms > launch_detect_ms) { done = true; break; }
-				onset.Add(batch[i].timestamp_ms, RocketNav::Math::norm(batch[i].accel) / G0_F);
+				onset.Add(batch[i].timestamp_ms, RocketNav::Math::norm(FlightArchive::AccelG(batch[i])));
 			}
 			start += got;
 		}

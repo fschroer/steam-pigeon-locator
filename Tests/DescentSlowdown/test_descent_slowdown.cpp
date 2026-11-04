@@ -100,7 +100,42 @@ static void TestResetRearms() {
     CHECK(!d.Detected());
 }
 
+// LevelOff (2026-11-04): v(t) with t = seconds since apogee; returns latch time or -1.
+template <typename F>
+static float RunLevel(float seconds, F v) {
+    TrailingMean m;
+    LevelOff d;
+    int latched = 0;
+    float at = -1.0f;
+    for (int i = 0; i < int(seconds / kDt); ++i) {
+        const float t = i * kDt;
+        m.Add(v(t));
+        if (d.Update(m, t)) { ++latched; if (at < 0) at = t; }
+    }
+    CHECK(latched <= 1);
+    return at;
+}
+
+static void TestADrogueAtApogeeLevelsOff() {
+    printf("level-off: a drogue opened at apogee, building to -20 m/s and holding, is a drogue\n");
+    auto v = [](float t) { return t < 2.0f ? -10.0f * t : -20.0f; };
+    const float at = RunLevel(15.0f, v);
+    CHECK(at > 3.0f && at < 6.0f);
+    printf("level-off: the same with a slow 5 m/s drogue\n");
+    CHECK(RunLevel(15.0f, [](float t) { return t < 0.5f ? -10.0f * t : -5.0f; }) > 0);
+}
+
+static void TestFreeFallAndNoCanopyAreNotALevelOff() {
+    printf("level-off: free fall, and a no-canopy fall leveling at -60 m/s, are not\n");
+    CHECK(RunLevel(15.0f, [](float t) { return -9.8f * t; }) < 0);
+    CHECK(RunLevel(30.0f, [](float t) { return t < 6.0f ? -10.0f * t : -60.0f; }) < 0);
+    printf("level-off: touchdown under a main-sized rate is not, once the ground is reached\n");
+    CHECK(RunLevel(10.0f, [](float t) { return t < 1.0f ? -0.5f : 0.0f; }) < 0);
+}
+
 int main() {
+    TestADrogueAtApogeeLevelsOff();
+    TestFreeFallAndNoCanopyAreNotALevelOff();
     TestNikeMainOscillationIsNotAMain();
     TestARealMainIsDetected();
     TestTouchdownIsNotAnOpening();

@@ -20,11 +20,18 @@ namespace FlightArchive
     // 327.67 m/s, below what these rockets fly.  Same consequence as v6: old
     // records would decode 10x too slow, so the bump is mandatory and orphans
     // every record on a device.  Download first.
-    static constexpr uint16_t ARCHIVE_VERSION    = 0x0007u; // v7: GPS velocity in dm/s (#53)
+    //
+    // v8 (ADR-0039): the loop runs at 50 Hz and the record is VARIABLE-RATE --
+    // 50 Hz from the pre-launch ring through drogue + 10 s, 5 Hz on descent, 50 Hz
+    // again around main and landing.  FlightSample gains the MMC5983MA field
+    // (88 -> 94 B), and a record is sized in samples (9,000) instead of minutes.
+    // Any reader that assumed one sample per 50 ms is wrong on v8: read
+    // timestamp_ms.  Old records are orphaned as with v6/v7.  Download first.
+    static constexpr uint16_t ARCHIVE_VERSION    = 0x0008u; // v8: variable rate + magnetometer (ADR-0039)
     static constexpr uint16_t INVALID_RECORD_ID  = 0xFFFFu;
 
-    static constexpr uint16_t SAMPLES_PER_SEC    = 20u;
-    static constexpr uint16_t SAMPLE_PERIOD_MS   = 50u;
+    // No SAMPLES_PER_SEC here any more: the archive has no fixed rate since v8.
+    // Record capacity is a sample count (Config::samplesPerRecord).
 
     static constexpr uint32_t VALID_MARKER_MAGIC = 0x56414C44u; // VALD
     static constexpr uint32_t CHUNK_MAGIC        = 0x43484B32u; // CHK2

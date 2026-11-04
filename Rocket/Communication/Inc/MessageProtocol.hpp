@@ -68,7 +68,22 @@ enum class MsgType : uint8_t {
 	LocatorSearchResult = 24,
 	// Reserved for the same reason as 20/21 and 23/24 above.  Stops a channel
 	// survey in progress; app<->receiver only, and never sent or parsed here.
-	ChannelSurveyCancelRequest = 25
+	ChannelSurveyCancelRequest = 25,
+	// Paged, bit-exact full-record transfer (ADR "The radio download becomes the
+	// primary data path").  New types rather than new fields on FlightData*, so
+	// the quick-look transfer above stays byte-identical for every app and
+	// receiver build that already speaks it.
+	FullRecordRequest = 26, // App→locator: send page N of a record (0xFFFF stops).
+	FullRecordData = 27,    // Locator→app: one packet of a page, FullRecordCodec payload.
+	FullRecordParity = 28,  // Locator→app: XOR of up to kParityGroupSize data packets.
+	FullRecordAck = 29,     // App→locator: bitmap of the page's packets received.
+	// App→locator: start (or cancel) a simulated flight the locator computes
+	// from a profile (ADR "An app-started simulated flight computed on the
+	// locator", 0041).  Accepted only disarmed, on the pad.
+	SimFlightRequest = 30,
+	// App→locator: start a simulated flight from a physical rocket profile
+	// (ADR-0041 as amended 2026-11-03).  Since then type 30 only cancels.
+	SimFlightStart = 31
 };
 
 // Flight event summary indices.  One entry per archived event timestamp; the
@@ -237,16 +252,18 @@ struct FlightMetadata {
 struct FlightEventsMessage {
 	PacketHeader packet_header;
 	uint8_t  record;              // archive slot this summary describes
-	uint8_t  reserved;            // pad to keep the u16/u32 fields naturally sized
+	uint8_t  flags;               // bit 0: a simulated flight (ADR-0041); was reserved, always 0
 	uint16_t present_mask;        // bit (1 << FlightEvent) set ⇒ that timestamp is valid
 	uint32_t flight_timestamp_s;  // GPS wall clock at flight start (Statistic::FlightTimestampS)
 	uint32_t event_timestamp_ms[kFlightEventCount];  // ms since the launch epoch, indexed by FlightEvent
 	float    max_altitude_m;      // raw-baro apogee peak (Statistic::MaxAltitudeM)
 	uint8_t  deployment_ch_stats[4];   // per channel: mode (bits 0-2) | fired (3) | pre-fire cont. (4) | post-fire cont. (5)
 };
-// NOTE: Statistic::MaxVelocityMps, MaxAccelerationMps2 and PhysicalDeploymentStats
-// exist in the archive enum but are never written by FlightManager, so they are
-// deliberately absent here — sending them would ship guaranteed zeros.  Add them
+static constexpr uint8_t kFlightEventsSimulated = 0x01u;   // FlightEventsMessage::flags
+// NOTE: Statistic::MaxVelocityMps and MaxAccelerationMps2 exist in the archive
+// enum but are never written by FlightManager, and PhysicalDeploymentStats only
+// as ADR-0041's simulated mark (which reaches the app as flags bit 0), so they
+// are deliberately absent here — sending them would ship guaranteed zeros.  Add them
 // once the locator actually records them (and bump the size assert below).
 
 // On-wire packet for flight profile transfer
@@ -259,6 +276,84 @@ struct FlightDataPacket {
 	uint32_t total_samples; // total samples in transfer
 	uint8_t payload[kPayloadSize]; // Compressed payload bytes
 };
+
+// ── Paged full-record transfer (ADR "The radio download becomes the primary
+// data path") ────────────────────────────────────────────────────────────────
+//
+// A record is cut into fixed pages of FullRecordCodec::kSamplesPerPage (512)
+// samples.  A page is up to 256 packets, so one FullRecordAck bitmap covers it.
+// EVERY packet is self-describing: it names its record (by CRC), page, first
+// sample and sample count, and is coded from the two flash samples before it.
+// So the app can take packets in any order (each decodes once the two samples
+// before it are in hand), resume a page after any interruption, and drop a
+// packet that belongs to some other record.
+//
+// record_crc is the IEEE CRC-32 of the record's raw FlightSample bytes in flash
+// order, and the record's identity on the wire: a slot reused by a new flight
+// gets a new CRC, so a resumed transfer can never splice two flights together.
+// The app verifies it over the reassembled record before calling it complete.
+//
+// The locator only serves this while disarmed and in WaitingLaunch or Landed,
+// and it sends its normal periodic frame between bursts, so every other app
+// function keeps working while a transfer runs in the background.
+struct FullRecordRequest {          // app→locator, MsgType::FullRecordRequest
+	PacketHeader packet_header;
+	uint32_t target_locator_id;     // ADR-0020, at the fixed offset every command uses
+	uint16_t page;                  // kFullRecordStopPage stops a transfer
+	uint8_t  record;                // archive slot
+	uint8_t  reserved;              // 0
+};
+static constexpr uint16_t kFullRecordStopPage = 0xFFFFu;
+
+// Data and parity share one layout.  A data packet carries packet_index,
+// first_in_page, sample_count and payload_len for itself, and parity_mask = 0.
+// A parity packet carries the group's first packet index, the member mask
+// (bit j ⇒ packet_index + j is included), and the XOR of every member's
+// first_in_page, sample_count, payload_len and zero-padded payload, so the one
+// missing member is rebuilt whole.
+//
+// packet_count = 0 is a marker: total_samples = 0 (and record_crc = 0) means the
+// record is empty or missing; otherwise the requested page is past the end.
+struct FullRecordPacketHeader {
+	PacketHeader packet_header;
+	uint32_t record_crc;
+	uint32_t total_samples;         // samples in the whole record
+	uint16_t page;
+	uint16_t packet_count;          // packets in this page, 1..256 (0 = marker)
+	uint8_t  packet_index;          // data: 0..255; parity: the group's first index
+	uint8_t  parity_mask;           // data: 0; parity: members included
+	uint16_t first_in_page;         // first sample, as an offset into the page
+	uint8_t  sample_count;          // samples in the payload
+	uint8_t  payload_len;           // payload bytes (the frame is header + this)
+	uint8_t  record;                // archive slot, for display; the CRC is the identity
+};
+constexpr size_t kFullRecordPayloadSize = kMaxPayloadBytes - sizeof(FullRecordPacketHeader);
+struct FullRecordPacket {
+	FullRecordPacketHeader h;
+	uint8_t payload[kFullRecordPayloadSize];
+};
+
+struct FullRecordAck {              // app→locator, MsgType::FullRecordAck
+	PacketHeader packet_header;
+	uint32_t target_locator_id;
+	uint32_t record_crc;            // must match the page being sent, or it is ignored
+	uint16_t page;
+	uint16_t packet_count;
+	uint8_t  bitmap[32];            // bit (i % 8) of byte (i / 8) ⇒ packet i received
+};
+
+// Recovery status rides in a spare bit of TelemetryData::physical_deployment_stats
+// (bits 0 and 1 are drogue and main detected) rather than in a new field, so the
+// message keeps its size and every parser in the field keeps working.
+// Set once the locator has landed and then been picked up: the accelerometer has
+// left its settled reading, or the board has turned, for a sustained window.  One
+// of the app's three triggers for starting a background transfer.
+static constexpr uint8_t kTelemetryPickedUpBit = 0x80u;
+// Set while the locator flies an app-started simulated flight (ADR "An
+// app-started simulated flight computed on the locator", 0041): every sensor
+// is synthetic and the locator is disarmed.  The app labels the flight
+// SIMULATED.  Same spare-bit scheme, so the message keeps its size.
+static constexpr uint8_t kTelemetrySimulatedBit = 0x40u;
 
 // ── Addressed app→locator commands (ADR-0020, #34) ──────────────────────────
 //
@@ -323,6 +418,68 @@ struct PadAlertSnoozeRequest {
 	uint8_t minutes;       // 0 cancels an active snooze
 };
 
+// Cancel an app-started simulated flight (ADR "An app-started simulated flight
+// computed on the locator", 0041).  A cancel is never refused.
+//
+// Until 2026-11-03 this also STARTED one, from a target apogee and burn time
+// (action 1).  That quick mode was replaced by the physics model and its start
+// is now ignored; SimFlightStart (31) starts a simulation.  The layout is kept so
+// the cancel stays byte-identical for every app and receiver that sends it.
+struct SimFlightRequest {
+	PacketHeader packet_header;
+	uint32_t target_locator_id;
+	uint16_t apogee_m;         // 30..3000
+	int32_t  origin_lat_1e7;
+	int32_t  origin_lon_1e7;
+	uint16_t wind_from_deg;    // 0..359, where the wind blows from
+	uint16_t seed;             // sensor noise
+	uint8_t  action;           // 0 cancel, 1 start
+	uint8_t  burn_ds;          // 3..50, tenths of a second
+	uint8_t  drogue_mps;       // 5..60
+	uint8_t  main_dmps;        // 20..150, tenths of a m/s
+	uint8_t  wind_mps;         // 0..20
+	uint8_t  reserved;
+};
+static constexpr uint8_t kSimFlightCancel = 0u;
+// SimFlightStart.temp_c: use the locator's own barometer temperature.
+static constexpr int8_t kSimTempFromBaro = -128;
+static constexpr uint8_t kSimFlightStart  = 1u;
+
+// Start a simulated flight from a physical rocket (ADR-0041 as amended
+// 2026-11-03).  Everything the locator integrates, in one frame: the motor's
+// thrust curve (thrust as a fraction of peak, so a 10 N and a 5,000 N motor get
+// the same resolution), its loaded and propellant mass, the rocket's dry mass,
+// reference diameter and Cd on SimFlight::kMachGrid, the rail, the day and the
+// descent rates.  Ignored unless every field is in range (SimFlight::Valid),
+// and refused unless disarmed, on the pad and still.  origin_* as above.
+struct SimFlightStart {
+	PacketHeader packet_header;
+	uint32_t target_locator_id;
+	int32_t  origin_lat_1e7;
+	int32_t  origin_lon_1e7;
+	uint16_t seed;              // sensor noise
+	uint16_t wind_from_deg;     // 0..359, where the wind blows from
+	uint16_t launch_az_deg;     // 0..359, the way the rail leans
+	uint16_t rail_len_cm;       // 0..2000
+	uint8_t  rail_angle_ddeg;   // 0..200, tenths of a degree from vertical
+	uint8_t  wind_mps;          // 0..20
+	uint8_t  drogue_mps;        // 5..60
+	uint8_t  main_dmps;         // 20..150, tenths of a m/s
+	int8_t   temp_c;            // -40..50 at the ground, or -128: the locator's baro
+	uint8_t  n_points;          // 2..32 thrust-curve points used
+	float    peak_thrust_n;
+	float    motor_loaded_kg;
+	float    motor_prop_kg;
+	float    dry_mass_kg;       // without the motor
+	float    ref_diameter_m;
+	uint16_t cd_milli[8];       // Cd x 1000 on SimFlight::kMachGrid
+	uint16_t t_ms[32];          // time after ignition
+	uint16_t thrust_frac[32];   // thrust / peak_thrust_n x 65535
+	// Added 2026-11-03 for the restoring-moment weathercock model.
+	uint16_t length_mm;         // 100..5000, overall length
+	uint8_t  stability_dcal;    // 5..100, static margin in tenths of a caliber
+};
+
 // NOTE: there is deliberately no "is this command addressed?" predicate here.
 // The locator requires an address from EVERY frame it acts on (ADR-0020), because
 // every frame reaching it is an app command.  An allowlist would have to be
@@ -376,5 +533,50 @@ static_assert(sizeof(DeploymentTestCountdownMessage) ==   7, "DeploymentTestCoun
 static_assert(sizeof(FlightDataRequest)              ==  11, "FlightDataRequest size changed");
 static_assert(sizeof(DeploymentTestRequest)          ==  11, "DeploymentTestRequest size changed");
 static_assert(sizeof(PadAlertSnoozeRequest)          ==  11, "PadAlertSnoozeRequest size changed — sync receiver + app");
+static_assert(sizeof(FullRecordRequest)              ==  14, "FullRecordRequest size changed — sync receiver + app + iOS");
+static_assert(sizeof(FullRecordPacketHeader)         ==  25, "FullRecordPacketHeader size changed — sync app + iOS");
+static_assert(kFullRecordPayloadSize                 == 230, "FullRecord payload size changed — re-check FullRecordCodec's worst case");
+static_assert(sizeof(FullRecordPacket)               == 255, "FullRecordPacket size changed (max LoRa frame 255)");
+static_assert(sizeof(FullRecordAck)                  ==  50, "FullRecordAck size changed — sync receiver + app + iOS");
+static_assert(offsetof(FullRecordPacketHeader, record_crc)    ==  6, "FullRecord offsets changed — sync app + iOS");
+static_assert(offsetof(FullRecordPacketHeader, total_samples) == 10, "FullRecord offsets changed — sync app + iOS");
+static_assert(offsetof(FullRecordPacketHeader, page)          == 14, "FullRecord offsets changed — sync app + iOS");
+static_assert(offsetof(FullRecordPacketHeader, packet_count)  == 16, "FullRecord offsets changed — sync app + iOS");
+static_assert(offsetof(FullRecordPacketHeader, packet_index)  == 18, "FullRecord offsets changed — sync app + iOS");
+static_assert(offsetof(FullRecordPacketHeader, parity_mask)   == 19, "FullRecord offsets changed — sync app + iOS");
+static_assert(offsetof(FullRecordPacketHeader, first_in_page) == 20, "FullRecord offsets changed — sync app + iOS");
+static_assert(offsetof(FullRecordPacketHeader, sample_count)  == 22, "FullRecord offsets changed — sync app + iOS");
+static_assert(offsetof(FullRecordPacketHeader, payload_len)   == 23, "FullRecord offsets changed — sync app + iOS");
+static_assert(offsetof(FullRecordPacketHeader, record)        == 24, "FullRecord offsets changed — sync app + iOS");
+static_assert(offsetof(FullRecordAck, record_crc)             == 10, "FullRecordAck offsets changed — sync app + iOS");
+static_assert(offsetof(FullRecordAck, bitmap)                 == 18, "FullRecordAck offsets changed — sync app + iOS");
+static_assert(offsetof(FullRecordRequest, page)               == 10, "FullRecordRequest offsets changed — sync app + iOS");
+// ADR-0041.  The receiver sizes this from its own table; the app builds it by offset.
+static_assert(sizeof(SimFlightRequest)               ==  30, "SimFlightRequest size changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightRequest, apogee_m)       == 10, "SimFlightRequest offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightRequest, origin_lat_1e7) == 12, "SimFlightRequest offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightRequest, origin_lon_1e7) == 16, "SimFlightRequest offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightRequest, wind_from_deg)  == 20, "SimFlightRequest offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightRequest, seed)           == 22, "SimFlightRequest offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightRequest, action)         == 24, "SimFlightRequest offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightRequest, wind_mps)       == 28, "SimFlightRequest offsets changed — sync receiver + app + iOS");
+static_assert(sizeof(SimFlightStart)                  == 199, "SimFlightStart size changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightStart, origin_lat_1e7)   == 10, "SimFlightStart offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightStart, seed)             == 18, "SimFlightStart offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightStart, rail_len_cm)      == 24, "SimFlightStart offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightStart, rail_angle_ddeg)  == 26, "SimFlightStart offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightStart, temp_c)           == 30, "SimFlightStart offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightStart, n_points)         == 31, "SimFlightStart offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightStart, peak_thrust_n)    == 32, "SimFlightStart offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightStart, ref_diameter_m)   == 48, "SimFlightStart offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightStart, cd_milli)         == 52, "SimFlightStart offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightStart, t_ms)             == 68, "SimFlightStart offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightStart, thrust_frac)      == 132, "SimFlightStart offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightStart, length_mm)        == 196, "SimFlightStart offsets changed — sync receiver + app + iOS");
+static_assert(offsetof(SimFlightStart, stability_dcal)   == 198, "SimFlightStart offsets changed — sync receiver + app + iOS");
+static_assert(sizeof(SimFlightStart) <= kMaxPayloadBytes, "SimFlightStart must fit one radio frame");
+static_assert(static_cast<uint8_t>(MsgType::SimFlightStart) == 31, "MsgType::SimFlightStart changed — sync receiver + app + iOS");
+static_assert(offsetof(FlightEventsMessage, flags)       ==  7, "FlightEventsMessage flags moved — sync app + iOS");
+static_assert(static_cast<uint8_t>(MsgType::SimFlightRequest) == 30, "MsgType::SimFlightRequest changed — sync receiver + app + iOS");
 
 } // namespace Communication

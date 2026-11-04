@@ -17,6 +17,10 @@
 #include "FlightProfileCodec.hpp"
 #include "TransferPlan.hpp"
 #include "MessageProtocol.hpp"
+#include "FullRecordSender.hpp"
+#include "SerialLink.hpp"
+#include "ParityRing.hpp"
+#include "PickupDetector.hpp"
 #include "Deployment.hpp"
 
 // ---------------------------------------------------------------------------
@@ -125,6 +129,21 @@ public:
 	void Process(DeviceState &device_state);
 
 	void OnAckReceived(const FlightDataAck &ack, DeviceState &device_state);
+
+	// Background full-record transfer: run from Process() every loop cycle.
+	void ServiceFullRecordTransfer(DeviceState device_state);
+	FullRecordSender::Phase FullRecordPhase() const { return full_.phase(); }
+
+	// The console's binary mode (ADR decision 6c, SerialLink.hpp).  Factory sets
+	// the port when the app's hello arrives and clears it when the console times
+	// out of binary mode; clearing it hands a running transfer back to the radio.
+	void SetSerialPort(SerialLink::TxQueue *port);
+	// A complete frame the console's parser collected, from main-loop context.
+	void OnSerialFrame(const uint8_t *data, size_t len);
+	// The periodic frame Factory last asked for, to the UART only: the answer to
+	// the app's hello, which is how the app knows the cable and its rate work.
+	void SendPeriodicToSerial();
+	bool PickedUp() const { return pickup_.picked_up(); }
 	bool IsComplete() const { return complete_; }
 	// Call from the main loop while in MetadataRequested or DataRequested.
 	// Reverts to Disarmed if the session has been idle too long (e.g. the app's
@@ -150,6 +169,32 @@ public:
 	// power cycle clears it. A snooze that outlived either would be an off
 	// switch, and would hand back exactly the forgotten arm ADR-0021 exists to
 	// catch. There is no "snooze indefinitely".
+	// The latest SimFlightRequest from the app, once (ADR-0041).  Factory gates it.
+	bool TakeSimFlightRequest(SimFlightRequest& out) {
+		if (!pending_sim_req_) return false;
+		const uint32_t primask = __get_PRIMASK();
+		__disable_irq();
+		out = pending_sim_req_msg_;
+		pending_sim_req_ = false;
+		__set_PRIMASK(primask);
+		return true;
+	}
+	// The latest SimFlightStart from the app, once (ADR-0041 as amended).
+	// ADR-0041: Factory reports a simulated flight from start until it is back
+	// on the pad, so the telemetry's simulated bit also covers the landed hold.
+	// The physics stops at landing, and a Landed frame without the bit read to
+	// the app as a real landing, which started an automatic full-record transfer.
+	void SetSimSession(bool on) { sim_session_ = on; }
+	bool TakeSimFlightStart(SimFlightStart& out) {
+		if (!pending_sim_start_) return false;
+		const uint32_t primask = __get_PRIMASK();
+		__disable_irq();
+		out = pending_sim_start_msg_;
+		pending_sim_start_ = false;
+		__set_PRIMASK(primask);
+		return true;
+	}
+
 	bool IsPadAlertSnoozed() const { return PadAlertSnoozeRemainingMs() > 0; }
 
 	int32_t PadAlertSnoozeRemainingMs() const {
@@ -316,18 +361,84 @@ private:
 	uint16_t window_start_ = 0;
 	bool     complete_     = false;
 
-	// Per-group parity accumulator.  Each entry accumulates the XOR of all
-	// FlightDataPacket payloads in a parity group so that the parity packet
-	// can be emitted as soon as the last member of the group is sent.
-	// kPayloadSize is defined in MessageProtocol.hpp as the usable payload
-	// region of a FlightDataPacket (kMaxPayloadBytes minus header and fixed
-	// fields), so this exactly matches the on-wire payload array.
-	struct ParityAccumulator {
-		uint8_t payload[kPayloadSize] = {};
-		uint8_t count   = 0;     // number of data packets XOR'd in so far
-		bool    pending = false;  // true once the group is complete and parity has not yet been sent
+	// Parity accumulators for the groups the window can touch: each XORs the
+	// FlightDataPacket payloads of one parity group so its parity packet can go
+	// out as soon as the group's last member has.  A ring of 4 rather than one
+	// per possible group (64, 15.4 KB): see ParityRing.hpp for why 4 is enough.
+	ParityRing parity_acc_;
+
+	// ADR-0041: written in the radio RX callback, taken by Factory.
+	SimFlightRequest pending_sim_req_msg_ {};
+	volatile bool    pending_sim_req_ = false;
+	SimFlightStart   pending_sim_start_msg_ {};
+	volatile bool    pending_sim_start_ = false;
+	bool             sim_session_ = false;
+	// The last position the GPS driver called valid, in degrees, and whether
+	// there has been one.  See SendablePosition.
+	double           last_good_lat_deg_ = 0.0;
+	double           last_good_lon_deg_ = 0.0;
+	bool             have_good_fix_ = false;
+	struct Position { double lat_deg; double lon_deg; };
+	Position SendablePosition(const GpsSample& gps);
+
+	// -----------------------------------------------------------------------
+	// Background full-record transfer (ADR "The radio download becomes the
+	// primary data path", #60).  Runs only while Disarmed in WaitingLaunch or
+	// Landed, alongside the normal beacon: see FullRecordSender.hpp for the
+	// burst / periodic / listen cycle.  It borrows chunk_buf_ as flash scratch
+	// (the quick-look transfer above never runs at the same time: it needs
+	// DataRequested, which pauses this one), and invalidates that buffer's
+	// cache on every read so the quick-look transfer never trusts stale samples.
+	// -----------------------------------------------------------------------
+	class FullIo final : public FullRecordSender::Io {
+	public:
+		explicit FullIo(Communication &c) : c_(c) {}
+		bool SampleCount(uint8_t record, uint32_t &n) override;
+		bool Read(uint8_t record, uint32_t first, FlightArchive::FlightSample *out, uint32_t n, uint32_t &got) override;
+		bool RadioIdle(uint32_t now_ms) override;
+		void Send(FullRecordPacket &pkt, size_t len) override;
+		void SendPeriodic() override;
+		bool SerialIdle(uint32_t now_ms) override;
+		void SendSerial(FullRecordPacket &pkt, size_t len) override;
+		void SendSerialPeriodic() override;
+	private:
+		Communication &c_;
 	};
-	ParityAccumulator parity_acc_[kMaxPackets / kParityGroupSize];
+	SerialLink::TxQueue *serial_ = nullptr;   // non-null while the console is in binary mode
+	FullIo full_io_ { *this };
+	FullRecordSender::Sender full_ { full_io_, chunk_buf_, kChunkSize };
+	PickupDetector pickup_;
+
+	// Deferred from the radio ISR like pending_begin_transfer_: the sender reads
+	// flash, so it only ever runs from Process().  A frame arriving while the
+	// previous one is still unconsumed is dropped; the app repeats both.
+	volatile bool pending_full_req_ = false;
+	FullRecordRequest pending_full_req_msg_ { };
+	FullRecordSender::Path pending_full_req_path_ = FullRecordSender::Path::Radio;
+	volatile bool pending_full_ack_ = false;
+	FullRecordAck pending_full_ack_msg_ { };
+	FullRecordSender::Path pending_full_ack_path_ = FullRecordSender::Path::Radio;
+
+	// The periodic frame Factory last asked for, so the sender can send it
+	// between bursts while it holds the beacon (Factory's own 1 Hz call is
+	// deferred, not lost).
+	enum class PeriodicKind : uint8_t { PreLaunch, Telemetry };
+	PeriodicKind periodic_kind_ = PeriodicKind::PreLaunch;
+	bool    periodic_armed_ = false;
+	uint8_t periodic_pad_alert_ = 0;
+	// radio = false builds the frame for the UART alone (the serial path's own
+	// periodic frame, ADR decision 6c); either way it is copied to the UART while
+	// the console is in binary mode.
+	void SendPreLaunchDataNow(bool armed, uint8_t pad_alert, bool radio = true);
+	void SendTelemetryDataNow(bool armed, bool radio = true);
+	void CopyToSerial(const void *frame, size_t len);
+
+	// Start time of the transmission in flight.  The SubGHz driver's TX timeout
+	// is not routed to OnRadioTxDone, so a lost TxDone would leave radio_busy_
+	// set and the background transfer waiting forever; FullIo::RadioIdle clears
+	// it after kRadioBusyWatchdogMs, well past the longest frame's airtime.
+	uint32_t radio_tx_start_ms_ = 0;
+	static constexpr uint32_t kRadioBusyWatchdogMs = 2000u;
 
 #if SP_LOSS_INJECT
 	// Loss-injection state (issue #18).  dbg_txdrop_per_group_ data packets at the

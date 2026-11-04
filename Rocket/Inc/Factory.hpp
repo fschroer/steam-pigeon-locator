@@ -69,6 +69,14 @@ private:
 	// navigation_.Update().
 	void ServiceConsole();
 	void HandleConsoleChar(uint8_t uart_char);
+	// The console's binary mode, for the full-record transfer over the USB cable
+	// (ADR "The radio download becomes the primary data path", decision 6c;
+	// SerialLink.hpp).  Entered by the app's hello byte at an idle console, left
+	// after SerialLink::kHoldMs with neither a hello nor a valid frame.
+	void HandleBinaryByte(uint8_t b);
+	void ServiceBinaryMode();
+	// Starts the next queued buffer on the UART TX DMA, if the wire is free.
+	void KickSerialTx();
 	// Runs the sync-byte verify timeout and persists a detection once it commits.
 	// Called from ServiceConsole so it ticks on the 50 ms cycle whether or not any
 	// bytes arrived — a half-finished detection has to time out on its own.
@@ -84,6 +92,11 @@ private:
 	// setting actually take effect?", which otherwise cannot be seen without
 	// flying and reading the archived body accel back out (#36 item 5).
 	void PrintMountingDiag();
+	// 's' console key, and once at the end of Init(): each sensor's health and,
+	// if any failed its power-on check, what that disables (ADR-0038).  Answers
+	// in any arm state — it is one line, and "why will it not arm?" is asked by
+	// someone who has just been refused.
+	void PrintSensorStatus();
 	// 'v' console key: profile the battery-sense chain (reference, converter,
 	// load switch, divider, filter cap) and print it.  The app's 8-step gauge
 	// renders every reading below 3750 mV as the same empty bar, and
@@ -104,11 +117,31 @@ private:
 	// Long enough to find the probe points and read a settled value, short
 	// enough that walking away cannot leave the divider drawing current.
 	static constexpr uint16_t kBattHoldCycles = SAMPLES_PER_SECOND * 10u;   // ~10 s
+	// Once-per-second slots in ProcessRocketEvents' rocket_service_count switch.
+	// Written as the time into the second they ran at under the 20 Hz loop (counts
+	// 0 / 2 / 3 / 5), so the divider still gets 100 ms to settle before the
+	// telemetry slot reads it, whatever the loop rate (ADR-0039).
+	static constexpr uint16_t kSlotDividerOn  = 0u;
+	static constexpr uint16_t kSlotTelemetry  = SamplesForMs(100);
+	static constexpr uint16_t kSlotDividerOff = SamplesForMs(150);
+	static constexpr uint16_t kSlotLedOff     = SamplesForMs(250);
+	// End of the once-a-second yellow sensor-fault flash (ADR-0038), which
+	// kSlotLedOff starts; count 7 under the 20 Hz loop.
+	static constexpr uint16_t kSlotFaultLedOff = SamplesForMs(350);
+	static_assert(kSlotDividerOn < kSlotTelemetry && kSlotTelemetry < kSlotDividerOff
+	              && kSlotDividerOff < kSlotLedOff && kSlotLedOff < kSlotFaultLedOff
+	              && kSlotFaultLedOff < SAMPLES_PER_SECOND,
+	              "once-per-second slots must be distinct and in order");
 
 	static constexpr uint16_t kUart2RxBufSize = 256;  // power of two
 	volatile uint8_t  uart2_rx_buf_[kUart2RxBufSize] = { };
 	volatile uint16_t uart2_rx_head_ = 0;  // producer: UART2 RX ISR
 	volatile uint16_t uart2_rx_tail_ = 0;  // consumer: main loop
+
+	SerialLink::Parser  serial_parser_;
+	SerialLink::TxQueue serial_tx_;
+	bool     binary_mode_ = false;
+	uint32_t binary_last_ms_ = 0;
 
 	UART_HandleTypeDef &huart2_;
 	SPI_HandleTypeDef &hspi2_;
@@ -248,4 +281,20 @@ private:
 	// makes.
 	bool       vac_sim_running_   = false;
 	uint32_t   vac_sim_tick_      = 0;
+
+	// App-started simulated flight (ADR "An app-started simulated flight
+	// computed on the locator", 0041).  In every build.  Navigation generates
+	// the sensors; Factory owns the gates, the canopy feedback, the record's
+	// mark and the return to the pad.
+	enum class SimStage : uint8_t { Off, Flying, Closing, LandedHold };
+	SimStage   sim_stage_          = SimStage::Off;
+	bool       sim_marked_         = false;   // record's simulated stat written
+	uint32_t   sim_landed_since_ms_ = 0;
+	static constexpr uint32_t kSimLandedHoldMs = 10000u;
+	// Take the app's SimFlightRequest and run the lifecycle.  Disarmed/Armed only.
+	void ServiceSimFlight(FlightStates& flight_state);
+	void ServiceSimFlightStage(FlightStates& flight_state);
+	// End it now: stop the generator and, if it had launched, land the flight
+	// so the record closes like any other.
+	void EndSimFlight();
 };

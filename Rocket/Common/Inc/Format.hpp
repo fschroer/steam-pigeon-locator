@@ -10,6 +10,10 @@ void FormatFloat(char* out, float value, uint32_t frac_digits);
 void FormatFloatRight(char* out, float value, uint32_t frac_digits, uint32_t width);
 void FormatUnixUtc(char* out, uint32_t ts);
 void Uint32ToHex(char* out, uint32_t value);
+// Degrees x 1e-7 (the archive's lat/lon) as exact decimal degrees, "-119.1103439".
+// Integer-only, so every stored digit survives: going through float kept ~0.4 m.
+// out needs 13 bytes ("-2147.4836480" worst case plus the terminator).
+void FormatDeg1e7(char* out, int32_t value);
 
 // ─────────────────────────────────────────────
 // Format descriptor structs

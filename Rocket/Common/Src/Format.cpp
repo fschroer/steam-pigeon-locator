@@ -44,6 +44,20 @@ void FormatUintRight(char* out, uint32_t value, uint32_t width)
     out[pad + count] = '\0';
 }
 
+void FormatDeg1e7(char* out, int32_t value)
+{
+    char* p = out;
+    uint32_t m = static_cast<uint32_t>(value);
+    if (value < 0) { *p++ = '-'; m = 0u - m; }       // INT32_MIN safe: unsigned negate
+    uint32_t whole = m / 10000000u;
+    uint32_t frac  = m % 10000000u;
+    FormatUint(p, whole);
+    while (*p) ++p;
+    *p++ = '.';
+    for (int i = 6; i >= 0; --i) { p[i] = static_cast<char>('0' + frac % 10u); frac /= 10u; }
+    p[7] = '\0';
+}
+
 void FormatFloat(char* out, float value, uint32_t frac_digits)
 {
     char* p = out;

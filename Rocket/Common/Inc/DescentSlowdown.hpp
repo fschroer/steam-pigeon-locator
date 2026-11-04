@@ -32,12 +32,15 @@
 //
 // HAL-free and header-only so Tests/DescentSlowdown compiles it on the host.
 
+#include <cmath>
 #include <cstdint>
+#include "Constants.hpp"
 
 namespace DescentSlowdown {
 
-constexpr int   kMeanSamples       = 20;     // 1 s at 20 Hz
-constexpr int   kPersistSamples    = 30;     // 1.5 s
+// Held as the times they were tuned at, not as 20 Hz counts (ADR-0039).
+constexpr int   kMeanSamples       = SamplesForMs(1000);   // 1 s (20 @ 20 Hz)
+constexpr int   kPersistSamples    = SamplesForMs(1500);   // 1.5 s (30 @ 20 Hz)
 constexpr float kDrogueSlowdownMps = 5.0f;
 constexpr float kMainSlowdownMps   = 8.0f;
 constexpr float kDescendingMps     = -1.0f;  // vertical speed, +up
@@ -90,6 +93,58 @@ private:
     bool  armed_ = false, detected_ = false;
     int   run_ = 0;
     float ref_ = 0.0f;
+};
+
+/**
+ * The drogue that opens at apogee (2026-11-04, Frank).  It leaves no slowdown:
+ * the rocket only speeds up, to the drogue's rate, so Detector never fires.
+ * What it does leave is a descent that levels off well below free fall.
+ *
+ * Confirmed when the 1 s trailing mean has stayed within kSteadyMps of where the
+ * run started for kPersistSamples, while descending faster than kDescendingMps
+ * but slower than both kLevelOffMaxMps and kFreeFallFraction of the speed a body
+ * falling freely from rest at apogee would have reached by now.
+ *
+ *   - Free fall from apogee changes the mean by ~15 m/s over 1.5 s, so it is
+ *     never steady.
+ *   - A rocket falling with no canopy levels off too, but fast; kLevelOffMaxMps
+ *     keeps that out.  Something tumbling (Nike Smoke, in pieces) can level off
+ *     slower and read as a drogue, the trade ADR-0036 already accepted.
+ *   - Touchdown is not "descending", so it resets the run.
+ *
+ * Like Detector, it reports once.  FlightManager runs it from drogue primary to
+ * main primary.  Thresholds are first guesses, to be checked on the archive.
+ */
+constexpr float kGravityMps2       = 9.80665f;
+constexpr float kSteadyMps         = 2.0f;
+constexpr float kFreeFallFraction  = 0.6f;
+constexpr float kLevelOffMaxMps    = 45.0f;
+
+class LevelOff {
+public:
+    void Reset() { detected_ = false; run_ = 0; run_ref_ = 0.0f; }
+
+    bool Update(const TrailingMean& m, float seconds_since_apogee) {
+        if (detected_ || !m.Full()) return false;
+        const float mean = m.Mean();
+        if (!(mean < kDescendingMps)) { run_ = 0; return false; }
+        if (run_ == 0 || std::fabs(mean - run_ref_) > kSteadyMps) { run_ref_ = mean; run_ = 1; }
+        else ++run_;
+        const float speed = -mean;
+        const float free_fall = kGravityMps2 * seconds_since_apogee;
+        if (run_ >= kPersistSamples && speed < kLevelOffMaxMps && speed < kFreeFallFraction * free_fall) {
+            detected_ = true;
+            return true;
+        }
+        return false;
+    }
+
+    bool Detected() const { return detected_; }
+
+private:
+    bool  detected_ = false;
+    int   run_ = 0;
+    float run_ref_ = 0.0f;
 };
 
 inline constexpr Detector Drogue() { return Detector(true,  kDrogueSlowdownMps); }

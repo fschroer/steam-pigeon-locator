@@ -16,6 +16,14 @@
 // ArchiveTypes.hpp before changing either number.
 constexpr uint8_t record_count = 9;
 
+// Samples per record (ARCHIVE_VERSION 8, ADR-0039).  The record used to be sized
+// as 8 minutes at 20 Hz (9,600 samples).  At 50 Hz with variable-rate logging a
+// flight's worst case is about 6,200: 62 s at 50 Hz from the ring through the
+// ascent cap, 10 s at 50 Hz around main, 4 s at landing, and the rest of an
+// 8-minute flight (kMaxFlightMs) at 5 Hz.  9,000 keeps 9 records at the 94-byte
+// sample with ~45 % headroom over that.
+constexpr uint32_t kRecordCapacitySamples = 9000u;
+
 using RocketArchive = FlightArchive::Archive<
 FlightArchive::FlightSample,
 FlightArchive::ExampleEventStats,
@@ -53,6 +61,8 @@ public:
 		bool              baro_raw_valid   = false;
 		float             baro_pressure_pa = 0.0f;
 		float             baro_temp_c      = 0.0f;
+		// MMC5983MA, sensor frame (ADR-0039).  nullptr or !valid = unknown.
+		const MagSample   *mag             = nullptr;
 	};
 	bool WriteData(const SampleInputs &in);
 	// Pack a FlightSample WITHOUT writing it.  Shared by WriteData() and the

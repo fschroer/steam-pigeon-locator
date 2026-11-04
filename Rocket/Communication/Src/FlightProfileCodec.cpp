@@ -5,6 +5,36 @@
 
 namespace FlightProfileCodec {
 
+// The profile the radio carries, in the float units its wire format has always
+// used (CompressedHeader / CompressedDelta are unchanged).  The archive stores
+// these fields as fixed-point since ARCHIVE_VERSION 8 (ADR-0040); converting
+// here keeps the encoder's float arithmetic, and so the app's decoder, exactly
+// as before.  gyro is rad/s despite the wire field names saying dps -- the
+// archive held rad/s and that is what has always been sent.
+namespace {
+struct ProfilePoint {
+    uint32_t timestamp_ms;
+    float    alt;
+    Vec3f    accel;
+    Vec3f    gyro;
+};
+ProfilePoint ToPoint(const FlightArchive::FlightSample& s) {
+    return { s.timestamp_ms, FlightArchive::RawBaroAglM(s),
+             FlightArchive::AccelMps2(s), FlightArchive::GyroRps(s) };
+}
+FlightArchive::FlightSample FromPoint(const ProfilePoint& p, int32_t lat_1e7, int32_t lon_1e7) {
+    FlightArchive::FlightSample s{};
+    s.timestamp_ms = p.timestamp_ms;
+    FlightArchive::SetRawBaroAglM(s, p.alt);
+    FlightArchive::SetAccelMps2(s, p.accel);
+    FlightArchive::SetGyroRps(s, p.gyro);
+    s.lat_1e7 = lat_1e7;
+    s.lon_1e7 = lon_1e7;
+    return s;
+}
+}  // namespace
+
+
 namespace {
 
 // Saturate to the int16_t delta range.  The former int16_t(std::round(...))
@@ -62,9 +92,10 @@ size_t PackSamples(const FlightArchive::FlightSample* samples,
     // (ADR-0003 / ADR-0005), and the fused columns are the live EKF's purely
     // observational output (ADR-0005 amendment 2026-07-15).  The app's profile
     // chart plots the altitude the deployment decisions were actually made on.
-    hdr.base_altitude_m   = samples[0].raw_baro_altitude_agl;
-    hdr.base_accel_mps2   = samples[0].accel;
-    hdr.base_gyro_dps     = samples[0].gyro;
+    const ProfilePoint first = ToPoint(samples[0]);
+    hdr.base_altitude_m   = first.alt;
+    hdr.base_accel_mps2   = first.accel;
+    hdr.base_gyro_dps     = first.gyro;
     hdr.base_lat_rad      = FlightArchive::Deg1e7ToRad(samples[0].lat_1e7);
     hdr.base_lon_rad      = FlightArchive::Deg1e7ToRad(samples[0].lon_1e7);
 
@@ -78,21 +109,21 @@ size_t PackSamples(const FlightArchive::FlightSample* samples,
     // rounding accumulate along it (ADR-0009 amendment 2026-09-28, invariant
     // 14).  Updated below with the decoder's own float arithmetic, so the two
     // stay bit-identical and the decoders need no change.
-    FlightArchive::FlightSample rec = samples[0];
+    ProfilePoint rec = first;
     size_t written = 1;
 
     for (size_t i = 1; i < sample_count; ++i) {
         if (p + sizeof(CompressedDelta) > end)
             break;
 
-        const auto& s = samples[i];
+        const ProfilePoint s = ToPoint(samples[i]);
 
         CompressedDelta d{};
 
         // Time and kinematic fields: delta from the reconstructed previous sample
         d.d_timestamp_ms     = Sat16(static_cast<int64_t>(s.timestamp_ms)
                                      - static_cast<int64_t>(rec.timestamp_ms));
-        d.d_alt_0p1m         = Sat16((s.raw_baro_altitude_agl - rec.raw_baro_altitude_agl) * 10.0f);
+        d.d_alt_0p1m         = Sat16((s.alt - rec.alt) * 10.0f);
         d.d_accel_x_0p1mps2  = Sat16((s.accel.x    - rec.accel.x)     * 10.0f);
         d.d_accel_y_0p1mps2  = Sat16((s.accel.y    - rec.accel.y)     * 10.0f);
         d.d_accel_z_0p1mps2  = Sat16((s.accel.z    - rec.accel.z)     * 10.0f);
@@ -102,15 +133,15 @@ size_t PackSamples(const FlightArchive::FlightSample* samples,
 
         // Lat/lon: delta from the packet's absolute base, NOT from prev.
         // This keeps accumulated floating-point error out of the decode path.
-        d.d_lat_scaled = int32_t(std::round((FlightArchive::Deg1e7ToRad(s.lat_1e7) - hdr.base_lat_rad) * LATLON_SCALE));
-        d.d_lon_scaled = int32_t(std::round((FlightArchive::Deg1e7ToRad(s.lon_1e7) - hdr.base_lon_rad) * LATLON_SCALE));
+        d.d_lat_scaled = int32_t(std::round((FlightArchive::Deg1e7ToRad(samples[i].lat_1e7) - hdr.base_lat_rad) * LATLON_SCALE));
+        d.d_lon_scaled = int32_t(std::round((FlightArchive::Deg1e7ToRad(samples[i].lon_1e7) - hdr.base_lon_rad) * LATLON_SCALE));
 
         std::memcpy(p, &d, sizeof(d));
         p += sizeof(d);
 
         // Advance exactly as UnpackSamples (and the app's decodePayload) will.
         rec.timestamp_ms          = rec.timestamp_ms          + d.d_timestamp_ms;
-        rec.raw_baro_altitude_agl = rec.raw_baro_altitude_agl + d.d_alt_0p1m        / 10.0f;
+        rec.alt                   = rec.alt                   + d.d_alt_0p1m        / 10.0f;
         rec.accel.x               = rec.accel.x               + d.d_accel_x_0p1mps2 / 10.0f;
         rec.accel.y               = rec.accel.y               + d.d_accel_y_0p1mps2 / 10.0f;
         rec.accel.z               = rec.accel.z               + d.d_accel_z_0p1mps2 / 10.0f;
@@ -141,27 +172,27 @@ size_t UnpackSamples(const uint8_t* payload,
     p += sizeof(hdr);
 
     // Reconstruct the first sample from the absolute header values
-    FlightArchive::FlightSample prev{};
+    ProfilePoint prev{};
     prev.timestamp_ms = hdr.base_timestamp_ms;
-    prev.raw_baro_altitude_agl = hdr.base_altitude_m;
+    prev.alt          = hdr.base_altitude_m;
     prev.accel        = hdr.base_accel_mps2;
     prev.gyro         = hdr.base_gyro_dps;
-    prev.lat_1e7      = FlightArchive::RadToDeg1e7(hdr.base_lat_rad);
-    prev.lon_1e7      = FlightArchive::RadToDeg1e7(hdr.base_lon_rad);
 
     size_t written = 0;
-    out_samples[written++] = prev;
+    out_samples[written++] = FromPoint(prev,
+            FlightArchive::RadToDeg1e7(hdr.base_lat_rad),
+            FlightArchive::RadToDeg1e7(hdr.base_lon_rad));
 
     while (p + sizeof(CompressedDelta) <= end && written < max_samples) {
         CompressedDelta d{};
         std::memcpy(&d, p, sizeof(d));
         p += sizeof(d);
 
-        FlightArchive::FlightSample s{};
+        ProfilePoint s{};
 
         // Kinematic fields: apply delta to previous sample
         s.timestamp_ms = prev.timestamp_ms + d.d_timestamp_ms;
-        s.raw_baro_altitude_agl = prev.raw_baro_altitude_agl + d.d_alt_0p1m / 10.0f;
+        s.alt          = prev.alt          + d.d_alt_0p1m / 10.0f;
         s.accel.x      = prev.accel.x      + d.d_accel_x_0p1mps2 / 10.0f;
         s.accel.y      = prev.accel.y      + d.d_accel_y_0p1mps2 / 10.0f;
         s.accel.z      = prev.accel.z      + d.d_accel_z_0p1mps2 / 10.0f;
@@ -170,10 +201,9 @@ size_t UnpackSamples(const uint8_t* payload,
         s.gyro.z       = prev.gyro.z       + d.d_gyro_z_0p1dps   / 10.0f;
 
         // Lat/lon: apply delta from the packet's absolute base (matches encode)
-        s.lat_1e7 = FlightArchive::RadToDeg1e7(hdr.base_lat_rad + d.d_lat_scaled / LATLON_SCALE);
-        s.lon_1e7 = FlightArchive::RadToDeg1e7(hdr.base_lon_rad + d.d_lon_scaled / LATLON_SCALE);
-
-        out_samples[written++] = s;
+        out_samples[written++] = FromPoint(s,
+                FlightArchive::RadToDeg1e7(hdr.base_lat_rad + d.d_lat_scaled / LATLON_SCALE),
+                FlightArchive::RadToDeg1e7(hdr.base_lon_rad + d.d_lon_scaled / LATLON_SCALE));
         prev = s;
     }
 

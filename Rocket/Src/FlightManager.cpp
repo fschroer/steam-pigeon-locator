@@ -289,7 +289,11 @@ float FlightManager::SelectDeployVspeed(const NavSolution& sol, const BaroSample
     // One cycle of outage reproduces the original bound EXACTLY, so the healthy
     // path is unchanged — this only ever loosens a bound that was already failing.
     const uint32_t outage_ms = now_ms - m_last_raw_vspeed_ms_;
-    const float    cycles    = (outage_ms * 0.001f) * static_cast<float>(SAMPLES_PER_SECOND);
+    // The allowance was tuned per 20 Hz cycle (20 m/s per 50 ms); it is held per
+    // 50 ms of outage, not per loop cycle, so the gate is as loose at 50 Hz as it
+    // was at 20 Hz (ADR-0039).  The minimum of one unit keeps a sample that
+    // arrives a single 20 ms cycle after the last from being held to 8 m/s.
+    const float    cycles    = (outage_ms * 0.001f) * 20.0f;
     const float    bound     = kDeployVelDistrustMps * (cycles > 1.0f ? cycles : 1.0f);
 
     // Accept raw if self-consistent with the last good raw velocity.
@@ -559,6 +563,8 @@ void FlightManager::UpdateFlightState() {
                 DeployIfClear(4);
             }
             m_drogue_primary_fired_ = true;
+            m_rate_events_.has_drogue = true;          // ends the ascent full-rate window (ADR-0039)
+            m_rate_events_.drogue_ms  = flight_time_ms;
             AdvanceFlightState(FlightStates::DroguePrimaryEvent);
             archive_.WriteEvent(FlightArchive::Statistic::DroguePrimaryDeployTimestampMs, flight_time_ms);
         }
@@ -618,6 +624,8 @@ void FlightManager::UpdateFlightState() {
                 DeployIfClear(4);
             }
             m_main_primary_fired_ = true;
+            m_rate_events_.has_main = true;            // full-rate window around main (ADR-0039)
+            m_rate_events_.main_ms  = flight_time_ms;
             AdvanceFlightState(FlightStates::MainPrimaryEvent);
             archive_.WriteEvent(FlightArchive::Statistic::MainPrimaryDeployTimestampMs, flight_time_ms);
         }
@@ -654,7 +662,25 @@ void FlightManager::UpdateFlightState() {
         // Physical drogue / main inference (#54, DescentSlowdown.hpp): the 1 s mean
         // descent rate slower than its reference by a margin, held for 1.5 s while
         // still descending.  Observational only -- nothing is gated on these bits.
-        if (flight_state_ >= FlightStates::DroguePrimaryEvent && drogue_slowdown_.Update(descent_mean_)) {
+        // The drogue detector stops when the main fires (2026-11-04): left running,
+        // a drogue that opened at apogee (no slowdown of its own) latched onto the
+        // main's slowdown, and "Drogue opening detected" was spoken just after the
+        // main charge.
+        //
+        // Either evidence counts: a slowdown (the drogue opened on a rocket that
+        // had built speed) or a level-off well below free fall (it opened at
+        // apogee, so there was no speed to lose; Frank, 2026-11-04).  Both are
+        // updated every cycle so each sees the whole descent.
+        bool drogue_seen = false;
+        if (flight_state_ >= FlightStates::DroguePrimaryEvent && !m_main_primary_fired_) {
+            const bool slowed = drogue_slowdown_.Update(descent_mean_);
+            const bool level  = drogue_level_off_.Update(descent_mean_,
+                    static_cast<float>(noseover_time_) / static_cast<float>(SAMPLES_PER_SECOND));
+            // The first of the two reports it; the other may still latch later.
+            drogue_seen = (slowed || level)
+                    && !(physical_deployment_stats_ & (1 << bit_shift_drogue_deployed));
+        }
+        if (drogue_seen) {
             physical_deployment_stats_ = (physical_deployment_stats_ | (1 << bit_shift_drogue_deployed));
             archive_.WriteEvent(FlightArchive::Statistic::DrogueVelocityThresholdTimestampMs, flight_time_ms);
         }
@@ -670,6 +696,8 @@ void FlightManager::UpdateFlightState() {
             // Arm the post-landing tail so ~2 s of settled-on-ground samples are
             // captured in the Landed state before the record is closed.
             m_landed_tail_remaining_ = kLandedTailSamples;
+            m_rate_events_.has_landing = true;         // full rate from landing - 2 s (ADR-0039)
+            m_rate_events_.landing_ms  = flight_time_ms;
             archive_.WriteEvent(FlightArchive::Statistic::LandingTimestampMs, flight_time_ms);
             // The whole status byte, not just the configured mode (#52): which
             // channels fired, and their continuity before and after, is the
@@ -766,6 +794,8 @@ void FlightManager::UpdateFlightState() {
         in.baro_raw_valid   = baro_raw.valid;          // #56: pre-filter pressure + die temp
         in.baro_pressure_pa = baro_raw.pressure_pa;
         in.baro_temp_c      = baro_raw.temperature_c;
+        const MagSample mag = nav_.getMag();
+        in.mag              = &mag;
         FlightArchive::FlightSample s = Archive::BuildSample(in);
         // A stale fix latches lat/lon at the last parsed value, so without the fix
         // type a frozen position is indistinguishable in the record from a
@@ -779,20 +809,19 @@ void FlightManager::UpdateFlightState() {
 
     // Force-close the flight once the record span is full so the landing timestamp
     // is never larger than the recorded data span.
-    if (flight_state_ >= FlightStates::Launched && flight_state_ < FlightStates::Landed
-            && flight_time_ms >= kMaxFlightMs) {
-        flight_state_ = FlightStates::Landed;
-        nav_.setPhase(FlightStates::Landed);
-        archive_.WriteEvent(FlightArchive::Statistic::LandingTimestampMs, flight_time_ms);
-    }
+    if (flight_time_ms >= kMaxFlightMs)
+        ForceLand();
 
-    // --- Pre-launch ring drain ---
-    // Once launched, write buffered samples oldest-first into the archive.  While
-    // in flight the drain is throttled to at most one flash chunk commit per cycle
-    // (the timing budget); at landing the (near-empty) remainder is flushed in full
-    // so CloseCurrentFlight, called immediately after, writes a complete record.
+    // --- Ring drain ---
+    // Once launched, write buffered samples oldest-first into the archive,
+    // throttled to at most one flash chunk commit per cycle (the timing budget),
+    // always -- including after landing.  ADR-0039 keeps up to 2 s of descent in
+    // the ring for the lookback, and flushing that in one cycle at landing would
+    // be ~20 chunk commits in a 20 ms loop.  RecordComplete() waits for the ring
+    // to empty instead; at 5 samples/cycle against 1 pushed it empties in ~0.5 s,
+    // well inside the 2 s landed tail.
     if (flight_state_ >= FlightStates::Launched)
-        DrainPreLaunchRing(/*flush_all=*/ flight_state_ >= FlightStates::Landed);
+        DrainPreLaunchRing(/*flush_all=*/ false);
 }
 
 // ---------------------------------------------------------------------------
@@ -825,17 +854,36 @@ void FlightManager::PushPreLaunchSample(const FlightArchive::FlightSample &s, bo
 // remain.
 // ---------------------------------------------------------------------------
 void FlightManager::DrainPreLaunchRing(bool flush_all) {
-    uint16_t to_write = flush_all ? m_ring_count_ : archive_.SamplesUntilChunkCommit();
-    if (to_write > m_ring_count_)
-        to_write = m_ring_count_;
+    // Variable-rate archive (ADR-0039, ArchiveRatePolicy.hpp).  Each sample is
+    // rebased to the record epoch, then:
+    //   - inside the ascent window: final at once, written;
+    //   - otherwise: held until kLookbackMs old (so an event up to 2 s after it
+    //     can still claim it for a full-rate window), then kept or dropped by
+    //     the 5 Hz decimator.  Once Landed nothing more can claim a sample, so
+    //     the hold is skipped.
+    // Dropped samples cost no flash, so only kept ones count against the
+    // one-chunk-per-cycle budget.
+    uint16_t budget = flush_all ? m_ring_count_ : archive_.SamplesUntilChunkCommit();
+    const bool hold_for_lookback = !flush_all && flight_state_ < FlightStates::Landed;
 
-    for (uint16_t i = 0; i < to_write; ++i) {
+    while (m_ring_count_ > 0 && budget > 0) {
         FlightArchive::FlightSample s = m_ring_[m_ring_head_];
         s.timestamp_ms -= m_record_origin_ms_;   // rebase to record epoch
-        if (!archive_.WriteBuiltSample(s))
-            break;                                 // record full / write failed
+        if (hold_for_lookback
+                && !ArchiveRate::InAscentWindow(s.timestamp_ms, m_rate_events_)
+                && (flight_time_ms - s.timestamp_ms) < ArchiveRate::kLookbackMs)
+            break;                                 // too recent to decide
+        const bool keep = m_decimator_.Keep(s.timestamp_ms, m_rate_events_);
         m_ring_head_ = static_cast<uint16_t>((m_ring_head_ + 1) % kPreLaunchRingSamples);
         --m_ring_count_;
+        if (!keep)
+            continue;
+        --budget;
+        // A failed write (record full) drops the sample rather than stalling the
+        // ring: RecordComplete() waits for an empty ring, so a sample that can
+        // never be written must not stay in it.
+        if (!archive_.WriteBuiltSample(s))
+            break;
     }
 }
 
@@ -855,6 +903,19 @@ void FlightManager::DeployIfClear(uint8_t channel) {
         Deploy(channel, DeployState::On);
     else
         deployment_queued_[channel - 1] = true;
+}
+
+// Land now, wherever the flight is: the record-span limit above, and a
+// simulated flight ended in the air (ADR-0041).  No landed tail is armed, so
+// RecordComplete() turns true as soon as the ring has drained.
+void FlightManager::ForceLand() {
+    if (flight_state_ < FlightStates::Launched || flight_state_ >= FlightStates::Landed)
+        return;
+    flight_state_ = FlightStates::Landed;
+    nav_.setPhase(FlightStates::Landed);
+    m_rate_events_.has_landing = true;
+    m_rate_events_.landing_ms  = flight_time_ms;
+    archive_.WriteEvent(FlightArchive::Statistic::LandingTimestampMs, flight_time_ms);
 }
 
 void FlightManager::ResetFlight() {
@@ -881,6 +942,7 @@ void FlightManager::ResetFlight() {
     deploy_ch4_reset_       = false;
     descent_mean_.Reset();
     drogue_slowdown_.Reset();
+    drogue_level_off_.Reset();
     main_slowdown_.Reset();
     flight_time_ms          = 0;
     m_launch_candidate_ms_  = 0;
@@ -912,6 +974,8 @@ void FlightManager::ResetFlight() {
     // Clear the record epoch; re-established at the next launch detect.
     m_record_origin_ms_     = 0;
     m_record_origin_set_    = false;
+    m_rate_events_          = ArchiveRate::Events{};
+    m_decimator_.Reset();
 }
 
 // ---------------------------------------------------------------------------
@@ -971,13 +1035,13 @@ uint32_t FlightManager::AnchorRecordToLaunchOnset() {
     uint16_t onset_off = 0;                 // default: keep the oldest sample
     const int walked = LaunchOnset::OnsetIndex(m_ring_count_, [this](int i) {
         const uint16_t k = static_cast<uint16_t>((m_ring_head_ + i) % kPreLaunchRingSamples);
-        return RocketNav::Math::norm(m_ring_[k].accel) / G0_F;
+        return RocketNav::Math::norm(FlightArchive::AccelG(m_ring_[k]));
     });
     // Fallback, the pre-walk-back rule: when the newest ring sample is itself in
     // the pad band (a weak motor confirmed by the baro gate) there is no run to
     // walk back along, so take the first sample above the band.
     for (uint16_t i = 0; walked < 0 && i < m_ring_count_; ++i) {
-        const float a_g = RocketNav::Math::norm(m_ring_[idx].accel) / G0_F;
+        const float a_g = RocketNav::Math::norm(FlightArchive::AccelG(m_ring_[idx]));
         if (a_g >= kLaunchOnsetAccelG) {
             // Onset = the sample just before accel first exceeds the pad band, so
             // t=0 sits immediately before the thresholds trip (per the request).

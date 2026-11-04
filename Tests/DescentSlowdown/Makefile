@@ -15,7 +15,11 @@
 # ---------------------------------------------------------------------------
 
 CXX      := g++
+# The replay corpus and these tests' synthetic flights are 20 Hz, so the real
+# code is built at the rate the data was recorded at (ADR-0039).  Every
+# sample-count constant is SamplesForMs(), so 20 Hz reproduces the old values.
 CXXFLAGS := -std=c++17 -Wall -Wextra -O0 -g \
+            -DSAMPLES_PER_SECOND=20 \
             -I../../Rocket/Common/Inc
 
 TARGET   := test_descent_slowdown

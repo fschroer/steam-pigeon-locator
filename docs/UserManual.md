@@ -154,7 +154,26 @@ The buzzer is the locator's primary way of talking to you, and it's the only cha
 | Status LED | Brief **blue** flash | The locator just transmitted a radio message (roughly once per second). |
 | Status LED | Brief **green** flash | The locator just received a radio message from your receiver. |
 | Status LED | **Red**, blinking about once per second, then twice per second | A deployment test is counting down. The faster blink means under 3 seconds to fire. ⚠️ |
+| Status LED | **Cyan**, **magenta**, **green**, half a second each, at power-on | The IMU, barometer and GPS came up, in that order. |
+| Status LED | **Red** for a second at power-on, in place of one of those colors | That sensor failed its power-on check. The locator carries on without it (§1.4). |
+| Status LED | Brief **yellow** flash, about once a second | A sensor failed its power-on check. The locator is running with reduced functions (§1.4). |
 | Status LED | Off | Normal idle state between radio events. |
+
+### If a sensor fails at power-on
+
+The locator checks its three sensors every time it powers on: the IMU (accelerometer and gyro), the barometer and the GPS. **A sensor that fails this check no longer restarts the locator.** It boots without that sensor and tells you so. Until 2026-10-25 it restarted, over and over, which made the stored flights unreachable on exactly the locator you most wanted to read: the one that came back damaged.
+
+What you lose depends on which sensor failed:
+
+| Failed | Still works | Lost |
+|---|---|---|
+| IMU | Stored flights and their download, the USB-C console, position, altitude, battery | **Arming.** Launch detection, so no new flight is recorded |
+| Barometer | Stored flights and their download, the USB-C console, position, accel and gyro readings | **Arming.** Altitude, apogee, main and landing detection |
+| GPS | Everything else, **including arming** | Position, so the map cannot find the rocket for you |
+
+The locator **refuses to arm** without the IMU and the barometer, because it would be firing charges on a guess. It says so in three places: a brief yellow flash on the status LED about once a second, a red note on the app's status panel (§4.6), and the console's `s` key (Appendix D).
+
+⚠️ **Don't fly a locator with a failed sensor.** A failed GPS still arms, because deployment doesn't use it. You decide whether a rocket you can't find by position should fly. Power-cycle once: a sensor that fails again is a hardware fault. **Download the stored flights first** (Part 10). That is what this behavior is for.
 
 ## 1.5 Receiver tour
 
@@ -836,6 +855,7 @@ It comes in two pieces.
 | **Satellites** | The small number beside the rocket icon. More is better; watch it climb after power-on. |
 | **Battery, ×2** | Bar gauges — receiver on top, locator below. Don't fly a locator showing one bar. The gauges go away at launch and return when you disarm after landing (§1.6) — so read it **before** you fly, and again on the walk out. An *empty* gauge on a battery you know is charged is a different problem — see Part 11. |
 | **dBm / SNR** | How loud and how clean the link is (§8.4). |
+| **Sensor note** (red, under the signal reading) | Absent. *"Locator barometer failed. Arming disabled."* (or IMU, or GPS) means that sensor failed its power-on check: see §1.4 for what still works. **Arm** will refuse and tell you why. |
 
 **The statistics panel at the bottom right** is where the flight-critical readings are. ⚡ **It has no separate "health" or "continuity" indicators — the readings themselves change color.** A line in the normal text color is a healthy one; **a line in red is the failure**, and which line is red tells you which sensor or channel.
 
@@ -1351,7 +1371,7 @@ You get a list of stored flights, each showing its **record number, date, time a
 - **Every sample** around the **main** event and at **landing**.
 - **Every few samples** on the long descent between them — a few per second, which is plenty to see a steady descent rate.
 
-So a slow drift down under canopy looks slightly coarser than the boost, by design. **The full-rate record is still on the locator**; the USB-C console export (§10.4) always has every sample.
+On a 50-samples-per-second record (November 2026 firmware and later) even those windows can hold more than one download carries, so they arrive at **every second sample** (25 per second) or, on a very long ascent, a little coarser. So a slow drift down under canopy looks slightly coarser than the boost, by design. **The full-rate record is still on the locator**; the USB-C console export (§10.4) always has every sample.
 
 ⚠️ **A locator on firmware older than 2026-09-29 sends only the first ~100 seconds of any flight.** The chart then ends there, often partway down the descent. The app now says so in red above the chart — *"Partial record: this locator's firmware sends only about the first 102 s of a flight…"* — so a short profile is no longer mistaken for the whole flight. Update the locator's firmware to see the rest. (Older app versions showed no warning at all.)
 
@@ -1492,6 +1512,8 @@ The state only ever moves forward, and it can **skip**: if two events come due i
 
 > ⚡ **The timing columns are gone**, and the column order changed. `oc_start_us`, `oc_end_us`, `process_start_us` and `process_dur_us` were replaced by the GPS velocity and accuracy columns above. If you have a spreadsheet that reads columns by position rather than by name, it will need updating. Per-cycle timing is still available live from the data menu's `t` breakdown.
 
+> ⚡ **The November 2026 firmware changes the record format again** (the 50 Hz update). Records now carry the magnetometer and are recorded at a variable rate. Old records can't be read by the new firmware, and the data menu won't list them. **Export everything you want to keep before you flash, then erase (§3.6).** Still 9 stored flights, still 8 minutes each. Altitude and speed columns now print to the centimeter, accel to 0.001 g and gyro to 0.01 °/s, which is everything the record holds. The export gains three columns at the end, `mag_x_ut`, `mag_y_ut` and `mag_z_ut`: the magnetic field in microtesla, blank if the locator has no magnetometer or had no reading.
+
 > ⚡ **The October 2026 firmware changes the record format again** ([#53](https://github.com/fschroer/steam-pigeon-locator/issues/53)): GPS velocity is now stored in tenths of a meter per second, so it can record a rocket past 327 m/s. Old records can't be read by the new firmware, and the data menu won't list them. **Export everything you want to keep before you flash, then erase (§3.6).** The number of stored flights (9) does not change.
 
 > ⚡ **The September 2026 firmware erased stored flights, and the locator now holds 9 instead of 10.** The record format changed enough that older records cannot be read back at all — the data menu will not list them. **Export everything you want to keep before you flash.** The flight is 8 minutes either way; only the number of stored flights changed, to make room for the extra data in each one.
@@ -1509,7 +1531,7 @@ The state only ever moves forward, and it can **skip**: if two events come due i
 - **`time_ms = 0` is thrust onset.** The record starts at launch.
 - **One exception:** if the locator's combined ("fused") solution was already flagged as unhealthy on the pad (a nonzero `ekf_health` in the seconds before launch), the record deliberately keeps about **2 seconds of pad data** so the problem can be examined, and `time_ms = 0` is the start of that instead. Thrust onset is then partway in: the `Launch onset time:` summary line (§10.4) says where. Subtract it from `time_ms` to put the record on an ignition-zero clock.
 - Time is measured on a **GPS-disciplined clock**, so it is real elapsed time, not an assumed sample rate. Durations you measure from the data are trustworthy.
-- Data is recorded at **20 samples per second**.
+- Data is recorded at **50 samples per second** from just before launch until 10 seconds after drogue (or 60 seconds after launch, if drogue never fires), for the 2 seconds before and 8 seconds after main, and for the last 2 seconds before landing to the end. **Everywhere else it is 5 samples per second.** Samples are therefore not evenly spaced: always plot against `time_ms`, never against row number. Records from firmware before November 2026 are 20 samples per second throughout.
 - A record is capped at **8 minutes** and includes about **2 seconds of settled data after landing**.
 
 **In the app flight log** (§10.7), which is a different clock and a weaker one:
@@ -1619,6 +1641,9 @@ The same applies to the accelerometer, gyro and `pad_alert` columns: those also 
 | Symptom | Look at |
 |---|---|
 | Locator won't power on / no power-on tone | Battery flat (§1.6). Wrong magnet pole or wrong spot (§1.2). |
+| Locator won't arm, and the status panel says a sensor failed | The IMU or barometer failed its power-on check, and the locator refuses to arm without them (§1.4). Power-cycle once. If it fails again, download the stored flights and send the locator in. |
+| Status LED flashes yellow about once a second | A sensor failed at power-on. Press `s` on the console or read the app's status panel to see which one (§1.4). |
+| Locator keeps restarting at power-on (red LED, power-on tone repeating) | Firmware from before 2026-10-25 restarts on a failed sensor. Update it, and the locator will boot without that sensor so you can get its stored flights out (§1.4). |
 | "I couldn't follow the signal readings / callouts during the flight" | You aren't meant to — they're recorded for you. Menu → **App Flight Logs** (§10.7). |
 | App Flight Logs is empty after a flight | A log is only created for a launch the app was already receiving telemetry for, and only a launch creates one (§10.7). A session that never flew leaves nothing by design. |
 | App never finds the receiver | Receiver powered? Bluetooth on? Phone permissions granted? (§3.8) |
@@ -1787,6 +1812,9 @@ AT THE FLIGHT LINE
 | Status | Green flash | Radio receive |
 | Status | Red, ~1 Hz | Deployment test countdown |
 | Status | Red, ~2 Hz | Deployment test — under 3 s to fire ⚠️ |
+| Status | Cyan, magenta, green at power-on | IMU, barometer, GPS came up |
+| Status | Red ~1 s at power-on | That sensor failed; boot continues without it (§1.4) |
+| Status | Yellow flash, ~1 Hz | Running with a failed sensor (§1.4) |
 | Status | Off | Idle |
 
 ## Receiver lights
@@ -1941,13 +1969,15 @@ If a key seems to do nothing, you are in a menu — press Esc. If it answers `RE
 | `h` | Holds the battery-sense circuit powered for ~10 seconds so it can be measured with a meter. Press again to release early. Releases on its own regardless. |
 | `/` | Prints the last fault the locator recorded, if any — what kind, what reset it, and how long it had been running. Says `DIAG\|NONE` when there is nothing stored, which is the normal, healthy answer. Service will ask for this text if you send a locator in. |
 | `p` | **Deployment pin trace — works armed.** Prints a line whenever the deployment hardware changes state: `cmd` is what the firmware asked the pins to do, `pad` is what the pins actually did, `DARM` is the load switch that feeds all four channels, and `D1`–`D4` are the channels themselves. Press again to turn it off. Use it when **a channel doesn't fire** (below). It only reads pins — it cannot fire anything, and it is not a way to test a channel from the console. |
+| `s` | **Sensor status — works armed.** One line naming each sensor's health (`ok`, `warning`, `no fresh fix`, or `FAILED`). If any sensor failed its power-on check, it also says what that disables and whether arming is still allowed (§1.4). The locator prints the same report once at power-on. |
 
 None of these affects flight behavior.
 
-**Two keys answer while the locator is armed**, and everything else in the table is refused until you disarm:
+**Three keys answer while the locator is armed**, and everything else in the table is refused until you disarm:
 
 - `?` — so a list of the commands is always available, even when the commands themselves are not.
 - `p` — because the thing it exists to watch, a deployment test, only ever happens while armed. A disarmed-only trace would be a trace of nothing.
+- `s` — because the person asking "why won't it arm?" usually has just been refused.
 
 ## Editing keys (configuration menu)
 
@@ -2046,7 +2076,7 @@ Puts the device into firmware-update mode. It will not work again until it is re
 | Battery charging | Up to 1 A, over USB-C |
 | Audio | Piezo buzzer |
 | Data interface | USB-C, 921600 baud default (9600–921600, configurable per device) |
-| Sample rate | 20 samples per second |
+| Sample rate | 50 samples per second around launch, main and landing; 5 per second on the rest of the descent |
 | Max recorded flight | 8 minutes |
 
 ## Receiver
