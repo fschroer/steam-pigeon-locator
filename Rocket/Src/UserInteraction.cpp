@@ -776,8 +776,9 @@ void UserInteraction::DisplayCycleProfile() {
 				static_cast<uint32_t>(Diag::lastCount(c)), " / ",
 				static_cast<uint32_t>(Diag::maxCount(c)), crlf_);
 	}
-	line.WriteMany("(max cleared; run again then re-read for a clean worst case)", crlf_);
-	Diag::resetMax();
+	line.WriteMany("(max cleared from 3 cycles on, so this printout is not in it; re-read for a clean worst case)", crlf_);
+	// Not resetMax(): this cycle and the next would be the worst case.
+	Diag::resetMaxAfter(3);
 }
 
 void UserInteraction::ExportData(uint16_t archive_position) {

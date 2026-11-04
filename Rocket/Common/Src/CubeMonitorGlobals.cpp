@@ -19,6 +19,11 @@ static volatile uint16_t s_start[static_cast<uint8_t>(Seg::Count)] = {};
 static volatile uint16_t s_cnt_last[static_cast<uint8_t>(Cnt::Count)] = {};
 static volatile uint16_t s_cnt_max [static_cast<uint8_t>(Cnt::Count)] = {};
 
+// Cycles left before a deferred resetMax() (see resetMaxAfter).
+static volatile uint8_t s_reset_after = 0;
+
+void resetMaxAfter(uint8_t cycles) { s_reset_after = cycles; }
+
 uint16_t Now() { return static_cast<uint16_t>(TIM2->CNT); }
 
 void mark(Seg s, uint16_t t0) {
@@ -27,6 +32,7 @@ void mark(Seg s, uint16_t t0) {
     const uint16_t d = static_cast<uint16_t>(Now() - t0);
     s_last[i] = d;
     if (d > s_max[i]) s_max[i] = d;
+    if (s == Seg::ProcTotal && s_reset_after != 0u && --s_reset_after == 0u) resetMax();
 }
 
 void begin(Seg s) {
