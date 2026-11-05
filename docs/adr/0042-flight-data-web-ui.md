@@ -98,3 +98,20 @@ Implemented in `steam-pigeon-web` `33c0e65`.
 
 - **Uploads carry `locator_name`.** The name the locator calls itself (the app's remembered `KnownLocator.label`) is added to the upload metadata, and only when one is known. The web titles each locator with the name from its newest upload, with the id beside it. Uploads made before this change have no name, so they show the id alone. This is in Android `7dbbd14`, not compiled, and iOS does not upload yet.
 - **Fly-around tour: tried and withdrawn (2026-11-05).** A `gx:Tour` orbit was added, but Google Earth on the web rejects any file that contains one ("Unsupported element: gx:Tour"), and a separate Earth-Pro-only file was not wanted. A Google Earth Studio project (`.esp`) is parked: its format is undocumented, and Studio access is limited. The KML is plain again. It carries an angled view of the whole flight: a `LookAt` at a 70° tilt, aimed at half apogee, on the Document and on the path. Earth Pro honors the tilt. Earth on the web opens top-down whatever the file says. In Frank's test of 2026-11-05, a file with a `LookAt` kept Earth web in 3D, while files with no view or with a `Camera` dropped it to 2D, so the `LookAt` stays. Its path runs from the pad to the first fix after Landed, the same extent as the app's map. The landing fix is kept only if it is reachable at 50 m/s or less, which drops a simulated flight's snap home.
+
+### Amendment 2026-11-05 (evening): an in-page 3D view on Google's 3D map
+
+Frank chose this on 2026-11-05, over CesiumJS and over staying with KML only. Google Earth on the web ignores a KML file's tilt, and only the page itself can control the camera.
+
+- **What it is.** The flight page gets a 3D view on the Maps JavaScript API's photorealistic 3D map (`maps3d`: `Map3DElement`, `Polyline3DElement`, `Marker3DElement`), in satellite mode.
+  - It opens angled (67.5°) on the whole flight.
+  - The path is drawn at `fused_agl_m`, relative to the ground, over the same extent as the KML.
+  - Each flight event gets an extruded pin.
+  - **Fly around** (`flyCameraAround`) makes one 30 s circle, and a click on the map stops it. **Reset view** returns to the opening view.
+- **Heights.** The path and pins are relative to the ground, so they need no elevation data. The camera aims at an absolute altitude, so the pad's height is estimated from the median baro pressure on the pad, using the standard atmosphere. Weather shifts that estimate by tens of meters, which only moves the aim point slightly.
+- **Cost and the key.**
+  - Each map load is billed under the "Immersive Maps" SKU: 5,000 free a month as of 2026-11, then about $7 per 1,000. So the map loads **only on an explicit "Show 3D view" click**.
+  - The key is a Maps Platform browser key, restricted to the site's origins and to the Maps JavaScript API. It is read from `VITE_GOOGLE_MAPS_API_KEY` at build time. It ends up in the public bundle, as every browser Maps key does, and the restrictions are what protect it.
+  - Without a key, the section says the view is unavailable.
+- **Licensing.** This uses Google's own map in Google's own JS API, within its terms. It does not run into the tile-licensing question of issue #26, which is about the app's offline MapLibre tiles.
+- In `steam-pigeon-web` `6b464bf`. Not yet rendered with a real key.
