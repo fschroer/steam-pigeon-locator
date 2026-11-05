@@ -70,3 +70,26 @@ The rules themselves do not change: a signed-in user reads and writes only `user
 - **One more hand-copied name table:** the web labels flight states from its own copy of `FlightStates` (`src/channels.ts`). It is a display table, not wire layout, but it changes with the enum like every other copy.
 - **Cost.** Hosting and Storage reads stay inside the Blaze no-cost quota at this scale.
 - **A deploy now publishes the rules too,** so a rules mistake reaches production with the site. The rules are short; review them like code.
+
+## Amendment 2026-11-05: dark theme, deleting a flight, and the path in Google Earth
+
+Frank asked for three things after the first run against the real store.
+
+1. **Dark theme by default.** The viewer can switch to light, or follow the system setting. The choice is kept per browser.
+2. **Delete a flight from the web store.** This removes the record's `.csv` and `.bin` from `users/{uid}/locators/{locator_id}/`, after a confirmation that names the flight. The existing rules already allow the owner to delete.
+   - **The phone is not touched.** Its copy stays, already marked uploaded, so the app does not upload it again. The history order (phone → cloud → locator, ADR-0040 decision 6b) still finds it.
+   - **The locator is not touched.** Its copy stays in flash until the archive overwrites it.
+   - **A share link to the record stops working.**
+   - **No app change, so no parity question.** The web is not a parity platform (Consequences above), and neither app has a cloud delete. If one is wanted later, the Android app is the reference: it would remove the cloud copy the same way, and decide separately whether to clear its own.
+   - A record deleted here comes back only if the phone loses its copy and downloads the record from the locator again.
+3. **The flight path in Google Earth, as a KML download.**
+   - Google Earth has had no embeddable web API since the Earth API was retired in 2015. So the web exports a KML file instead, which opens in Google Earth on the web, desktop or mobile.
+   - The path is built from the CSV, like everything else here:
+     - GPS lat/lon where `fix_type` ≥ 2;
+     - consecutive repeats dropped;
+     - the altitude is `fused_agl_m`, relative to the ground and extruded;
+     - a pin marks each `flight_state` change.
+   - The CSV carries no GPS altitude, so the height is the locator's own AGL estimate.
+   - An in-page map is a separate decision. Google's photorealistic 3D map needs a Maps Platform API key with billing; a 2D satellite map would follow the app's MapLibre ADR and its open tile-licensing question.
+
+Implemented in `steam-pigeon-web` `33c0e65`.
