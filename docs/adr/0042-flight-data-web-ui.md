@@ -93,3 +93,8 @@ Frank asked for three things after the first run against the real store.
    - An in-page map is a separate decision. Google's photorealistic 3D map needs a Maps Platform API key with billing; a 2D satellite map would follow the app's MapLibre ADR and its open tile-licensing question.
 
 Implemented in `steam-pigeon-web` `33c0e65`.
+
+### Amendment 2026-11-05 (later): locator names, and a fly-around
+
+- **Uploads carry `locator_name`.** The name the locator calls itself (the app's remembered `KnownLocator.label`) is added to the upload metadata, and only when one is known. The web titles each locator with the name from its newest upload, with the id beside it. Uploads made before this change have no name, so they show the id alone. This is in Android `7dbbd14`, not compiled, and iOS does not upload yet.
+- **The KML carries a fly-around tour** (`gx:Tour`): one 40 s circle at 70° tilt, aimed at the middle of the flight at half apogee, from far enough out to keep the whole flight in frame. Google Earth Pro plays it from Places. Playback in Google Earth on the web is not verified. In `steam-pigeon-web`, after `33c0e65`.
