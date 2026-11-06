@@ -142,3 +142,23 @@ Frank asked for a readable location in the flight list and the flight's title.
 - **Kept on the record.** When the owner opens a flight, the name is written to the CSV's custom metadata as `place`. The flight list reads it with the metadata it already loads, and the list itself looks up any of the owner's flights that have none, one at a time and at most one a second, loading each CSV only for its pad fix (web 85751b9). So each flight is looked up once. A recipient of a shared flight, or a CSV opened from the computer, gets a lookup without the name being kept.
 - **Privacy.** Opening a flight without a kept place sends the pad's coordinates to the OpenStreetMap Foundation's server.
 - In `steam-pigeon-web` ab0c825. Not yet checked against the live service, which the cloud sandbox cannot reach.
+
+### Amendment 2026-11-06 (later): flight details
+
+Frank asked for fields the record itself cannot carry.
+
+- **What.** These fields are kept per record:
+  - the rocket's manufacturer and name;
+  - its motors;
+  - the recovery type;
+  - the electronics used;
+  - a notes log.
+- **Where.** They live in Firestore `flights/{ownerUid}_{locatorId}_{recordKey}`, not in Storage metadata, because they are edited often and the log can grow. The id is the prefix of every share id for the same record. So the rules let a verified recipient read the details with one `exists()` on their share. Only the owner writes, with a fixed field set, an id that must match its fields, capped strings and at most 8 motors. Deleting the flight deletes its details.
+- **Choice lists are suggestions.** Every list is attached to a text field, so anything can be typed instead:
+  - The rocket manufacturer list holds the major kit makers.
+  - Recovery offers Parachute, Streamer, Tumble and Dual Deploy.
+  - Motors are chosen by manufacturer, then impulse class, then motor, from **ThrustCurve.org**: `metadata.json` for the manufacturers, then `search.json` with availability `all`, so out-of-production motors are listed too. The delay list is that motor's `delays`, and its seconds can be typed over. "EX (experimental)" heads the manufacturer list, and for it the other fields are free text.
+  - "Add another motor" covers clusters and staging.
+- **Notes log.** "Add to log" prefixes an entry with the local date and time, appends it, and saves. After the first entry, the log is a plain text box, edited directly.
+- **Not in the record or the apps.** The CSV and `.bin` are untouched. The web is not a parity platform. If the apps later show these fields, they read the same document.
+- In `steam-pigeon-web` 8975d86. 14 of 14 Firestore emulator rule checks pass. ThrustCurve could not be reached from the cloud sandbox, so the motor lists and their browser (CORS) access are unchecked. The fields still work as typed text without them.
