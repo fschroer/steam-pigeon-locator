@@ -2,12 +2,12 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
-## 2026-11-06 (archive) — a record left by older firmware stranded slot 0 for good. Host-tested, NOT on hardware
+## 2026-11-06 (archive) — a record left by older firmware stranded slot 0 for good. **Confirmed on the bench**
 
 - **Symptom (Frank):** after many sims the `data` menu showed slots 0 and 8 blank. Slot 8 is the record opened for the next flight, which is expected. Slot 0 printed only the CSV header, and `c` did not clear it.
 - **Cause:** a record header written under another archive layout (an older `ARCHIVE_VERSION` or record size) has the magic but fails `ValidateHeaderForConfig`. The allocator saw it as not free; both eviction searches and `ReclaimRecordIfDataless` skipped it. Only `e` (erase all) freed it. Slot 0 is where one survives a layout change, because its base address is the only one that does not move with the record size.
 - **Fix:** `GetNextAvailableArchiveRecord` takes a foreign-layout slot after free slots and before evicting any readable record; `c` erases one; the `data` menu labels each blank row `free`, `open for next flight` or `old format, unreadable`. Test 7 in `Tests/ArchiveRoundTrip` (fails 4 checks on the old allocator).
-- **To confirm on the bench:** `data` should label slot 0 `old format, unreadable`. Press `c` (or fly one more sim) and slot 0 should become `free` (or take the new flight).
+- **Confirmed on the bench 2026-11-06 (Frank, 3ae3259):** `data` labeled slot 0 `old format, unreadable`, and it was reclaimed as expected.
 
 ## 2026-11-06 (time zones) — every printed time carries its zone; the app tells the locator its offset, ADR-0043. Host-tested, Android NOT compiled, nothing on hardware
 
