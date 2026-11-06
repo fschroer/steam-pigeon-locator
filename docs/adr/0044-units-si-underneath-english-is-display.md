@@ -63,14 +63,24 @@ A header button, remembered per browser like the theme, defaulting from the brow
 
 - A flyer can read the app in feet and the console in meters for the same locator. The "N m on the locator" line and the manual are the mitigation.
 - Files never depend on a phone setting. An English CSV for a spreadsheet would be a separate, explicit export, not the toggle.
-- **Deferred:** the simulated-flight inputs (mass, dimensions, rates, wind, temperature) and the map download's km stay metric. The sim stores whole m/s, whose round trip through mph and ft/s has the problem decision 4 solves for altitudes, and it is a bench tool.
+- The flight stats panel's distance lines up with AGL in both systems (the number is padded, not number plus unit), and the map download shows sizes in miles, one decimal below 10 mi. The preset-sites CSV stays in km. Both added 2026-11-06 at Frank's request (Android `0018d62`, `fe3aea7`).
 - iOS shows metric only until UI_PARITY row 9 lands, which is correct but differs from an Android phone set to English.
 - `RocketViewModel` init changed, so the Android build needs an install-and-launch before it is called working (the `069986f` lesson).
+
+## Amendment 2026-11-06: the simulated-flight page
+
+Frank asked for recommendations and took them. In English the page takes mass in oz, body diameter and length in inches, rail length in feet, descent rates in ft/s, wind in mph (what a forecast gives, though the app's other speeds are ft/s) and ground temperature in °F; the canopy calculator works in oz, inches and ft/s. Motor data (N·s, mm: motors are sold as 38 mm, 54 mm), Cd, stability in calibers and angles stay as they are. Saved rockets and SimFlightStart stay SI.
+
+- **Fine inputs** convert exactly: every displayed step survives the grain it is stored at.
+- **The main rate becomes tenths of a m/s in the app.** The wire's `main_dmps` always carried tenths, but the app held whole m/s, so 15 ft/s became 5 m/s and read back as 16. No firmware change; a saved whole number loads unchanged.
+- **Drogue rate, wind and temperature** are whole m/s and °C on the wire, too coarse to keep every English value. In English they commit when the field is left, move to the nearest value the locator holds (10 mph reads back 9 mph), and show "Locator uses 4 m/s" under the field, the same idea as decision 4. Finer wire steps were rejected: a SimFlightStart change in four places for a bench tool.
+
+Android `15c9174` (not compiled). iOS owes it with UI_PARITY row 9.
 
 ## Built
 
 | Where | Commit |
 |---|---|
-| Android | `rocket-flight-manager` `d676f99` |
+| Android | `rocket-flight-manager` `d676f99`, `0018d62`, `fe3aea7`, `15c9174` |
 | Web | `steam-pigeon-web` `d25aab8` |
 | iOS parity row | `steam-pigeon-ios` (see the PR) |
