@@ -607,6 +607,17 @@ void Communication::OnRadioRxDone(uint8_t *payload, uint16_t size, int16_t rssi,
 			break;
 		}
 
+		case MsgType::TimeZoneSet: {
+			// ADR-0043: display only, so accepted in any state, armed included.
+			int16_t offset_min = 0;
+			std::memcpy(&offset_min, payload + offsetof(TimeZoneSet, utc_offset_min), sizeof(offset_min));
+			if (offset_min >= -kUtcOffsetMinLimit && offset_min <= kUtcOffsetMinLimit) {
+				utc_offset_min_ = offset_min;
+				utc_offset_known_ = true;
+			}
+			break;
+		}
+
 		case MsgType::VersionRequest:
 			// Defer the response to the main loop via Process() — calling
 			// radio_->Send() directly from the RX callback (ISR context) is
@@ -1250,6 +1261,12 @@ ParseResult Communication::ParseLoraFrame(const uint8_t *data, std::size_t len, 
 		// minutes), so no ParsedMessage member is needed — only the length has
 		// to be right for the address check ahead of it to have found the id.
 		if (len != sizeof(PadAlertSnoozeRequest))
+			return ParseResult::LengthMismatch;
+		out.type = hdr.msg_type;
+		return ParseResult::Ok;
+	case MsgType::TimeZoneSet:
+		// Read from the frame in the handler, like PadAlertSnoozeRequest.
+		if (len != sizeof(TimeZoneSet))
 			return ParseResult::LengthMismatch;
 		out.type = hdr.msg_type;
 		return ParseResult::Ok;

@@ -229,6 +229,29 @@ void FormatUnixUtc(char* out, uint32_t ts)
     out[19] = '\0';
 }
 
+void FormatTimestamp(char* out, uint32_t ts_utc, int16_t utc_offset_min, bool offset_known)
+{
+    // Before 2001 is not a GPS wall-clock time (an empty slot reads 0), and an
+    // offset there could wrap below 1970.
+    if (!offset_known || ts_utc < 978307200u) {
+        FormatUnixUtc(out, ts_utc);
+        out[19] = ' '; out[20] = 'U'; out[21] = 'T'; out[22] = 'C'; out[23] = '\0';
+        return;
+    }
+    const int64_t local = static_cast<int64_t>(ts_utc) + static_cast<int64_t>(utc_offset_min) * 60;
+    FormatUnixUtc(out, static_cast<uint32_t>(local));
+    const uint32_t mag = static_cast<uint32_t>(utc_offset_min < 0 ? -utc_offset_min : utc_offset_min);
+    const uint32_t hh = mag / 60, mm = mag % 60;
+    out[19] = ' ';
+    out[20] = utc_offset_min < 0 ? '-' : '+';
+    out[21] = static_cast<char>('0' + hh / 10);
+    out[22] = static_cast<char>('0' + hh % 10);
+    out[23] = ':';
+    out[24] = static_cast<char>('0' + mm / 10);
+    out[25] = static_cast<char>('0' + mm % 10);
+    out[26] = '\0';
+}
+
 void Uint32ToHex(char *out, uint32_t value) {
 	static const char lut[] = "0123456789ABCDEF";
 
