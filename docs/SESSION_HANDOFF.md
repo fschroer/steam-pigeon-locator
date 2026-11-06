@@ -2,6 +2,14 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-11-06 (time zones) — every printed time carries its zone; the app tells the locator its offset, ADR-0043. Host-tested, Android NOT compiled, nothing on hardware
+
+- **Stored times are unchanged (UTC).** Printing converts: the locator console's `data` list and the USB export's `Flight time:` print `2026-11-05 23:36:49 -08:00`, or `… UTC` until the app has sent an offset since power-on. The `data` header gains a `Zone` column.
+- **TimeZoneSet, MsgType 32, 12 B** (int16 minutes at offset 10, addressed). Locator `2d0d30d` (RAM only, any state, ±14:00), receiver `fd22935` (relayed as housekeeping: never ends a scan, never displaces a queued operator command), Android `48e95ca` (sent from the version loop after VersionInfo, on an offset change and every 10 min), iOS `8a2b39d` (wire copy only; sending owed, UI_PARITY row 8), web `2122e8a`.
+- **Also:** Flight Profiles on both apps prints the offset; Firebase uploads gain `flight_time` (ISO 8601 UTC); the web names the zone and stamps notes with an offset, and reads offset-labeled `Flight time:` lines.
+- **Trap:** the console uses the phone's **current** offset, so an old flight across a DST change prints an hour off the wall clock of that day, with the offset that makes it exact.
+- **To confirm on the bench:** connect the app, then type `data` on the console. The dates should end `-08:00`. Power-cycle without the app and they should end `UTC`.
+
 ## 2026-11-04 (download) — the full-record download stall: the ACK collided with the locator's VersionInfo. **Confirmed on the bench**
 
 - Logging (app c8b8d07) showed the app receiving the same window every cycle (`new 0 dup 10`) and sending an ACK each time, while the locator never advanced. Requests got through (they resumed it after a suspend); ACKs didn't.
