@@ -363,7 +363,16 @@ A typed value pushes in the same way. Typing a drogue primary of 1.9 s with the 
 
 **A typed value outside the range is refused, not corrected.** The field turns red and says why (for example *Max 500 m*), and **Update** stays disabled until you fix it. The app will not quietly change 2,500 to 500, because a number that far out is usually a units mistake (feet typed into a meters field), and 500 m would be just as wrong.
 
-> ⚠️ **Settings are in meters and seconds.** In September 2026 a rocket flew with its mains set to 2,500 m and 2,400 m — meant as feet — and both came due at apogee. That can no longer happen: the app refuses the value, and the locator itself refuses any settings change containing an out-of-range value.
+> ⚠️ **Check which unit the field says.** In September 2026 a rocket flew with its mains set to 2,500 m and 2,400 m — meant as feet — and both came due at apogee. That can no longer happen: the app refuses the value, and the locator itself refuses any settings change containing an out-of-range value.
+
+**Feet or meters.** The app can show and take altitudes in feet: **App Settings → Units → English**. The field names say which unit is in use, for example *Main Primary Deploy Altitude (ft)*. In feet:
+
+- Main altitudes move in **10 ft steps**, and a typed value must be a multiple of 10. The locator stores whole meters, and only 10 ft steps come back as the same number of feet.
+- The limits are **10–1,640 ft** for the primary and **0–1,630 ft** for the backup.
+- Under each field the app shows **what the locator will hold in meters**, for example *183 m on the locator*. That is the number the locator's USB console shows, because **the locator itself always works in meters**. The app only translates.
+- A value set earlier in meters shows to the nearest foot. The 130 m default shows as 427 ft, and the first arrow press moves it onto a 10 ft step.
+
+Exported files (the flight CSV, the app flight log, KML) are always in meters, whatever this setting says.
 
 The locator also checks what it has stored every time it powers on. **Any setting found out of range is reset to its default** (a primary/backup pair is reset together), so a locator that had a bad value saved before this check existed comes up with 130 m / 100 m mains, or 0.0 s / 2.0 s drogues. Check your settings after updating the firmware.
 
@@ -1145,15 +1154,15 @@ With **Enable Speech** on (§2.8), the app announces:
 |---|---|
 | "*Armed*" / "*Disarmed*" | When the arm state changes. |
 | "*Warning. Rocket is on the pad and not armed.*" | A prepped rocket is standing upright and disarmed. Repeats about every 30 s until you arm it, lay it down, or snooze it (§6.6). Accompanied by a phone vibration, which **Enable Speech** does not switch off. |
-| "*[number] meters*" | Altitude, every 100 m as the rocket coasts to apogee. |
-| "*Apogee, [number] meters*" | Apogee detected. |
+| "*[number] meters*" / "*[number] feet*" | Altitude, every 100 m (or every 500 ft with English units) as the rocket coasts to apogee. |
+| "*Apogee, [number] meters*" / "*…feet*" | Apogee detected. In feet it is rounded to the nearest 10 ft. |
 | "*Drogue charge*" | The drogue primary charge has been fired. |
 | "*Drogue backup charge*" | The drogue backup charge has been fired. |
 | "*Main charge*" | The main primary charge has been fired. |
 | "*Main backup charge*" | The main backup charge has been fired. |
 | "*Drogue opening detected*" | After the drogue charge, the descent has slowed by at least 5 m/s from its fastest and stayed slower for 1.5 s. An inference from the descent rate, not a sighting of the canopy. |
 | "*Main opening detected*" | After the main charge, the descent has slowed by at least 8 m/s from its rate when the main charge fired, and stayed slower for 1.5 s. |
-| "*Descent warning, [number] meters per second…*" | Descending faster than **50 m/s** — fast enough that no chute is holding. Repeated at most every 10 s, with the distance and direction from the launch point when the rocket has a GPS fix. |
+| "*Descent warning, [number] meters per second…*" (or *feet per second*) | Descending faster than **50 m/s** (164 ft/s) — fast enough that no chute is holding. Repeated at most every 10 s, with the distance and direction from the launch point when the rocket has a GPS fix. |
 | "*Landing…*" | Touchdown, with the distance and direction from the launch point. Said once. If the link died on the way down, the app works out when the rocket must have reached the ground from the last altitude and descent rate it heard, and calls the landing then — you get the callout even though nothing was received for the last part of the descent. |
 | "*GPS fix lost*" / "*GPS fix restored*" | The locator is still being heard but has stopped (or resumed) reporting a good fix. |
 | "*Telemetry lost*" / "*Telemetry restored*" | More than 3 s with no valid message from the locator (see §8.4), and its recovery. |
