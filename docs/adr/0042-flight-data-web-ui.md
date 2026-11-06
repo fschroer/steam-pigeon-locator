@@ -133,3 +133,12 @@ Frank asked for sharing that works like Google Drive: share a file with one or m
 - **Setup:** Frank creates the Firestore database (production mode). On the first deploy he grants the Storage service permission to read Firestore for its rules. Deploys now publish `hosting,storage,firestore`.
 - In `steam-pigeon-web` ea575e4.
 - **Checked.** In the Firebase emulators, 28 of 29 rule checks pass: who may create, list, read and delete a share, and that recipients cannot read the `.bin`, another record, the folder listing, or anything without a verified email or after a revoke. The one positive check, a recipient reading the shared CSV, could not run in the cloud sandbox, because its proxy blocks the Storage emulator's call to the Firestore emulator. It still needs a real two-account test.
+
+### Amendment 2026-11-06 (later): naming the launch site
+
+Frank asked for a readable location in the flight list and the flight's title.
+
+- **The name comes from the pad's GPS fix** (the first point of the drawn path), reverse-geocoded to "town, state" ("country" added outside the US) by **OpenStreetMap's Nominatim**, not Google. Google's geocoding terms forbid keeping results, while the point here is to look the name up once and keep it. Nominatim allows that, with the attribution the page shows, and asks for at most one request a second.
+- **Kept on the record.** When the owner opens a flight, the name is written to the CSV's custom metadata as `place`. The flight list reads it with the metadata it already loads, so a flight shows its place once it has been opened once. A recipient of a shared flight, or a CSV opened from the computer, gets a lookup without the name being kept.
+- **Privacy.** Opening a flight without a kept place sends the pad's coordinates to the OpenStreetMap Foundation's server.
+- In `steam-pigeon-web` ab0c825. Not yet checked against the live service, which the cloud sandbox cannot reach.
