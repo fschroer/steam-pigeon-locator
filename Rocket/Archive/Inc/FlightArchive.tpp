@@ -1030,7 +1030,9 @@ namespace FlightArchive
         }
         if (!ValidateHeaderForConfig(h, recordId))
         {
-            return false;   // foreign layout — leave for a full erase
+            // Foreign layout: unreadable by this build, so it is unused space.
+            // Erasing the header sector is enough to make the slot read as free.
+            return m_flash.EraseSector4K(GetRecordBaseAddress(recordId));
         }
 
         bool valid = false;
@@ -1051,6 +1053,25 @@ namespace FlightArchive
         // just the first sector (header + valid marker + stats) so the slot reads
         // as free; its chunk region is empty already and is fully erased on reuse.
         return m_flash.EraseSector4K(GetRecordBaseAddress(recordId));
+    }
+
+    template<typename TSample, typename TStatTraits, size_t ChunkPayloadBytes>
+    bool Archive<TSample, TStatTraits, ChunkPayloadBytes>::IsRecordForeignLayout(uint16_t recordId) const
+    {
+        if (!m_rt.initialized || !IsRecordIdValid(recordId))
+        {
+            return false;
+        }
+        if (m_rt.activeOpen && m_rt.activeRecordId == recordId)
+        {
+            return false;
+        }
+        RecordHeader h{};
+        if (!ReadHeader(recordId, h))
+        {
+            return false;
+        }
+        return h.magic == ARCHIVE_MAGIC && !ValidateHeaderForConfig(h, recordId);
     }
 
     template<typename TSample, typename TStatTraits, size_t ChunkPayloadBytes>
@@ -1124,6 +1145,21 @@ namespace FlightArchive
             }
 
             if (h.magic != ARCHIVE_MAGIC)
+            {
+                return i;
+            }
+        }
+
+        // Next, a record left by firmware with a different archive layout (an
+        // older ARCHIVE_VERSION, or another record size).  Nothing in this build
+        // can read its samples, so it costs less than evicting a readable flight.
+        // Without this such a slot was never free, never evicted and never
+        // reclaimed: it sat in the archive for good, showing as a blank row.
+        // Slot 0 is where one survives a layout change, because it is the only
+        // slot whose base address does not move with the record size.
+        for (uint16_t i = 0u; i < m_cfg.recordCount; ++i)
+        {
+            if (IsRecordForeignLayout(i))
             {
                 return i;
             }

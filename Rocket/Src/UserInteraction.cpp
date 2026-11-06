@@ -474,8 +474,15 @@ void UserInteraction::DisplayDataMenu() {
 		bool simulated = false;
 		archive_.ReadEvent(i, FlightArchive::Statistic::PhysicalDeploymentStats, physical, simulated);
 		simulated = simulated && (physical & FlightArchive::kRecordSimulatedBit) != 0u;
+		const char* slot_note = simulated ? "  simulated" : "";
+		switch (archive_.GetSlotStatus(i)) {
+		case Archive::SlotStatus::Free:              slot_note = "  free"; break;
+		case Archive::SlotStatus::OldFormat:         slot_note = "  old format, unreadable"; break;
+		case Archive::SlotStatus::OpenForNextFlight: slot_note = "  open for next flight"; break;
+		case Archive::SlotStatus::Recorded:          break;
+		}
 		export_line.WriteMany(archive_position, flight_date_time, Fmt(apogee, 11, 1),
-				Fmt(apogee_timestamp / 1000.0f, 19, 1), simulated ? "  simulated" : "", crlf_);
+				Fmt(apogee_timestamp / 1000.0f, 19, 1), slot_note, crlf_);
 //    }
 	}
 	export_line.WriteMany(data_guidance_text_, crlf_);
