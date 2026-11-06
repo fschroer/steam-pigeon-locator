@@ -83,7 +83,11 @@ enum class MsgType : uint8_t {
 	SimFlightRequest = 30,
 	// App→locator: start a simulated flight from a physical rocket profile
 	// (ADR-0041 as amended 2026-11-03).  Since then type 30 only cancels.
-	SimFlightStart = 31
+	SimFlightStart = 31,
+	// App→locator: the phone's current UTC offset, so the console and the USB
+	// export print local times with their offset (ADR "Times are stored in UTC
+	// and shown with their offset", 0043).  Display only: nothing stored changes.
+	TimeZoneSet = 32
 };
 
 // Flight event summary indices.  One entry per archived event timestamp; the
@@ -373,6 +377,16 @@ struct TargetedRequest {          // ArmRequest, DisarmRequest,
 	uint32_t target_locator_id;
 };
 
+// ADR-0043.  utc_offset_min is the phone's offset from UTC at the moment it
+// sent this (DST included), e.g. -480 for PST and -420 for PDT.  Out of
+// kUtcOffsetMinLimit's range is ignored.  Addressed like every command (ADR-0020).
+struct TimeZoneSet {
+	PacketHeader packet_header;
+	uint32_t target_locator_id;
+	int16_t  utc_offset_min;
+};
+static constexpr int16_t kUtcOffsetMinLimit = 14 * 60;   // UTC-14:00 .. UTC+14:00
+
 struct LocatorSettings {
 	PacketHeader header;
 	uint32_t target_locator_id;
@@ -533,6 +547,8 @@ static_assert(sizeof(DeploymentTestCountdownMessage) ==   7, "DeploymentTestCoun
 static_assert(sizeof(FlightDataRequest)              ==  11, "FlightDataRequest size changed");
 static_assert(sizeof(DeploymentTestRequest)          ==  11, "DeploymentTestRequest size changed");
 static_assert(sizeof(PadAlertSnoozeRequest)          ==  11, "PadAlertSnoozeRequest size changed — sync receiver + app");
+static_assert(sizeof(TimeZoneSet)                    ==  12, "TimeZoneSet size changed — sync receiver + app + iOS");
+static_assert(offsetof(TimeZoneSet, utc_offset_min)  ==  10, "TimeZoneSet offsets changed — sync receiver + app + iOS");
 static_assert(sizeof(FullRecordRequest)              ==  14, "FullRecordRequest size changed — sync receiver + app + iOS");
 static_assert(sizeof(FullRecordPacketHeader)         ==  25, "FullRecordPacketHeader size changed — sync app + iOS");
 static_assert(kFullRecordPayloadSize                 == 230, "FullRecord payload size changed — re-check FullRecordCodec's worst case");

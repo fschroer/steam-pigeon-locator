@@ -159,7 +159,7 @@ private:
   //const char* device_name_edit_text_ = "Edit Device Name:\r\n\0";
 
   const char* data_menu_intro_ = "Rocket Locator Data Menu\r\n\r\n\0";
-  const char* data_menu_header_ = "#  Date       Time     Apogee (m) Time to Apogee (s)\r\n\0";
+  const char* data_menu_header_ = "#  Date       Time     Zone   Apogee (m) Time to Apogee (s)\r\n\0";
   const char* data_exit_text_ = "Exiting Data Menu\r\n\r\n\0";
   const char* data_guidance_text_ = "\r\nStart terminal logging and enter a valid number to retrieve CSV output of corresponding flight\r\n"
 		  "c) Clear empty/unused records\r\n"

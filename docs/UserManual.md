@@ -1434,7 +1434,7 @@ This gives you everything the locator recorded, at full rate, for analysis in a 
 
 | Line | Meaning |
 |---|---|
-| `Flight time:` | Date and time of the flight, **UTC**, from GPS. |
+| `Flight time:` | Date and time of the flight, from GPS, **with its zone**: local time with its offset from UTC, e.g. `2026-11-05 23:36:49 -08:00`, once the app has been connected since the locator was switched on (the app sends the phone's time zone). Otherwise UTC, and it says so: `2026-11-06 07:36:49 UTC`. The offset is the phone's **current** one, so a summer flight read in winter shows the winter offset; the time is still exact. Exports from firmware before November 2026 print no zone, and that time is UTC. |
 | `Launch onset time:` | Where thrust began, in the same milliseconds as `time_ms`: the start of the unbroken rise in acceleration that leads into launch detect. **Usually 0**, since the record starts there. Nonzero when the record kept pad data (the exception in §10.6), or on records from older firmware that started on a bump before ignition. Subtract it to line up records by ignition. `unknown` if no thrust rise reaches launch detect. |
 | `Launch detect time:` | When the locator decided it was flying (§10.2 **Launch**), in the same milliseconds as `time_ms`. Usually a few hundred ms after thrust onset; up to about 2 s for a slow, low-thrust motor, which is detected by altitude instead. |
 | `Burnout time:` | §10.2 **Burnout**: when the motor stopped pushing, read from the acceleration along the rocket. On flights recorded before the October 2026 locator firmware it runs several seconds late on fast rockets, because drag held the old test off ([#45](https://github.com/fschroer/steam-pigeon-locator/issues/45)). |
@@ -2011,7 +2011,7 @@ For text fields (name, password), just type; Enter saves, Esc cancels.
 
 ## `data` — Rocket Locator Data Menu
 
-Lists stored flights as `#  Date  Time  Apogee (m)  Time to Apogee (s)`.
+Lists stored flights as `#  Date  Time  Zone  Apogee (m)  Time to Apogee (s)`. Times are local with their offset from UTC once the app has been connected since power-on, otherwise UTC (see `Flight time:` in §10.3).
 
 | Key | Action |
 |---|---|

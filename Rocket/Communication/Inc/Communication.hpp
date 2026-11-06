@@ -217,7 +217,16 @@ public:
 	// off switch this must never become.
 	static constexpr uint32_t kMaxPadAlertSnoozeMinutes = 15u;
 
+	// The phone's UTC offset from the last TimeZoneSet (ADR-0043), for printing
+	// times only.  RAM only: after a reset the console prints UTC, labeled so,
+	// until the app sends it again.
+	bool UtcOffsetKnown() const { return utc_offset_known_; }
+	int16_t UtcOffsetMin() const { return utc_offset_known_ ? utc_offset_min_ : 0; }
+
 private:
+
+	volatile int16_t utc_offset_min_ = 0;
+	volatile bool    utc_offset_known_ = false;
 
 	uint32_t pad_alert_snooze_until_ms_ = 0u;   // 0 = not snoozed
 

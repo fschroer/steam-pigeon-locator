@@ -11,6 +11,7 @@ extern "C" {
 #include "CycleProfiler.hpp"
 #include "Constants.hpp"
 #include "StaticString.hpp"
+#include <cstring>
 #include "StaticStringWriter.hpp"
 #include "Format.hpp"
 #include "Units.hpp"
@@ -458,8 +459,12 @@ void UserInteraction::DisplayDataMenu() {
 		archive_.ReadEvent(i, FlightArchive::Statistic::FlightTimestampS, flight_timestamp, valid_record);
 //    if (valid_record){
 		archive_position[0] = i + '0';
-		char flight_date_time[20] { 0 };
-		FormatUnixUtc(flight_date_time, flight_timestamp);
+		char flight_date_time[kTimestampChars] { 0 };
+		FormatTimestamp(flight_date_time, flight_timestamp, comm_.UtcOffsetMin(), comm_.UtcOffsetKnown());
+		// "UTC" is 3 characters to an offset's 6: pad so the columns stay aligned.
+		for (std::size_t c = std::strlen(flight_date_time); c < kTimestampChars - 1; c++)
+			flight_date_time[c] = ' ';
+		flight_date_time[kTimestampChars - 1] = '\0';
 		float apogee = 0.0f;
 		archive_.ReadEvent(i, FlightArchive::Statistic::MaxAltitudeM, apogee, valid_record);
 		uint32_t apogee_timestamp = 0;
@@ -915,8 +920,8 @@ void UserInteraction::ExportFlightStats(uint16_t archive_position) { //Export fl
 	uint32_t time_ms = 0;
 	bool present_out;
 	archive_.ReadEvent(archive_position, FlightArchive::Statistic::FlightTimestampS, time_ms, present_out);
-	char flight_date_time[20] { };
-	FormatUnixUtc(flight_date_time, time_ms);
+	char flight_date_time[kTimestampChars] { };
+	FormatTimestamp(flight_date_time, time_ms, comm_.UtcOffsetMin(), comm_.UtcOffsetKnown());
 	export_line.WriteMany("Flight time: ", flight_date_time, crlf_);
 
 	archive_.ReadEvent(archive_position, FlightArchive::Statistic::LaunchTimestampMs, time_ms, present_out);
