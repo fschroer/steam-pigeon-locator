@@ -115,3 +115,20 @@ Frank chose this on 2026-11-05, over CesiumJS and over staying with KML only. Go
   - Without a key, the section says the view is unavailable.
 - **Licensing.** This uses Google's own map in Google's own JS API, within its terms. It does not run into the tile-licensing question of issue #26, which is about the app's offline MapLibre tiles.
 - In `steam-pigeon-web` `6b464bf`. Not yet rendered with a real key.
+
+### Amendment 2026-11-06: sharing a flight with named people
+
+Frank asked for sharing that works like Google Drive: share a file with one or more people, and it shows in their "Shared with you" list. ADR-0040 decision 9 had deferred named-user sharing; this takes it up for the web only.
+
+- **A share is a Firestore document.** The project gains a Firestore database that holds one collection, `shares`. Each document lets one email address read one record. Its id is `{ownerUid}_{locatorId}_{recordKey}_{recipientEmail}`, where `recordKey` is `{record_ts}_{crc}`. The fields are the same values, plus the owner's email, the locator's name and a server timestamp, so the recipient's list needs no Storage reads.
+- **The share itself is the permission.** `storage.rules` gains one match. A signed-in reader whose email is verified may `get` `users/{owner}/locators/{locator}/{record}.csv` when `firestore.exists()` finds the share whose id the rule rebuilds from that path and the reader's email.
+  - Recipients get **read only, the CSV only**. They cannot list the folder, read the `.bin`, write or delete.
+  - The owner's own rule is unchanged. Everything else stays closed.
+- **`firestore.rules`** let only the owner create a share, with a fixed field set, an id that must match its fields, a lowercase recipient address that is not the owner's own, and the owner's real email if one is given. Nobody updates a share. The owner and the recipient may read or delete it. Everything else in Firestore is closed.
+- **Identity is the email address, and it must be verified** (the token's `email_verified`). A share may name an address that has no account yet; it works once someone signs up and verifies that address. Google sign-ins are verified. An email/password account made in the app may not be, so the web offers to send the verification link.
+- **No notification.** There is no server to send email, so the owner tells the person. Firebase's own email sending is for auth only.
+- **Revoking.** Removing the share closes access at once. Deleting the flight removes its shares too. A recipient may remove a share from their own list. Copy share link (ADR-0040 decision 9, the download-URL token) is unchanged and separate.
+- **Not in the apps.** The web is not a parity platform. If the apps later show "Shared with you", they read the same collection, and Android is the reference.
+- **Setup:** Frank creates the Firestore database (production mode). On the first deploy he grants the Storage service permission to read Firestore for its rules. Deploys now publish `hosting,storage,firestore`.
+- In `steam-pigeon-web` .
+- **Checked.** In the Firebase emulators, 28 of 29 rule checks pass: who may create, list, read and delete a share, and that recipients cannot read the `.bin`, another record, the folder listing, or anything without a verified email or after a revoke. The one positive check, a recipient reading the shared CSV, could not run in the cloud sandbox, because its proxy blocks the Storage emulator's call to the Firestore emulator. It still needs a real two-account test.

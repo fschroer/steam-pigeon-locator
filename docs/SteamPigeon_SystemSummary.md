@@ -227,7 +227,7 @@ Android / Kotlin / Jetpack Compose, organized around a `RocketViewModel` and a s
 
 ### 3.8 Web viewer
 
-**[ADR-0042](adr/0042-flight-data-web-ui.md), decided and v1 built 2026-11-04 (`steam-pigeon-web` `4678440`), not yet deployed.** A static TypeScript single-page app (`steam-pigeon-web`, Firebase Hosting) lets a flyer sign in with their app account (Google or email/password), list the records the app uploaded to Firebase Storage, chart them (uPlot) and download the stored CSV. It reads the `.csv`, never the `.bin`, so it adds no copy of the wire format. The Storage rules move from the Android repo into that repo and are deployed with the site. It is a viewer of the store, not a parity platform: §4.4 has no web column.
+**[ADR-0042](adr/0042-flight-data-web-ui.md), decided and v1 built 2026-11-04 (`steam-pigeon-web` `4678440`), not yet deployed.** A static TypeScript single-page app (`steam-pigeon-web`, Firebase Hosting) lets a flyer sign in with their app account (Google or email/password), list the records the app uploaded to Firebase Storage, chart them (uPlot) and download the stored CSV. It reads the `.csv`, never the `.bin`, so it adds no copy of the wire format. The Storage rules move from the Android repo into that repo and are deployed with the site. It is a viewer of the store, not a parity platform: §4.4 has no web column. Since 2026-11-06 (ADR-0042 amendment) a flyer can share a record with named, verified email addresses: a Firestore `shares` document grants read access to that record's CSV, and the record appears under the recipient's "Shared with you" list.
 
 ---
 
