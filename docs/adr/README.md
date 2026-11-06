@@ -58,5 +58,6 @@ Write an ADR for a decision that is costly to reverse, or that future work must 
 | [0041](0041-app-started-simulated-flight.md) | An app-started simulated flight computed on the locator | Accepted |
 | [0042](0042-flight-data-web-ui.md) | Flyers read their flights in a browser, from a static web app over the same Firebase store | Accepted |
 | [0043](0043-times-stored-utc-shown-with-offset.md) | Times are stored in UTC and shown with their offset; the app tells the locator its zone | Proposed |
+| [0044](0044-units-si-underneath-english-is-display.md) | Units are SI underneath; English is a display choice | Accepted |
 
 > **Numbering note (resolved 2026-08-03):** the iOS-port ADR and the launch-detection ADR were both filed as **0015**. Launch detection was filed first (2026-07-17) and keeps the number; the iOS port moved to **0016**. Commit `4b6bb45` and any external reference calling the iOS port "ADR-0015" mean [0016](0016-ios-port-corebluetooth-and-platform-parity.md) — a note in that file records the change. When picking the next number, check this table rather than the highest number you remember.
