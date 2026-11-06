@@ -92,7 +92,13 @@ namespace FlightArchive
         // is not cleanly closed, holds zero committed chunks, and is not the
         // currently-open record.  Erases only its first sector (header + valid
         // marker + stats) so the slot reads as free.  Returns true if reclaimed.
+        // A foreign-layout record (written under another ARCHIVE_VERSION or
+        // geometry) is reclaimed too: this build cannot read any of it.
         bool ReclaimRecordIfDataless(uint16_t recordId);
+        // True when the slot holds a record header written under a different
+        // archive layout.  Such a record is unreadable here; the allocator takes
+        // it after free slots and before evicting a readable record.
+        bool IsRecordForeignLayout(uint16_t recordId) const;
         // True when a record is open but no sample data has been written yet —
         // i.e. armed and erased but never launched.  Such a record can be reused
         // by the next arming instead of consuming/erasing a fresh slot.

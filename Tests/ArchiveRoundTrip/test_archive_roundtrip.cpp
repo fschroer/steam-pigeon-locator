@@ -536,6 +536,56 @@ static void TestSimulatedEvictedFirst()
 }
 
 // ---------------------------------------------------------------------------
+// Test 7: a record left by an older archive layout is reused, not stranded.
+// Its header has the magic but fails ValidateHeaderForConfig, so before the fix
+// it was neither free nor evictable nor reclaimable: one slot lost for good
+// (seen on the bench 2026-11-06 as a blank slot 0 after a v8 upgrade).
+// ---------------------------------------------------------------------------
+static void StampForeignHeader(RamFlashDriver& flash, RocketArchive& archive, uint16_t recId)
+{
+    FlightArchive::RecordHeader h{};
+    flash.Read(recId * archive.GetGeometry().recordSizeBytes, &h, sizeof(h));   // archive base is 0
+    h.version = static_cast<uint16_t>(FlightArchive::ARCHIVE_VERSION - 1u);
+    flash.EraseSector4K(recId * archive.GetGeometry().recordSizeBytes);
+    flash.Write(recId * archive.GetGeometry().recordSizeBytes, &h, sizeof(h));
+}
+
+static void TestForeignLayoutReused()
+{
+    printf("\n--- Test 7: an old-layout record is reused before a readable one ---\n");
+    RamFlashDriver flash(kFlashSize);
+    RocketArchive::Config cfg = MakeConfig();
+    cfg.evictFirstStatId = FlightArchive::Statistic::PhysicalDeploymentStats;
+    cfg.evictFirstMask   = FlightArchive::kRecordSimulatedBit;
+    RocketArchive archive(flash, cfg);
+    CHECK(archive.Init());
+    for (uint16_t r = 0u; r < kRecordCount; ++r)
+        FillOne(archive, archive.GetNextAvailableArchiveRecord(), r, true);
+    StampForeignHeader(flash, archive, 0u);
+    CHECK(archive.IsRecordForeignLayout(0u));
+    CHECK(!archive.IsRecordForeignLayout(1u));
+
+    // Full archive of simulated records: the old-layout slot goes first, not the
+    // oldest simulated one (which would be record 1 now that 0 is unreadable).
+    CHECK(archive.GetNextAvailableArchiveRecord() == 0u);
+    FillOne(archive, 0u, 500u, true);
+    CHECK(!archive.IsRecordForeignLayout(0u));
+    // ...and after that, eviction is back to oldest-simulated.
+    CHECK(archive.GetNextAvailableArchiveRecord() == 1u);
+
+    // A free slot still wins over an old-layout one.
+    StampForeignHeader(flash, archive, 4u);
+    CHECK(archive.ReclaimRecordIfDataless(2u) == false);   // closed flight: kept
+    flash.EraseSector4K(7u * archive.GetGeometry().recordSizeBytes);
+    CHECK(archive.GetNextAvailableArchiveRecord() == 7u);
+
+    // 'c' (ReclaimRecordIfDataless) frees an old-layout slot.
+    CHECK(archive.ReclaimRecordIfDataless(4u));
+    CHECK(!archive.IsRecordForeignLayout(4u));
+    CHECK(archive.GetNextAvailableArchiveRecord() == 4u);
+}
+
+// ---------------------------------------------------------------------------
 // Test 5: pre-launch ring drain — throttle, ordering, and epoch rebasing
 //
 // Mirrors FlightManager's pre-launch ring + throttled drain against the real
@@ -672,6 +722,7 @@ int main()
     TestRecordWrapAround();
     TestPreLaunchDrainThrottle();
     TestSimulatedEvictedFirst();
+    TestForeignLayoutReused();
 
     printf("\n==========================================================\n");
     printf(" Results: %d passed, %d failed\n", g_pass, g_fail);

@@ -402,6 +402,17 @@ uint16_t Archive::ReclaimGhostRecords() {
 	return reclaimed;
 }
 
+Archive::SlotStatus Archive::GetSlotStatus(uint16_t record_id) const {
+	if (archive_.IsRecordForeignLayout(record_id))
+		return SlotStatus::OldFormat;
+	RocketArchive::RecordInfo info { };
+	if (!archive_.GetRecordInfo(record_id, info) || !info.exists)
+		return SlotStatus::Free;
+	if (record_id == record_id_ && archive_.IsOpenFlightPristine())
+		return SlotStatus::OpenForNextFlight;
+	return SlotStatus::Recorded;
+}
+
 bool Archive::EraseAllMemory() {
 	// Drop any in-RAM open state, then erase the whole archive region sector by
 	// sector so no stale record headers survive a record-structure change.

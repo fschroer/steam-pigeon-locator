@@ -132,6 +132,11 @@ public:
 	// leaving cleanly closed flights and unclosed-flights-with-data intact.
 	// Returns the number of records freed.  Fast (one sector erase per ghost).
 	uint16_t ReclaimGhostRecords();
+	// What a slot holds, for the console data menu: a blank row there used to
+	// mean any of "free", "opened for the next flight" or "left by older
+	// firmware", and only the last one is a problem.
+	enum class SlotStatus : uint8_t { Free, OldFormat, OpenForNextFlight, Recorded };
+	SlotStatus GetSlotStatus(uint16_t record_id) const;
 	// Erase the entire archive region.  Use when the record structure/geometry
 	// changes and old records are no longer interpretable.  Slow (erases the
 	// whole archive); kicks the watchdog as it goes.
