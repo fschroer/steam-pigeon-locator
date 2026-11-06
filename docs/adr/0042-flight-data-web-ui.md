@@ -130,5 +130,5 @@ Frank asked for sharing that works like Google Drive: share a file with one or m
 - **Revoking.** Removing the share closes access at once. Deleting the flight removes its shares too. A recipient may remove a share from their own list. Copy share link (ADR-0040 decision 9, the download-URL token) is unchanged and separate.
 - **Not in the apps.** The web is not a parity platform. If the apps later show "Shared with you", they read the same collection, and Android is the reference.
 - **Setup:** Frank creates the Firestore database (production mode). On the first deploy he grants the Storage service permission to read Firestore for its rules. Deploys now publish `hosting,storage,firestore`.
-- In `steam-pigeon-web` .
+- In `steam-pigeon-web` ea575e4.
 - **Checked.** In the Firebase emulators, 28 of 29 rule checks pass: who may create, list, read and delete a share, and that recipients cannot read the `.bin`, another record, the folder listing, or anything without a verified email or after a revoke. The one positive check, a recipient reading the shared CSV, could not run in the cloud sandbox, because its proxy blocks the Storage emulator's call to the Firestore emulator. It still needs a real two-account test.
