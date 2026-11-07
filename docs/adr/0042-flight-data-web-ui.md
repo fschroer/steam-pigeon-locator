@@ -165,10 +165,11 @@ Frank asked for fields the record itself cannot carry.
 
 ### Amendment 2026-11-07: renaming a flight, and editing its place
 
-Frank asked to change the name a flight is shown by, on the list and on its page, and its location.
+Frank asked to change the name a flight is shown by, on the list and on its page, and its location. He then asked for an Event as well (the launch, such as "LDRS 44").
 
 - **Kept on the CSV, beside `place`.** The owner's name for a flight is written to the CSV's custom metadata as `title`. An edited place overwrites `place`. The list already reads that metadata, and a recipient of a shared flight reads it too, so both see the owner's name and place without another store.
 - **Blank means default.** Clearing the name removes `title`, and the flight is again titled by its time, or by a computer-saved CSV's file name. Clearing the place removes `place`, so it is looked up again from the pad's GPS fix (as in "naming the launch site" above). A place typed by hand is never replaced by a lookup.
 - **Display only.** The storage object name, the record key, share ids and the downloaded file names do not change, so share links and shares keep working. A given name also names the KML.
 - **Owner only.** Only the owner can write the metadata (`storage.rules`, unchanged). The app does not read either key.
-- In `steam-pigeon-web` 8f8453b.
+- **Event.** Kept as `event` beside them, blank meaning none. The lists show it in its own column after Place, and the flight page title reads "Name · Place · Event".
+- In `steam-pigeon-web` 8f8453b (name, place) and e446a6b (event).
