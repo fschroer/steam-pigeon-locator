@@ -879,6 +879,8 @@ It comes in two pieces.
 
 💡 **The statistics panel can be dragged** anywhere on the map, and it stays where you put it.
 
+⚠️ **When the signal is lost, the panel stays up with the last readings.** Two seconds after the last message from the locator, the readings dim and a red line at the top reads **Signal lost · 12 s ago**, counting up. Those are the last altitude, flight state and position the rocket sent: the coordinates are still tappable, which is what you want when it came down out of range. On the pad, the channel lines are hidden while the panel is stale, because continuity is something only a live locator can report. During a record download the top line reads **Last heard … ago** in the normal color instead: the locator is quiet because the app asked it to be.
+
 **On accuracy:** there is no numeric accuracy readout. The locator's reported horizontal accuracy is drawn as the **ring around the rocket marker** — a wide ring is a poor fix. If the ring is large, the antenna's view of the sky is poor (§1.7).
 
 **About continuity:** continuity means *there is an intact circuit through the igniter*. It tells you the igniter is good and the terminals are tight. It does **not** mean the channel is armed or live — you'll see continuity on a wired channel whenever the locator is powered, armed or not.

@@ -2,6 +2,12 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-11-07 (app) — the stats panel stays up when the signal is lost. **Not compiled**
+
+- **Ask (Frank):** show the flight statistics panel even when the locator signal is lost, with an indicator that the data is stale.
+- **Android** (`rocket-flight-manager`, branch `claude/project-thread-q5ez43`): the panel shows once the locator has been heard this run and is no longer hidden after 2 s of silence. Stale, its rows dim under "Signal lost · 12 s ago" (red) or "Last heard … ago" (neutral, during a record download); it keeps its own 1 s clock, since nothing else recomposes it once messages stop. Pad-layout channel rows are hidden while stale (`releaseLocatorOnLinkLoss` resets the config). Tap-to-speak adds "last heard N seconds ago". Formatting in pure-Kotlin `ui/StaleTelemetry.kt`; `StaleTelemetryTest` 3/0 under kotlinc. **The Compose change is not compiled**; it needs a Pixel build.
+- **iOS** owes it: `UI_PARITY.md` owed row 10.
+
 ## 2026-11-06 (archive) — a record left by older firmware stranded slot 0 for good. **Confirmed on the bench**
 
 - **Symptom (Frank):** after many sims the `data` menu showed slots 0 and 8 blank. Slot 8 is the record opened for the next flight, which is expected. Slot 0 printed only the CSV header, and `c` did not clear it.
