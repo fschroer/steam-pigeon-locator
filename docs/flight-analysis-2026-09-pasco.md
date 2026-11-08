@@ -147,11 +147,22 @@ acceleration vector and body +X, over samples above 3 g:
 | Mike_8 180444 | 2.2° | 3.4° | 15.1 g | 0.7 g |
 | Mike_9 110552 | 3.4° | 6.0° | 17.0 g | 1.7 g |
 | **Ken 132857** | **38.8°** | 155.8° | 12.2 g | 10.3 g |
-| **Ken_6** | **144.5°** | 154.2° | 27.9 g | 7.4 g |
+| ~~**Ken_6**~~ | ~~**144.5°**~~ | ~~154.2°~~ | 27.9 g | ~~7.4 g~~ |
+| Ken_6, thrust only (to 2.0 s) | 1.6° | 3.2° | 27.9 g | 0.9 g |
 
-The two Ken records are outliers by an order of magnitude and want a **mounting-frame
-and nose-axis check on the bench**. `Ken 132857` also shows an accel-implied pad tilt of
+~~The two Ken records are outliers by an order of magnitude and want a **mounting-frame
+and nose-axis check on the bench**.~~ `Ken 132857` also shows an accel-implied pad tilt of
 40.1° stable to ±1° — a rocket that flew to 1 656 m was not 40° off the rail.
+
+*(Corrected 2026-11-08.)* **Only `Ken 132857` is misaligned; `Ken_6` is mounted
+correctly.** "Samples above 3 g" also counts post-burnout drag, which acts along −X and
+reads as ~145–180° off +X. `Ken_6`'s motor stopped at about 2.0 s and it then coasted
+at −5 to −9 g of drag for over a second, so drag dominated its row. Restricted to thrust
+(before the motor stops), `Ken_6` is within 1.6° (p90 3.2°) of +X. `Ken 132857` stays
+misaligned on the same restriction (median 35.8°, p90 40.1°, 58 samples): during thrust
+its accel points along (0.77, 0.45, 0.45), the same direction as its pad gravity, so the
+board sits about 40° skewed to the airframe axis. The other four rows are unaffected,
+because their thrust samples dominate.
 
 **A measured drift figure exists.** The 2026-09-06 180444 pair put two independent
 strapdowns in one airframe. They agreed to **~3° at burnout** (6.7° both) and **~4° at

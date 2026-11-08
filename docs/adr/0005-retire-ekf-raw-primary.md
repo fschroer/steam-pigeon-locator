@@ -199,8 +199,11 @@ is anything built later on the assumption that descent tilt means something.
 
 📋 **Separately, two locators need a bench mounting check before the next flight.**
 `Ken 132857` shows the boost acceleration **38.8°** off body X (p90 155.8°) and an
-accel-implied pad tilt of 40.1° stable to ±1°; `Ken_6` shows the same pattern. A rocket
-that flew to 1 656 m was not 40° off the rail. See also
+accel-implied pad tilt of 40.1° stable to ±1°; ~~`Ken_6` shows the same pattern.~~ A rocket
+that flew to 1 656 m was not 40° off the rail. *(Corrected 2026-11-08: only `Ken 132857`
+needs this check. `Ken_6`'s 144.5° figure counted post-burnout drag; during thrust it
+is within 1.6° of +X. See the correction in
+[flight-analysis-2026-09-pasco.md](../flight-analysis-2026-09-pasco.md) §2–3.)* See also
 [#43](https://github.com/fschroer/steam-pigeon-locator/issues/43), which is a different
 frame defect in the same area and should not be confused with this one.
 
