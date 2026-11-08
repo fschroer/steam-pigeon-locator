@@ -268,6 +268,12 @@ namespace FlightArchive
         kEkfCorrectionDropped  = 0x02u,  // injectErrorState() rejected a non-finite dx
         kEkfBaroRejected       = 0x04u,  // updateBaro() bailed (non-finite or gated)
         kEkfFusedFrozen        = 0x08u,  // fused altitude static while raw baro moved
+        // GPS vertical speed disagrees with raw baro vertical speed (#70, ADR-0017
+        // amendment 2026-11-08).  Logged only, no behavior depends on it.  It
+        // belongs in this byte because the EKF fuses that GPS velocity, so the
+        // fused pair on a flagged row is suspect too: "0 = trustworthy" still
+        // holds.  Records written before it read 0 here, so no version bump.
+        kGpsVerticalDisagree   = 0x10u,
     };
 
     // pps_status bits (#31) -- whether this sample's timestamp is GPS-disciplined.

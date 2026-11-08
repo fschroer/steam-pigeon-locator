@@ -180,7 +180,10 @@ private:
   //
   // ekf_health (ARCHIVE_VERSION 6, #38): 0 = the filter was healthy on that cycle;
   // bit 0 = velocity divergence guard fired, bit 1 = a non-finite correction was
-  // dropped, bit 2 = the baro update was rejected.  Any non-zero value means the
+  // dropped, bit 2 = the baro update was rejected, bit 3 = fused altitude frozen,
+  // bit 4 (0x10) = GPS vertical speed disagreed with raw baro (#70, logged only;
+  // the EKF fuses that velocity, so the row's fused pair is suspect too).  Any
+  // non-zero value means the
   // fused_* pair on that row is not trustworthy.  This column exists because a
   // frozen fused altitude with an exactly-0.0 vertical speed is indistinguishable
   // from a healthy filter sitting on the pad — six flights across two campaigns

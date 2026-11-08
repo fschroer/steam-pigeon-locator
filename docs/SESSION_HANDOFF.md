@@ -2,6 +2,13 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-11-08 (attitude, GPS) — canopy tilt correction (#44) and a logged GPS vertical cross-check (#70). **Host-tested, ARM syntax-checked, NOT on hardware**
+
+- **#44, decided option 1:** `CanopyTiltGate` (drogue deployment to landing, |a| within 0.25 g of 1 g for 250 ms) drives `AttitudeEstimator::correctRollPitchFromAccel` at `kCanopyTiltGain` = 0.05/20 Hz cycle. The pad path is unchanged. ADR-0005 amended. `Tests/CanopyTilt` replays a CSV through the real estimator and matches the review's Python within about 1°.
+- **#70, decided log-only:** `ekf_health` bit 4 (0x10) = GPS vertical speed disagrees with raw baro by more than max(25 m/s, 15 %), in flight, live 3D fix only. No behavior. ADR-0017 amended. No archive version bump.
+- **Also decided:** main gate stays raw baro (ADR-0003 amended); #71 replay test first, then beside the EKF; #72 descent wind coast first; #73 re-cut once, after the first v8 flights.
+- **To check on the bench / first flight:** under canopy the app's tilt should settle to the hang angle instead of drifting. Gain is a starting value (20 Hz replay: Ken_6 26°, Ken 132857 30° median at 0.05, against 15° and 11° at 0.1). Confirm on the first 50 Hz record with #14's FIFO rate.
+
 ## 2026-11-08 (analysis) — fused altitude and position review; decisions open as #44, #70–#73. **Analysis only, no code**
 
 - **Record:** `docs/flight-analysis-2026-11-fusion-review.md`, scripts in `docs/analysis/fusion-review-2026-11/` (offline Python on the 13-record 20 Hz corpus; set `FLIGHT_DATA`).

@@ -488,6 +488,7 @@ void Navigation::simFillGps(GpsSample& gps, uint32_t now) const {
 // ---------------------------------------------------------------------------
 void Navigation::setPhase(FlightStates state) {
     m_ekf.setPhase(state);
+    m_phase_ = state;   // CanopyTiltGate (#44) reads it every cycle
 
     // Arm the GPS stale-fix watchdog from launch onward, including Landed — a
     // frozen position hurts most during the recovery walk-out, which is exactly
@@ -789,10 +790,10 @@ bool Navigation::Update() {
         // Independent of the EKF: seed from gravity while stationary on the pad,
         // then dead-reckon by integrating the (bias-corrected) gyro.  Driven here
         // at the 20 Hz loop rate; the ≥ 480 Hz FIFO/ISR path of NFR-9 is follow-on
-        // hardware integration.  Accel tilt correction only when quasi-static
-        // (pad / gentle descent) — there is no gravity reference in powered or
-        // ballistic flight, so confidence then decays with time (the FR-P13
-        // attitude-freshness gate).  gyro_bias_rps borrows the EKF estimate while
+        // hardware integration.  Accel tilt correction on the pad (quasi_static,
+        // full blend) and under canopy (CanopyTiltGate, roll/pitch only, #44) —
+        // there is no gravity reference in powered or ballistic flight, so
+        // confidence then decays with time (the FR-P13 attitude-freshness gate).  gyro_bias_rps borrows the EKF estimate while
         // the EKF still runs; the strapdown should own pad-bias once it is removed.
         const bool quasi_static = !m_gps_velocity_enabled_ && IsStationary(imu, baro);
         if (!m_attitude.initialized()) {
@@ -882,8 +883,14 @@ bool Navigation::Update() {
             if (!propagated)
                 m_attitude.propagate(imu.gyro_rps, dt_s, now);
 
-            if (quasi_static)
+            if (quasi_static) {
                 m_attitude.correctTiltFromAccel(imu.accel_selected_mps2, kStrapdownTiltGain);
+            } else if (m_canopy_tilt_gate_.update(m_phase_, imu.accel_selected_mps2,
+                                                  static_cast<uint32_t>(dt_s * 1000.0f + 0.5f))) {
+                // Under canopy gravity is observable again (#44): roll/pitch only,
+                // so the spin the gyro tracks as heading is left alone.
+                m_attitude.correctRollPitchFromAccel(imu.accel_selected_mps2, kCanopyTiltGain);
+            }
         }
         Diag::mark(Diag::Seg::Strapdown, t_sd);   // FIFO drain + integrate + tilt
 

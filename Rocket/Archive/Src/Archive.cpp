@@ -4,6 +4,7 @@
 #include "SettingsBounds.hpp"
 #include "Types.hpp"
 #include <Math.hpp>   // RocketNav::Math::norm — accel channel identification
+#include <GpsVerticalCrossCheck.hpp>   // #70 logged flag
 #include "Units.hpp"  // G0_F
 #include "RandomNumGen.hpp"
 #include "Format.hpp"
@@ -343,6 +344,13 @@ FlightArchive::FlightSample Archive::BuildSample(const SampleInputs &in) {
 			| (in.health.correction_dropped   ? FlightArchive::kEkfCorrectionDropped  : 0u)
 			| (in.health.baro_update_rejected ? FlightArchive::kEkfBaroRejected       : 0u)
 			| (in.health.fused_frozen         ? FlightArchive::kEkfFusedFrozen        : 0u));
+	// #70: GPS vertical speed against raw baro, in flight only (the pad and the
+	// ground are not what the check is for).  Logged, never acted on.
+	if (in.gps && in.flight_state > FlightStates::WaitingLaunch
+	           && in.flight_state < FlightStates::Landed
+	           && RocketNav::GpsVerticalCrossCheck::disagrees(in.gps->velocity_valid, in.gps->fix_type,
+	                                                          in.gps->vel_d_mps, in.raw_baro_vel_mps))
+		s.ekf_health |= FlightArchive::kGpsVerticalDisagree;
 	s.pps_status   = in.pps_status;
 	// Raw baro (#56).  Temperature is written only with a valid pressure, since
 	// 0 is both "unknown" and a real 0 C.
