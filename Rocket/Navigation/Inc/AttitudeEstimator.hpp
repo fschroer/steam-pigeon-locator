@@ -19,11 +19,13 @@ namespace RocketNav {
 // (Math::quatIntegrateBodyRates), but does not resolve sub-sample coning.
 //
 // Honesty about the envelope (ADR-0005):
-//   • Accelerometer tilt correction is valid ONLY quasi-statically (on the pad,
-//     gentle descent under canopy).  During powered/ballistic flight there is no
-//     usable gravity reference (free fall ⇒ accel ≈ 0 g), so attitude is
-//     dead-reckoned and confidence decays with elapsed time — callers must gate
-//     on lastUpdateMs()/freshness, which FR-P13 does.
+//   • Accelerometer tilt correction is valid ONLY where gravity is observable:
+//     on the pad, and under canopy once CanopyTiltGate passes (#44).  During
+//     powered/ballistic flight there is no usable gravity reference (free fall ⇒
+//     accel ≈ 0 g, and drag passes through 1 g in coast), so attitude is
+//     dead-reckoned from launch to drogue deployment and confidence decays with
+//     elapsed time — callers must gate on lastUpdateMs()/freshness, which FR-P13
+//     does.
 //   • Heading/yaw is NOT observable with a 6-axis IMU; this estimator makes no
 //     heading claim at rest.  tiltFromVerticalRad() needs only roll/pitch, which
 //     gravity does observe, so the air-start gate is unaffected by that gap.
@@ -51,6 +53,17 @@ public:
     // Call ONLY when quasi-static (norm(accel) ≈ 1 g).  gain ∈ [0,1].  Corrects
     // roll/pitch (tilt) only; leaves heading untouched (gravity can't observe it).
     void correctTiltFromAccel(const Vec3f& accel_mps2, float gain);
+
+    // Roll/pitch-only correction for flight under canopy (#44).  Rotates the
+    // attitude about the axis that tips the estimated "up" a fraction `gain` of
+    // the way toward the measured specific force, and nothing else, so heading
+    // is left exactly as the gyro carried it.  correctTiltFromAccel() above
+    // blends the whole quaternion toward quatFromAccel(), whose yaw is always 0:
+    // harmless on the pad, but under a spinning canopy the spin IS a heading
+    // change and that blend fights the gyro (replay, Mike_8: 30° error against
+    // 9° with this method).  Call ONLY when CanopyTiltGate says gravity is
+    // observable.  gain ∈ [0,1].
+    void correctRollPitchFromAccel(const Vec3f& accel_mps2, float gain);
 
     bool        initialized()  const { return m_initialized; }
     Quaternionf quaternion()   const { return m_q_bn; }

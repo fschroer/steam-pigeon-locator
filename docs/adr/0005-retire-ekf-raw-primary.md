@@ -199,8 +199,11 @@ is anything built later on the assumption that descent tilt means something.
 
 📋 **Separately, two locators need a bench mounting check before the next flight.**
 `Ken 132857` shows the boost acceleration **38.8°** off body X (p90 155.8°) and an
-accel-implied pad tilt of 40.1° stable to ±1°; `Ken_6` shows the same pattern. A rocket
-that flew to 1 656 m was not 40° off the rail. See also
+accel-implied pad tilt of 40.1° stable to ±1°; ~~`Ken_6` shows the same pattern.~~ A rocket
+that flew to 1 656 m was not 40° off the rail. *(Corrected 2026-11-08: only `Ken 132857`
+needs this check. `Ken_6`'s 144.5° figure counted post-burnout drag; during thrust it
+is within 1.6° of +X. See the correction in
+[flight-analysis-2026-09-pasco.md](../flight-analysis-2026-09-pasco.md) §2–3.)* See also
 [#43](https://github.com/fschroer/steam-pigeon-locator/issues/43), which is a different
 frame defect in the same area and should not be confused with this one.
 
@@ -209,3 +212,41 @@ at 0.14 dps/LSB. `Ken_6`'s **median** boost body rate was 2 152 dps, and two rec
 railed on a handful of samples. A faster-rolling airframe will saturate, and the strapdown
 has no way to know that it did — which bears directly on NFR-9's ≥ 480 Hz strapdown, since
 sampling faster does not help once the sensor is at its rail.
+
+## Amendment (2026-11-08) — option 1 chosen: the tilt correction runs under canopy, roll and pitch only ([#44](https://github.com/fschroer/steam-pigeon-locator/issues/44))
+
+**Decided (Frank, 2026-11-08):** fix the code and keep the envelope, as a replay of four
+Pasco descents suggested
+([flight-analysis-2026-11-fusion-review.md](../flight-analysis-2026-11-fusion-review.md),
+"Tilt correction under canopy"). The replay changed option 1 in three ways:
+
+1. **A phase gate stays.** The correction runs only from `DroguePrimaryEvent` until
+   `Landed`. In coast, drag passes through 1 g on its way down: on Shane 7 % of coast
+   samples passed the magnitude test with the accel 168° from the nose. Coast tilt, which
+   FR-P13 uses and which was verified against GPS on Red Ryder and Shane, stays
+   dead-reckoned.
+2. **Gravity test: |a| within 0.25 g of 1 g, held 250 ms** (`CanopyTiltGate`). Not 0.15 g:
+   `Ken_6` hangs at a median 1.13 g. Each canopy sample's accel direction is within a median
+   2–3° of its 5 s average, so spin and swing push little.
+3. **Roll and pitch only** (`AttitudeEstimator::correctRollPitchFromAccel`). The pad's
+   `correctTiltFromAccel` blends the whole quaternion toward `quatFromAccel`, whose yaw is
+   0. Under a spinning canopy the spin is a heading change, and that blend fights the gyro
+   (`Mike_8`: 30° median error against 9°). The pad path is unchanged.
+
+Gain `kCanopyTiltGain` = 0.05 per 20 Hz cycle (1 s time constant), a starting value. The
+replay has only the archived 20 Hz gyro, where the firmware integrates the 480 Hz FIFO.
+Through the real estimator (`Tests/CanopyTilt`), median / p90 canopy tilt error against
+the 5 s accel-implied tilt at 0.05 was:
+- `Mike_5 09-06`: 4° / 13°;
+- `Mike_8 09-06`: 6° / 14°;
+- `Ken_6`: 26° / 44°;
+- `Ken 132857`: 30° / 39°.
+
+Uncorrected, it was 52–117° median. At 0.1, `Ken_6` and `Ken 132857` read 15° and 11°.
+Above about 0.1 the time constant falls below the ~5 s swing, whose tilt only the gyro sees.
+**Revisit** on the first 50 Hz record, together with #14's FIFO rate.
+
+The envelope in Decision 2 is therefore true again for descent, and the
+`AttitudeEstimator` header says so. The caveat of ADR-0004 applies: the reference is
+derived from the accel itself, so this shows convergence on what the accel says, not
+independent truth.

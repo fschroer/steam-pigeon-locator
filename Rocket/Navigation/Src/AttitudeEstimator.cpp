@@ -56,6 +56,34 @@ void AttitudeEstimator::correctTiltFromAccel(const Vec3f& accel_mps2, float gain
         k*m_q_bn.z + gain*qa.z });
 }
 
+void AttitudeEstimator::correctRollPitchFromAccel(const Vec3f& accel_mps2, float gain) {
+    if (!m_initialized || gain <= 0.0f) return;
+    const float a_norm = Math::norm(accel_mps2);
+    if (a_norm < 1e-6f) return;
+    if (gain > 1.0f) gain = 1.0f;
+
+    // Nav "up" (NED −Z) as the body currently believes it, and the measured
+    // specific-force direction, which is "up" while hanging under a canopy.
+    const Vec3f up_b = Math::rotateNavToBody(m_q_bn, Vec3f{0.0f, 0.0f, -1.0f});
+    const Vec3f m    = accel_mps2 * (1.0f / a_norm);
+
+    const Vec3f axis = Vec3f{ up_b.y*m.z - up_b.z*m.y,
+                              up_b.z*m.x - up_b.x*m.z,
+                              up_b.x*m.y - up_b.y*m.x };
+    const float s = Math::norm(axis);
+    if (s < 1e-9f) return;                         // already aligned (or exactly opposed)
+    const float c     = up_b.x*m.x + up_b.y*m.y + up_b.z*m.z;
+    const float angle = std::atan2(s, c) * gain;   // fraction of the misalignment
+    const float k     = -std::sin(0.5f * angle) / s;
+
+    // Body-frame increment q ⊗ dq, the same composition propagate() uses: it
+    // turns the body by −angle about `axis`, which moves the estimated up toward
+    // the measurement.  The rotation axis is perpendicular to up, so heading
+    // (rotation about up) is untouched.
+    const Quaternionf dq{ std::cos(0.5f * angle), k*axis.x, k*axis.y, k*axis.z };
+    m_q_bn = Math::quatNormalize(Math::quatMultiply(m_q_bn, dq));
+}
+
 Eulerf AttitudeEstimator::euler() const {
     return Math::quatToEuler(m_q_bn);
 }

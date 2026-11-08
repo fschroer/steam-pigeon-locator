@@ -175,3 +175,27 @@ The 2026-09-07 amendment was half right. **`fix_type` is the wrong trust gate: t
   - **Candidates:** `sAcc`, or a receiver-independent check such as GPS vertical velocity against accelerometer-integrated velocity, flagged on sustained disagreement.
   - **When to decide:** once flights with `sAcc` recorded, ideally including a hard boost, exist.
 - **The codec recommendation above stands, with a caveat.** If only one quality field fits in `FlightProfileCodec`, `h_acc` is still better than `fix_type`. It is no longer the whole answer, though, and the app must not present it as one.
+
+## Amendment (2026-11-08) — the GPS vertical-speed cross-check ships as a logged flag ([#70](https://github.com/fschroer/steam-pigeon-locator/issues/70))
+
+**Decided (Frank, 2026-11-08):** log it now, and decide on a gate later. The 2026-10-14
+amendment listed "GPS vertical velocity against accelerometer-integrated velocity" as a
+candidate trust gate and chose to measure first. The 2026-11 fusion review
+([flight-analysis-2026-11-fusion-review.md](../flight-analysis-2026-11-fusion-review.md))
+found the check catches a lying receiver well before `h_acc` does (Shane, Ken 132857, Nike
+Smoke) and never fired on Red Ryder.
+
+- **What is logged:** `GpsVerticalCrossCheck::disagrees()` on every archived sample in
+  flight (`Launched` … `MainBackupEvent`), judged only on a live 3D fix with velocity. It
+  flags when GPS vertical speed and raw baro vertical speed differ by more than
+  max(25 m/s, 15 % of baro).
+- **Where:** bit 4 (`kGpsVerticalDisagree`, 0x10) of `ekf_health`. The EKF fuses that GPS
+  velocity, so the row's fused pair is suspect too, and "0 = trustworthy" still holds. It
+  takes no bytes and needs no `ARCHIVE_VERSION` bump: older records read 0 there.
+- **Nothing acts on it.** No rejection, no app change.
+- **Known false positive:** in transonic flight the baro side is itself wrong. A gate would
+  compare against the vertical filter's speed there ([#71](https://github.com/fschroer/steam-pigeon-locator/issues/71)).
+
+**Revisit** on the first v8 flights with `sAcc`. That is when to choose between `sAcc`, this
+check, or both as the trust gate, and whether a rejected fix is held out for 2 s after it
+passes again.

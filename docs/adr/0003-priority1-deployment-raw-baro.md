@@ -139,3 +139,7 @@ apogee loses every deployment**, which is a Priority-1 failure.
 
 - **Fused-primary after vetting (original ADR-0001 direction).** Deferred: the method for ever doing this lives in [ADR-0004](0004-fusion-vetting-method.md), and it would additionally require revising this ADR. Not pursued now because fusion's accuracy edge is in non-gating phases.
 - **Raw-only with no fusion robustness layer.** Rejected: discards spike-rejection and dropout protection that a cross-check against the fused estimate cheaply provides.
+
+## Amendment 2026-11-08 — GPS stays out of the main-chute gate
+
+**Decided (Frank, 2026-11-08):** the main gate stays on raw baro alone. The 2026-11 fusion review ([flight-analysis-2026-11-fusion-review.md](../flight-analysis-2026-11-fusion-review.md)) found that fusing GPS vertical speed removes `Ken_6`'s ±2.5 m port oscillation under canopy without lag. That GPS-aided altitude is for display and the observational fused columns only ([#71](https://github.com/fschroer/steam-pigeon-locator/issues/71)). For the gate, GPS would add a failure path to the one decision that fires a charge, and the Pasco write-up's N-consecutive-samples rule already rides out the swing at a fixed 50 ms × N. Revisiting this needs a new decision and the vetting of [ADR-0004](0004-fusion-vetting-method.md).

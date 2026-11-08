@@ -60,3 +60,28 @@ A second calibration point, easy to get backwards: the distance comes from a hav
 - **Jump test only, no ceiling.** Has no answer for the first reading of a session, where there is no anchor to compare against — exactly the case where a locator with no fix is most likely to be reporting nonsense.
 - **One whole-flight speed bound.** What shipped first. Necessarily the boost number, so it never bites during the long, slow phases where a fixless reading actually persists.
 - **Bound the speed by airspeed (Mach 5).** Ignores that the figure is a ground-track distance. Four times looser than the measurement supports, in exchange for covering a vertical velocity that does not enter it.
+
+## Amendment 2026-11-08: under canopy, the marker coasts on the wind while the fix is lost (#72)
+
+Decided by Frank 2026-11-08 on #72, from the 2026-11 fusion review (`docs/flight-analysis-2026-11-fusion-review.md`, "Horizontal position while GPS is unreliable").
+
+**Context.** While the fix is lost the locator re-sends the last good lat/lon (`Communication::SendablePosition`), so the map holds a Degraded marker where the rocket *was*. Under canopy the rocket goes on drifting with the wind. `TelemetryData.vel_ned_mps` already carries raw GPS north/east velocity, so the app can carry the position forward with no wire change. `docs/analysis/fusion-review-2026-11/wind1hz.py` checked this on what the app actually receives, which is about 1 Hz telemetry with dropped packets, across 9 descents:
+
+| Outage | Hold last fix (median / p95) | Coast, 20 % packet loss | Coast, 50 % packet loss |
+|---|---|---|---|
+| 2 s | 10 / 37 m | 2 / 7 m | 3 / 7 m |
+| 10 s | 47 / 184 m | 13 / 32 m | 14 / 34 m |
+| 30 s | 147 / 552 m | 57 / 120 m | 59 / 119 m |
+
+**Decision.**
+
+1. **Wind.** The app keeps the mean north/east GPS velocity of the packets *with a fix* received in the last 5 s. At least 2 such packets are needed, or there is no coast.
+2. **When.** It coasts only while the fix is lost (`locatorHasFix` false) in `DroguePrimaryEvent` … `MainBackupEvent` (4–7). There is no coast in boost, coast or `Noseover`: drogue-phase velocity before deployment is not wind, and the ascent dead reckoning from the strapdown is a separate, later step.
+3. **Position.** The coasted position is the last fix plus the wind × the time since that fix. It moves for at most **30 s**, which is as far as the corpus measures, then freezes.
+4. **Ring.** The accuracy ring is `hacc` at the last fix + **4 m/s ×** the time since that fix. 4 m/s held 95–98 % of outcomes at every length from 2 to 30 s; 3 m/s held only 79–93 %. The ring keeps growing after the 30 s freeze, because the rocket may still be drifting.
+5. **Landed.** On `Landed` the point and the ring both freeze, because the rocket has stopped.
+6. **Reacquired.** The first fix replaces the coast at once.
+7. **Marker.** The coasted marker stays in the **Degraded** trust style and is labeled *estimated*, so it is never presented as a fix.
+8. **Numbers stay on real fixes.** Distance, bearing, the AR marker, the HUD pointers and the spoken callouts keep using the last real fix, and this ADR's jump test stays anchored on real fixes. A coasted point is drawn, not measured.
+
+**Consequences.** The marker no longer sits up to hundreds of meters upwind of a drifting rocket during an outage under canopy. The radius rate and the 30 s cap are fit to 9 descents at Pasco and Gerlach. A gustier site, or a canopy that changes shape (the drogue-to-main transition inside an outage), can put the rocket outside the ring, so revisit them once v8 flights add records. Android is the reference implementation. iOS owes it, recorded in `UI_PARITY.md`.

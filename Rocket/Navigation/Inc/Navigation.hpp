@@ -6,6 +6,7 @@
 #include "MMC5983MA.hpp"
 #include "InsEkf15.hpp"
 #include "AttitudeEstimator.hpp"
+#include "CanopyTiltGate.hpp"
 #include "Constants.hpp"
 #include "SimFlight.hpp"
 #include "SensorFaults.hpp"
@@ -446,6 +447,14 @@ private:
     static constexpr float kStrapdownTiltGain = PerCycleGainFrom20Hz(0.02f);  // tuned at 20 Hz (ADR-0039)
     // LPF gain for learning the strapdown gyro bias while stationary (≈1 s at 20 Hz).
     static constexpr float kStrapdownBiasAlpha = PerCycleGainFrom20Hz(0.05f);  // tuned at 20 Hz (ADR-0039)
+    // Roll/pitch correction gain under canopy (#44).  0.05 per 20 Hz cycle is a
+    // 1 s time constant: faster than the pad's 0.02, because a 20 Hz replay of
+    // four Pasco descents converged too slowly at 0.02, but slower than the
+    // ~5 s swing, whose tilt only the gyro can see (a pendulum's accel points
+    // along its line).  A starting value: confirm on the first 50 Hz record.
+    static constexpr float kCanopyTiltGain = PerCycleGainFrom20Hz(0.05f);
+    CanopyTiltGate m_canopy_tilt_gate_;
+    FlightStates   m_phase_ = FlightStates::WaitingLaunch;
 
     // ── High-rate strapdown propagation (NFR-9) ───────────────────────────────
     // The gyro FIFO is batched at this rate; each drained sample is integrated at
