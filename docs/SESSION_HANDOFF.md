@@ -2,13 +2,13 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
-## 2026-11-08 (app map) — under canopy the marker coasts on the wind while the fix is lost (#72), ADR-0022 amended. **Android NOT compiled; iOS owes it**
+## 2026-11-08 (app map) — under canopy the marker coasts on the wind while the fix is lost (#72), ADR-0022 amended. **Android built and run (not yet seen coasting); iOS NOT compiled**
 
 - **Android** `f82cd34` (`rocket-flight-manager`, branch `claude/project-thread-8koqky`): `ui/WindCoast.kt` (pure Kotlin, `WindCoastTest` 10 tests pass under kotlinc). In states 4–7 with `locatorHasFix` false, the marker and ring follow the last fix + the 5 s mean descent GPS velocity, for ≤ 30 s. The ring is h_acc + 4 m/s × t. Both freeze on Landed. The stats panel shows "Marker est. · fix N s ago".
 - **Unchanged on purpose:** distance, bearing, AR, callouts and the jump test stay on the real fix (Frank's call, 2026-11-08).
 - **Evidence:** `docs/analysis/fusion-review-2026-11/wind1hz.py` (1 Hz telemetry with packet loss).
-- **To confirm:** it needs a Pixel build. A sim flight never loses its fix, so watching it work live needs a real outage under canopy, or GPS blocked on the bench in a descent state.
-- **iOS owes it:** add a `UI_PARITY.md` owed row; the iOS repo was not in this session.
+- **To confirm:** a sim flight never loses its fix, so watching it work live needs a real outage under canopy, or GPS blocked on the bench in a descent state.
+- **Merged 2026-11-08:** locator #69 (4a6c544) and app #10 (877a04c), after Frank built and ran the app; both pulled to Frank's PC. **iOS** port `768f8d7` (steam-pigeon-ios #5) is NOT compiled; it is `UI_PARITY.md` row 11.
 
 ## 2026-11-08 (attitude, GPS) — canopy tilt correction (#44), a logged GPS vertical cross-check (#70), and the vertical filter under replay test (#71). **Host-tested, ARM syntax-checked, NOT on hardware**
 
