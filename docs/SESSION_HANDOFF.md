@@ -2,6 +2,13 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-11-08 (analysis) — fused altitude and position review; decisions open as #44, #70–#73. **Analysis only, no code**
+
+- **Record:** `docs/flight-analysis-2026-11-fusion-review.md`, scripts in `docs/analysis/fusion-review-2026-11/` (offline Python on the 13-record 20 Hz corpus; set `FLIGHT_DATA`).
+- **Open decisions (Frank):** #44 canopy tilt correction (replay says: accel-magnitude gate after drogue only, roll/pitch only, ~0.25 g gate, gain unsettled); #70 GPS vertical-speed cross-check (log first, ADR-0017 gate later); #71 2-state vertical filter in the EKF's observational role (ADR-0005/0013); #72 horizontal coast (ADR-0022); #73 archive re-cut 94 → 80 B (waits on #31, #52 and the first v8 flights).
+- **Corrected:** Ken_6 is mounted correctly (the Pasco "144°" was drag samples); only Ken 132857 is ~40° skewed, which the 6 cardinal frames cannot express.
+- **Trap:** `correctTiltFromAccel` blends the whole quaternion toward `quatFromAccel` (yaw 0), so in flight it would also drag heading toward 0. Fine on the pad, wrong under a spinning canopy.
+
 ## 2026-11-07 (app) — the stats panel stays up when the signal is lost. **Not compiled**
 
 - **Ask (Frank):** show the flight statistics panel even when the locator signal is lost, with an indicator that the data is stale.
