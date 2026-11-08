@@ -36,7 +36,7 @@ Write an ADR for a decision that is costly to reverse, or that future work must 
 | [0019](0019-channel-interference-detection.md) | Channel interference detection — report SNR and noise floor, classify in the app | Accepted |
 | [0020](0020-targeted-locator-commands.md) | Address app→locator commands to a locator, so a broadcast command cannot arm somebody else's rocket | Accepted |
 | [0021](0021-arming-gates-pyro-only.md) | Arming gates pyro only — always-on recording, and prompting the operator instead of auto-arming | Accepted |
-| [0022](0022-distance-bearing-plausibility.md) | The app refuses to quote a distance or bearing it cannot justify — radio-range ceiling, phase-aware jump test | Accepted |
+| [0022](0022-distance-bearing-plausibility.md) | The app refuses to quote a distance or bearing it cannot justify — radio-range ceiling, phase-aware jump test; under canopy the marker coasts on the wind (amended 2026-11-08) | Accepted |
 | [0023](0023-app-heading-true-north-and-compass-trust.md) | The app's heading is true north, and it refuses a compass it cannot trust — declination, and calibration status from the raw magnetometer | Accepted |
 | [0024](0024-console-baud-and-sync-byte-recovery.md) | Console baud is an operator setting, kept off the air, with a 0x7F sync-byte recovery path so it cannot brick its own access | Accepted |
 | [0025](0025-lora-channel-plan-and-part-15-compliance.md) | The 902–928 MHz channel plan — settle Part 15 compliance before adding channels | Proposed |
