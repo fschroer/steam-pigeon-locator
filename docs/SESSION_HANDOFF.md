@@ -2,11 +2,12 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
-## 2026-11-08 (attitude, GPS) — canopy tilt correction (#44) and a logged GPS vertical cross-check (#70). **Host-tested, ARM syntax-checked, NOT on hardware**
+## 2026-11-08 (attitude, GPS) — canopy tilt correction (#44), a logged GPS vertical cross-check (#70), and the vertical filter under replay test (#71). **Host-tested, ARM syntax-checked, NOT on hardware**
 
 - **#44, decided option 1:** `CanopyTiltGate` (drogue deployment to landing, |a| within 0.25 g of 1 g for 250 ms) drives `AttitudeEstimator::correctRollPitchFromAccel` at `kCanopyTiltGain` = 0.05/20 Hz cycle. The pad path is unchanged. ADR-0005 amended. `Tests/CanopyTilt` replays a CSV through the real estimator and matches the review's Python within about 1°.
 - **#70, decided log-only:** `ekf_health` bit 4 (0x10) = GPS vertical speed disagrees with raw baro by more than max(25 m/s, 15 %), in flight, live 3D fix only. No behavior. ADR-0017 amended. No archive version bump.
 - **Also decided:** main gate stays raw baro (ADR-0003 amended); #71 replay test first, then beside the EKF; #72 descent wind coast first; #73 re-cut once, after the first v8 flights.
+- **#71, replay-tested:** `Rocket/Navigation/Inc/VerticalFilter.hpp` is the 2-state (altitude, vertical speed) filter, ported from `vkf2.py`. It is **not wired into Navigation**, and no gate reads it. `Tests/VerticalFilter` runs 13 synthetic checks in the hook; `make replay FLIGHT_DATA=<dir>` scores the 11 GPS-velocity records against stable GPS. Under canopy the median is ≤ 0.8 m/s and p95 ≤ 1.8 m/s; Red Ryder coast is 1.2/4.6. Every figure is within 0.4 m/s of the Python. Running it beside the EKF waits for the #73 re-cut (it needs an archive field).
 - **To check on the bench / first flight:** under canopy the app's tilt should settle to the hang angle instead of drifting. Gain is a starting value (20 Hz replay: Ken_6 26°, Ken 132857 30° median at 0.05, against 15° and 11° at 0.1). Confirm on the first 50 Hz record with #14's FIFO rate.
 
 ## 2026-11-08 (analysis) — fused altitude and position review; decisions open as #44, #70–#73. **Analysis only, no code**
