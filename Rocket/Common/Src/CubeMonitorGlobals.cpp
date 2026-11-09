@@ -75,7 +75,7 @@ uint16_t maxCount (Cnt c) { return s_cnt_max [static_cast<uint8_t>(c)]; }
 const char* SegName(Seg s) {
     static const char* const kNames[] = {
         "Console",   "Comm",       "NavUpdate",   "  SensorRead",  "  GpsRead",
-        "  MagRead", "  Ekf",     "  Strapdown", "    FifoDrain", "FlightState",  "Telemetry", "PadCal", "ProcTotal",
+        "  MagRead", "  Ekf",     "  Strapdown", "    FifoDrain", "  Fused", "FlightState",  "Telemetry", "PadCal", "ProcTotal",
     };
     static_assert(sizeof(kNames) / sizeof(kNames[0]) == static_cast<size_t>(Seg::Count),
                   "SegName table out of step with Diag::Seg");

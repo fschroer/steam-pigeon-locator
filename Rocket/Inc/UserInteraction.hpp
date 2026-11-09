@@ -80,6 +80,7 @@ public:
   // Per-segment super-loop timing breakdown.  Public so Factory's root 'l'
   // key can print it without opening the data menu, which stops navigation.
   void DisplayCycleProfile();
+  void DisplayFusedNavigation();
 private:
   FlightManager& flight_;
   Communication::Communication& comm_;
@@ -164,7 +165,8 @@ private:
   const char* data_guidance_text_ = "\r\nStart terminal logging and enter a valid number to retrieve CSV output of corresponding flight\r\n"
 		  "c) Clear empty/unused records\r\n"
 		  "e) Erase ALL flight memory\r\n"
-		  "t) Per-cycle timing breakdown\r\n";
+		  "t) Per-cycle timing breakdown\r\n"
+		  "f) Fused navigation vs raw (ADR-0045)\r\n";
   const char* data_reclaim_done_text_ = "\r\nCleared empty records.\r\n\0";
   const char* data_erase_confirm_text_ = "\r\nErase ALL flight memory? This cannot be undone. Press Y to confirm, any other key to cancel.\r\n\0";
   const char* data_erase_progress_text_ = "\r\nErasing all flight memory, please wait...\r\n\0";

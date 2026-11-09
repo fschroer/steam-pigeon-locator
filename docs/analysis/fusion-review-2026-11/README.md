@@ -15,6 +15,7 @@ then run from this folder with `python3 <script>.py`. Needs numpy.
 | `ev2.py` | Scores the vertical filter against raw baro, the EKF and GPS |
 | `gps.py` | Per-phase GPS quality survey (fix loss, low satellites, `h_acc`, vertical-speed disagreement, position jumps) |
 | `dr.py` | Ascent tilt dead reckoning over simulated outages, against hold-last-fix and constant velocity |
+| `ascdr.py` | #72 ascent dead reckoning at the app's inputs and at 20 Hz: tilt DR, constant velocity, and the thrust-only hybrid; with and without the #70 cross-check |
 | `wind1hz.py` | #72 descent wind coast at the app's inputs (1 Hz telemetry, packet loss), and the error-radius growth rate |
 | `tc.py` | Strapdown replay with the #44 canopy tilt correction (firmware blend or roll/pitch only) |
 | `v1.py`–`v5.py` | #44 replay checks: dead-reckoned replay vs logged tilt, gate variants, gain sweep, coast gate pass rate, summary table |

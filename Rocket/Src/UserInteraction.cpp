@@ -274,6 +274,8 @@ void UserInteraction::ProcessChar(uint8_t uart_char, DeviceState &device_state) 
 			line.WriteMany(data_erase_confirm_text_);
 		} else if (uart_char == 't' || uart_char == 'T') {
 			DisplayCycleProfile();   // per-cycle timing breakdown
+		} else if (uart_char == 'f' || uart_char == 'F') {
+			DisplayFusedNavigation();   // fused vs raw, one snapshot per press
 		} else if (uart_char == 27) { // Esc key
 			erase_all_pending_ = false;
 			device_state = DeviceState::Disarmed;
@@ -793,6 +795,50 @@ void UserInteraction::DisplayCycleProfile() {
 	line.WriteMany("(max cleared from 3 cycles on, so this printout is not in it; re-read for a clean worst case)", crlf_);
 	// Not resetMax(): this cycle and the next would be the worst case.
 	Diag::resetMaxAfter(3);
+}
+
+// ---------------------------------------------------------------------------
+// DisplayFusedNavigation (ADR-0045) — one snapshot of the fused solution beside
+// the raw values it replaces, for the bench before any of it is archived or
+// sent.  Horizontal position prints as its offset from the raw fix in meters,
+// which a float can show and a latitude in degrees cannot.
+// ---------------------------------------------------------------------------
+void UserInteraction::DisplayFusedNavigation() {
+	using RocketNav::HorizontalBridge;
+	const RocketNav::Navigation& nav = flight_.Nav();
+	const RocketNav::VerticalFilter& vf = nav.verticalFilter();
+	const HorizontalBridge& hb = nav.horizontalBridge();
+	const BaroSample& baro = nav.getRawBaro();
+	const GpsSample&  gps  = nav.getRawGps();
+	const NavSolution& ekf = nav.getFused();
+
+	static const char* const kModes[] = { "no fix yet", "GPS", "thrust DR", "hold velocity", "wind", "frozen" };
+	const uint8_t m = static_cast<uint8_t>(hb.mode());
+	const char* mode = m < sizeof(kModes) / sizeof(kModes[0]) ? kModes[m] : "?";
+
+	constexpr double kDegToRad = 3.14159265358979323846 / 180.0;
+	constexpr double kMPerDeg  = 6371000.0 * kDegToRad;
+	const double lat_deg = gps.lat_rad / kDegToRad, lon_deg = gps.lon_rad / kDegToRad;
+	const float d_n = static_cast<float>((hb.latDeg() - lat_deg) * kMPerDeg);
+	const float d_e = static_cast<float>((hb.lonDeg() - lon_deg) * kMPerDeg * std::cos(gps.lat_rad));
+
+	StaticStringWriter<UART_LINE_MAX_LENGTH> line(&huart2_);
+	line.WriteMany(crlf_, "Fused navigation (ADR-0045): computed only, not archived or sent", crlf_);
+	line.WriteMany("  altitude AGL (m)      raw baro", Fmt(baro.altitude_m_agl, 10, 2),
+			"   fused", Fmt(vf.altitudeM(), 10, 2), "   EKF", Fmt(ekf.altitude_agl_m, 10, 2), crlf_);
+	line.WriteMany("  vertical speed (m/s)  raw baro", Fmt(baro.velocity, 10, 2),
+			"   fused", Fmt(vf.verticalSpeedMps(), 10, 2), "   GPS", Fmt(-gps.vel_d_mps, 10, 2), crlf_);
+	line.WriteMany("  vertical filter       GPS used ", vf.gpsUsed() ? "yes" : "no",
+			", tumbled ", vf.tumbled() ? "yes" : "no", ", accel bias", Fmt(vf.accelBias(), 7, 3), " m/s2", crlf_);
+	line.WriteMany("  horizontal            ", mode, hb.bridging() ? " (bridging)" : "",
+			", radius", Fmt(hb.radiusM(), 8, 1), " m", crlf_);
+	if (m != 0u)
+		line.WriteMany("  fused - raw fix (m)   N", Fmt(d_n, 9, 1), "   E", Fmt(d_e, 9, 1), crlf_);
+	line.WriteMany("  N/E velocity (m/s)    fused", Fmt(hb.velNorthMps(), 8, 2), Fmt(hb.velEastMps(), 8, 2),
+			"   GPS", Fmt(gps.vel_n_mps, 8, 2), Fmt(gps.vel_e_mps, 8, 2), crlf_);
+	line.WriteMany("  GPS                   fix ", static_cast<uint32_t>(gps.fix_type),
+			", ", static_cast<uint32_t>(gps.num_sv), " SV, h_acc", Fmt(gps.h_acc_m, 7, 1), " m", crlf_);
+	line.WriteMany("(cost per cycle: 't', segment Fused)", crlf_);
 }
 
 void UserInteraction::ExportData(uint16_t archive_position) {
