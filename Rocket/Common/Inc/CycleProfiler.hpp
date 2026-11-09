@@ -30,6 +30,7 @@ enum class Seg : uint8_t {
     Ekf,           //   EKF predict + baro/GPS updates + ZUPT
     Strapdown,     //   480 Hz gyro FIFO drain + quaternion integrate + tilt (whole block)
     FifoDrain,     //     just the FIFO drain loop (SPI reads + propagate) — subset of Strapdown
+    Fused,         //   VerticalFilter + HorizontalBridge step (ADR-0045)
     FlightState,   // FlightManager::UpdateFlightState() (incl. flash ring drain)
     Telemetry,     // Send{PreLaunch,Telemetry}Data() (service tick only)
     PadCal,        // CalibrateOnPadAndZeroAglUntilLaunch() (telemetry slot, on the pad)

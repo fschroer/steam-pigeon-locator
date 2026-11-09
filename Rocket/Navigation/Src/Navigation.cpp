@@ -11,6 +11,7 @@ uint32_t Pps_GetTim2TicksPerSec(void);   // GPS-PPS-disciplined TIM2 ticks/sec (
 #include "CubeMonitorGlobals.hpp"
 #include "CycleProfiler.hpp"
 #include "Faultlog.hpp"
+#include "GpsVerticalCrossCheck.hpp"
 
 namespace RocketNav {
 
@@ -421,6 +422,7 @@ bool Navigation::startSimFlight(const SimFlight::Profile& p, int32_t origin_lat_
         q.temp_c = std::fmin(50.0f, std::fmax(-40.0f, m_baro.raw().temperature_c));
     m_sim_.Start(q, HAL_GetTick(), m_sim_p0_pa_);
     m_sim_seed_pending_ = true;
+    resetFused();   // the simulation's track, not the bench's (ADR-0045)
     return true;
 }
 
@@ -428,6 +430,7 @@ void Navigation::stopSimFlight() {
     if (!m_sim_.active()) return;
     m_sim_.Stop();
     m_sim_seed_pending_ = false;
+    resetFused();
     m_baro.setPressureOverride(false);
     // Discard the real rotation the FIFO buffered while the simulation ran.
     m_imu.fifoFlush();
@@ -705,6 +708,7 @@ bool Navigation::Update() {
     if (gps_new) {
         m_gps_pending_      = gps;
         m_gps_fuse_pending_ = true;
+        m_fused_gps_fresh_  = true;   // and for the fused step (ADR-0045)
     }
 
     if (imu_new) {
@@ -894,6 +898,11 @@ bool Navigation::Update() {
         }
         Diag::mark(Diag::Seg::Strapdown, t_sd);   // FIFO drain + integrate + tilt
 
+        // After the strapdown, so the fused step reads this cycle's attitude.
+        const uint16_t t_fu = Diag::Now();
+        stepFused(imu, baro, gps, dt_s);
+        Diag::mark(Diag::Seg::Fused, t_fu);
+
         if (m_solution.altitude_agl_m > m_max_altitude_agl_m) {
             m_max_altitude_agl_m    = m_solution.altitude_agl_m;
             m_last_increase_time_ms = m_solution.timestamp_ms;
@@ -906,6 +915,65 @@ bool Navigation::Update() {
 
     cm_elapsed_update = TIM2->CNT - startUpdate;
     return false;
+}
+
+// ---------------------------------------------------------------------------
+// stepFused (ADR-0045)
+// One cycle of the fused solution: VerticalFilter (#71) for altitude and
+// vertical speed, HorizontalBridge (#72) for position and N/E velocity.  The
+// inputs are derived exactly as Tests/VerticalFilter and Tests/HorizontalBridge
+// derive them from an archived record, so a flight replays to what ran here.
+// An observer: nothing here feeds the EKF, deployment or the wire.
+// ---------------------------------------------------------------------------
+void Navigation::stepFused(const ImuSample& imu, const BaroSample& baro,
+                           const GpsSample& gps, float dt_s) {
+    constexpr float  kRadToDeg  = 57.29577951f;
+    constexpr double kRadToDegD = 57.29577951308232;
+    if (!m_attitude.initialized() || !baro.valid) return;   // no attitude or altitude yet
+
+    const Quaternionf q = getStrapdownQuat();   // the archived quaternion
+    const Vec3f& a = imu.accel_selected_mps2;   // body, gravity-inclusive
+    const Vec3f  fn = Math::rotateBodyToNav(q, a);
+    const Vec3f  w  = imu.gyro_rps;
+
+    VerticalFilter::Input v;
+    v.dt_s          = dt_s;
+    v.phase         = m_phase_;
+    v.a_up_mps2     = -fn.z - G0_F;
+    v.accel_norm_g  = Math::norm(a) / G0_F;
+    v.gyro_norm_dps = Math::norm(w) * kRadToDeg;
+    v.pitch_yaw_dps = std::hypot(w.y, w.z) * kRadToDeg;
+    v.lateral_g     = std::hypot(a.y, a.z) / G0_F;
+    v.tilt_deg      = m_attitude.tiltFromVerticalRad() * kRadToDeg;
+    v.baro_agl_m    = baro.altitude_m_agl;
+    // The archive repeats the newest fix on every row, and the replay fed it that
+    // way, so the latest GPS velocity goes in every cycle while it is valid.
+    v.gps_vz_valid  = gps.velocity_valid;
+    v.gps_vz_up_mps = -gps.vel_d_mps;
+    v.gps_h_acc_m   = gps.h_acc_m;
+    v.gps_fix_type  = gps.fix_type;
+    v.gps_num_sv    = gps.num_sv;
+    m_vfilter_.step(v);
+
+    HorizontalBridge::Input h;
+    h.dt_s           = dt_s;
+    h.phase          = m_phase_;
+    h.q_bn           = q;
+    h.v_up_mps       = baro.velocity;           // raw baro, as replayed
+    h.gps_fresh      = m_fused_gps_fresh_;
+    h.position_valid = gps.position_valid;
+    h.velocity_valid = gps.velocity_valid;
+    h.fix_type       = gps.fix_type;
+    h.num_sv         = gps.num_sv;
+    h.lat_deg        = gps.lat_rad * kRadToDegD;
+    h.lon_deg        = gps.lon_rad * kRadToDegD;
+    h.vel_n_mps      = gps.vel_n_mps;
+    h.vel_e_mps      = gps.vel_e_mps;
+    h.h_acc_m        = gps.h_acc_m;
+    h.vertical_disagrees = GpsVerticalCrossCheck::disagrees(gps.velocity_valid, gps.fix_type,
+                                                            gps.vel_d_mps, baro.velocity);
+    m_hbridge_.step(h);
+    m_fused_gps_fresh_ = false;
 }
 
 // ---------------------------------------------------------------------------

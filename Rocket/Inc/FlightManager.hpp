@@ -25,6 +25,9 @@ public:
     // interface in main.c, which FlightManager does not include.
     void SetPpsStatus(uint8_t bits) { m_pps_status_ = bits; }
 
+    // Read-only view for the console's fused-vs-raw readout (ADR-0045).
+    const RocketNav::Navigation& Nav() const { return nav_; }
+
     // Write the EKF health counters into the record (#38).  Called twice: at
     // launch, and again as the record closes.  Non-zero at launch means the
     // filter had already failed on the pad, BEFORE the samples begin — the one

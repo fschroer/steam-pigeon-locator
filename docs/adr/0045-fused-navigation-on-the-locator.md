@@ -1,6 +1,6 @@
 # ADR-0045: Fused position and velocity are computed on the locator and archived beside raw
 
-- **Status:** Accepted as a direction (Frank Schroer, 2026-11-09). The horizontal module is built and replay-tested. Nothing is wired into Navigation or archived yet, and nothing is on hardware.
+- **Status:** Accepted as a direction (Frank Schroer, 2026-11-09). Both modules are replay-tested and step every cycle in `Navigation::Update` (2026-11-09) as observers: nothing reads them, nothing archives or sends them, and the data menu's `f` key prints them against raw. Not yet run on hardware.
 - **Date:** 2026-11-09
 - **Deciders:** Frank Schroer
 - **Related ADRs and issues:** "Priority-1 deployment uses raw baro" (0003), which this leaves alone; "The strapdown is the attitude authority" (0005), whose quaternion this reads; "GPS receiver configuration is owned for the whole flight" (0017) and its 2026-11-08 amendment (the #70 cross-check, logged); "The app refuses to quote a distance or bearing it cannot justify" (0022) and its 2026-11-08 amendment (the app's canopy coast); the variable-rate archive (0039). Issues #71 (vertical filter), #72 (horizontal outage bridging) and #73 (archive re-cut). Evidence: `docs/flight-analysis-2026-11-fusion-review.md` and `docs/analysis/fusion-review-2026-11/`.
@@ -44,7 +44,7 @@ The C++ reproduces `ascdr.py` to the meter. Two other findings:
 - **Easier.** A flight path can be rebuilt from the archive through GPS outages, and the live display can later switch to fused values with one change.
 - **Harder.**
   - The re-cut has to fund fused position (about 8 B), fused N/E velocity (about 4 B) and a radius (about 2 B), where it had planned to shrink. The vertical pair already has slots (`fused_agl_cm`, `fused_vspeed_cms`), filled from the EKF today.
-  - The module adds 1.5 KB of RAM and a few trig calls per cycle to the 50 Hz loop. Both need the ADR-0035 bench checks once it is wired in.
+  - Wired in, the two modules cost 2.2 KB of static RAM (44.1 of 64 KB used) and 10.1 KB of flash (210.3 of 256 KB) in a full -O2 link, and 8 B of stack in `Navigation::Update`. Part of the flash is soft-float double math for latitude and longitude. The time per cycle is the `Fused` segment of the data menu's `t` profile, and it needs the ADR-0035 bench checks before flight.
 - **Known limits.**
   - The samples are small (23 ascent outages at 10 s).
   - Boost lasts only 1–4 s on these motors.

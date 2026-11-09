@@ -7,6 +7,8 @@
 #include "InsEkf15.hpp"
 #include "AttitudeEstimator.hpp"
 #include "CanopyTiltGate.hpp"
+#include "VerticalFilter.hpp"
+#include "HorizontalBridge.hpp"
 #include "Constants.hpp"
 #include "SimFlight.hpp"
 #include "SensorFaults.hpp"
@@ -222,6 +224,14 @@ public:
         return Quaternionf{ q.w, -q.x, q.y, -q.z };
     }
     float       getTiltFromVerticalRad()  const { return m_attitude.tiltFromVerticalRad(); }
+
+    // ── Fused navigation (ADR-0045) ───────────────────────────────────────────
+    // Fused 3D position and velocity, stepped every cycle beside the EKF.  An
+    // observer only: nothing reads these for deployment (raw baro stays the
+    // authority, ADR-0003), and until the #73 re-cut they are neither archived
+    // nor sent.  The console's data menu prints them against raw ('f').
+    const VerticalFilter&   verticalFilter()   const { return m_vfilter_; }
+    const HorizontalBridge& horizontalBridge() const { return m_hbridge_; }
 
     // Fused-solution health for the cycle just completed (#38).  Archived per
     // sample so a divergence is visible in the record at the moment it happens —
@@ -455,6 +465,14 @@ private:
     static constexpr float kCanopyTiltGain = PerCycleGainFrom20Hz(0.05f);
     CanopyTiltGate m_canopy_tilt_gate_;
     FlightStates   m_phase_ = FlightStates::WaitingLaunch;
+
+    // Fused navigation (ADR-0045).  A fix read this cycle is latched until the
+    // fused step consumes it, so a cycle without a new IMU sample cannot lose it.
+    VerticalFilter   m_vfilter_;
+    HorizontalBridge m_hbridge_;
+    bool             m_fused_gps_fresh_ = false;
+    void stepFused(const ImuSample& imu, const BaroSample& baro, const GpsSample& gps, float dt_s);
+    void resetFused() { m_vfilter_ = VerticalFilter{}; m_hbridge_.reset(); m_fused_gps_fresh_ = false; }
 
     // ── High-rate strapdown propagation (NFR-9) ───────────────────────────────
     // The gyro FIFO is batched at this rate; each drained sample is integrated at
