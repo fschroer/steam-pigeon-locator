@@ -2,6 +2,17 @@
 
 Orientation note for resuming work. Detail lives in the linked artifacts; this is the map.
 
+## 2026-11-09 (navigation) — fused position and velocity move to the locator, archived beside raw (ADR-0045). **Host-tested, not wired, not on hardware**
+
+- **Direction (Frank):** compute fused 3D position and velocity on the locator, for ascent and descent; archive them beside raw in the single #73 re-cut after the first v8 flights; the wire stays raw until trusted.
+- **Built:** `Rocket/Navigation/Inc/HorizontalBridge.hpp`.
+  - It passes GPS through while trusted (3D fix, ≥ 6 SV, #70 cross-check, 2 s hold-out).
+  - Otherwise it bridges the outage: dead reckoning under thrust, held velocity in coast, wind under canopy, frozen on Landed.
+  - It keeps an error radius; its RAM cost is 1.5 KB.
+- **Tests:** `Tests/HorizontalBridge` runs 23 unit checks in the hook. `make replay` injects outages into the corpus and matches `ascdr.py` to the meter (10 s ascent 20/67 m, against 497/839 m for holding the fix).
+- **Trap:** `ascdr.py` scored at t0 + L instead of at the fix's own time, which flattered held velocity by a few meters. Fixed. The #72 design comment's 18/63 m is 20/67 m.
+- **Next:** wire `VerticalFilter` + `HorizontalBridge` into Navigation, unarchived until #73; the console readout is optional.
+
 ## 2026-11-08 (app map) — under canopy the marker coasts on the wind while the fix is lost (#72), ADR-0022 amended. **Android built and run (not yet seen coasting); iOS NOT compiled**
 
 - **Android** `f82cd34` (`rocket-flight-manager`, branch `claude/project-thread-8koqky`): `ui/WindCoast.kt` (pure Kotlin, `WindCoastTest` 10 tests pass under kotlinc). In states 4–7 with `locatorHasFix` false, the marker and ring follow the last fix + the 5 s mean descent GPS velocity, for ≤ 30 s. The ring is h_acc + 4 m/s × t. Both freeze on Landed. The stats panel shows "Marker est. · fix N s ago".

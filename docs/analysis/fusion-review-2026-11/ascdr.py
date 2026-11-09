@@ -85,7 +85,7 @@ def run(L=(3,6,10), loss=0.2, seed=1, verbose=False):
                         x+=v[0]*dt; y+=v[1]*dt
                     for j in idx:
                         step(last,T[j]-prev); prev=T[j]; last=asc[j]
-                    step(last,t0+l-prev)
+                    step(last,T[j1]-prev)
                     return x,y
                 def dr(idx,off):
                     x,y=p0; prev=t0; last=r0
@@ -95,14 +95,15 @@ def run(L=(3,6,10), loss=0.2, seed=1, verbose=False):
                         vz=max(0,min(400,last['raw_baro_vel_mps'])); a=math.radians(az_deg(last))+off
                         vh=vz*math.tan(min(tilt_rad(last),math.radians(80)))
                         x+=vh*math.cos(a)*dt; y+=vh*math.sin(a)*dt; prev=T[j]; last=asc[j]
-                    dt=t0+l-prev
+                    dt=T[j1]-prev
                     vz=max(0,min(400,last['raw_baro_vel_mps'])); a=math.radians(az_deg(last))+off
                     vh=vz*math.tan(min(tilt_rad(last),math.radians(80)))
                     x+=vh*math.cos(a)*dt; y+=vh*math.sin(a)*dt
                     return x,y
                 e=lambda q: math.hypot(q[0]-pt[0],q[1]-pt[1])
                 res[l]['hold'].append(e(p0))
-                res[l]['cv'].append(e((p0[0]+r0['gps_vel_n_mps']*l,p0[1]+r0['gps_vel_e_mps']*l)))
+                el=T[j1]-t0   # score at the fix's own time, not t0+l (#72 port, 2026-11-09)
+                res[l]['cv'].append(e((p0[0]+r0['gps_vel_n_mps']*el,p0[1]+r0['gps_vel_e_mps']*el)))
                 res[l]['dr20'].append(e(dr(range(i0+1,j1+1),off20)))
                 res[l]['hy20'].append(e(hy(range(i0+1,j1+1),off20)))
                 if off1 is not None:
