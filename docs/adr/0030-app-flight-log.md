@@ -127,6 +127,21 @@ the locator's archive in name, storage and presentation.**
      have moved the receiver to channel 0. The app now refuses to send one until the
      channel is known.
 
+10. **The filename says which artifact it is** (2026-11-09, Frank). App flight logs are
+    named `<locator>_App_YYYY-MM-DD_HHmmss.csv` — an `App` field between the locator name
+    and the datestamp. The separation this ADR leads with holds inside the app, where the
+    two artifacts have their own screens; it does not survive the share sheet, which is
+    the only way a log leaves the phone. Once shared, an app log and the locator's
+    full-record export of the same flight sit in one inbox or one Downloads folder, and
+    the name is all the recipient has to tell the app's received-telemetry view, gaps and
+    all, from the locator's complete record.
+    - Read back as a whole `_App` field, so a locator named "Snapp" keeps its last three
+      characters and one actually named "App" still reads as itself. Logs written before
+      the field existed keep their names and still parse: the phone is holding them, and
+      the logs screen has no other source for the airframe's name.
+    - The datestamp itself is untouched, so ADR "Times are stored in UTC and shown with
+      their offset" still holds for the name as it stands there.
+
 ## Consequences
 
 **Easier.** A flight becomes reconstructable from the phone's side: link quality against

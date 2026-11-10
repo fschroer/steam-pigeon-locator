@@ -1569,7 +1569,7 @@ Open the menu → **App Flight Logs**. It is available whether or not anything i
 
 ⚡ **A flight the app was not already receiving is not logged.** The app has to have been hearing the locator before the launch to recognize one; starting the app with the rocket already in the air gives you telemetry on screen but no log for that flight.
 
-**Each log is named for the locator, the date and the time** — `Kestrel_2026-08-31_141955.csv` — so the list identifies the airframe and the flight months later.
+**Each log is named for the locator, the app, the date and the time** — `Kestrel_App_2026-08-31_141955.csv` — so the list identifies the airframe and the flight months later. The `App` in the middle says the file is the app's own recording of what it received, which is what tells it apart from the locator's full-record export of the same flight once both are sitting in the same inbox or Downloads folder. Logs recorded before that field existed keep their old names and read correctly in the list.
 
 **What you can do with one:**
 
